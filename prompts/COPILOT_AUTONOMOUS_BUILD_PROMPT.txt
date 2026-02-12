@@ -1,0 +1,52 @@
+You are an implementation agent with full write access to this repository. Your task is to build the ENTIRE Windows application described by the spec files in this repo.
+
+ABSOLUTE RULE: Complete the full project end-to-end and only stop when everything is done. You may implement in internal milestones, but you must NOT ask me to approve milestones or come back for permission. If a detail is ambiguous, choose a reasonable default, record it in PROJECT_PROGRESS.md under Assumptions Log, and proceed.
+
+CRITICAL PRODUCT REQUIREMENTS (do not skip):
+- Agentic browsing must be implemented as an iterative loop: plan → search (multi-lane) → snapshot → extract/index → evaluate coverage/contradictions → refine queries → repeat.
+- The system must explicitly seek diverse viewpoints and produce outputs with BOTH:
+  - “Most Supported View” (evidence-weighted), and
+  - “Credible Alternatives / Broader Views”.
+- The system must enforce polite browsing rules (do not hammer sites) per spec/SEARCH_LANES_AND_COURTESY.md:
+  - max 1 concurrent fetch per domain
+  - delays with jitter between requests to same domain
+  - exponential backoff on 429/503/timeouts and circuit-break repeated failures
+  - caching/dedupe: do not refetch if snapshot already exists (unless user forces refresh)
+  - do not bypass paywalls/logins/anti-bot protections; if blocked, log and move to alternatives
+
+Read and follow these specs (in order):
+- RUNBOOK.md
+- PROJECT_CONTEXT.md
+- spec/AUTONOMOUS_EXECUTION.md
+- spec/PRODUCT_BRIEF.md
+- spec/SCOPE_NON_GOALS.md
+- spec/ARCHITECTURE.md
+- spec/DOMAIN_CAPABILITY_PACKS.md
+- spec/SEARCH_LANES_AND_COURTESY.md
+- spec/SESSION_WORKSPACE_SPEC.md
+- spec/CITATIONS_AND_SNAPSHOTS.md
+- spec/SAFETY_SYSTEM.md
+- spec/PROGRAMMING_RESEARCH_AND_IP.md
+- spec/MATERIALS_EXPLORER.md
+- spec/IDEA_FUSION_ENGINE.md
+- spec/REPORTING_AND_LEARNING.md
+- spec/MODEL_STRATEGY.md
+- spec/AUTOMATION_AND_TOOLS.md
+- spec/DATA_MODEL.md
+- spec/UI_WPF_SPEC.md
+- spec/RESEARCH_AGENT_LOOP.md
+- spec/IDEA_STUDIO.md
+- spec/END_TO_END_DEMO.md
+- spec/MILESTONE_PLAN.md
+
+Then implement by executing spec/MILESTONE_PLAN.md Milestones 1–9 sequentially WITHOUT STOPPING.
+- Keep the solution buildable at all times.
+- No placeholders, no stubs, no TODO-only features.
+
+At the end (and only at the end), provide:
+- exact build/run commands
+- confirmation you passed every item in spec/END_TO_END_DEMO.md
+- where configuration lives (paths, models, providers)
+- a short list of key assumptions
+
+Begin now with Milestone 1 and continue automatically until Milestone 9 is complete.

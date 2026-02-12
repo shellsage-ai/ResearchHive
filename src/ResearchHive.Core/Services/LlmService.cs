@@ -1,0 +1,853 @@
+using ResearchHive.Core.Configuration;
+using System.Net.Http.Json;
+using System.Text;
+using System.Text.Json;
+
+namespace ResearchHive.Core.Services;
+
+/// <summary>
+/// LLM service for synthesis/planning. Supports:
+/// - Local Ollama (primary by default)
+/// - Cloud providers: OpenAI, Anthropic, Gemini, Mistral, OpenRouter, Azure, GitHub Models
+/// - Configurable routing (LocalOnly / LocalWithCloudFallback / CloudPrimary / CloudOnly)
+/// - Tool calling for research agents (search_evidence, search_web, get_source, verify_claim)
+/// - Configurable model selection per provider
+/// </summary>
+public class LlmService
+{
+    private readonly AppSettings _settings;
+    private readonly HttpClient _httpClient;
+    private readonly CodexCliService? _codexCli;
+    private bool _ollamaAvailable = true;
+    private DateTime _lastOllamaRetryTime = DateTime.MinValue;
+    private static readonly TimeSpan OllamaRetryInterval = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// Fired after each Codex CLI call with the events captured during that call.
+    /// Subscribers (e.g. ResearchJobRunner) surface these in the activity log.
+    /// </summary>
+    public event Action<IReadOnlyList<CodexEvent>>? CodexActivityOccurred;
+
+    public LlmService(AppSettings settings, CodexCliService? codexCli = null)
+    {
+        _settings = settings;
+        _codexCli = codexCli;
+        _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(120) };
+    }
+
+    /// <summary>True when the active provider is ChatGPT Plus with CodexOAuth and the CLI is available.</summary>
+    public bool IsCodexOAuthActive =>
+        _settings.UsePaidProvider
+        && _settings.PaidProvider == PaidProviderType.ChatGptPlus
+        && _settings.ChatGptPlusAuth == ChatGptPlusAuthMode.CodexOAuth
+        && _codexCli is { IsAvailable: true, IsAuthenticated: true };
+
+    /// <summary>Notify subscribers of Codex events from the last call.</summary>
+    private void RaiseCodexActivity()
+    {
+        if (_codexCli?.LastCallEvents is { Count: > 0 } events)
+            CodexActivityOccurred?.Invoke(events);
+    }
+
+    /// <summary>
+    /// Standard text generation — no tool calling.
+    /// Routes based on <see cref="AppSettings.Routing"/>.
+    /// </summary>
+    /// <param name="maxTokens">Optional token limit for Ollama (num_predict) and cloud (max_tokens). Defaults to 4000 for cloud, unbounded for local.</param>
+    public async Task<string> GenerateAsync(string prompt, string? systemPrompt = null, int? maxTokens = null, CancellationToken ct = default)
+    {
+        var routing = _settings.Routing;
+
+        // Periodic retry: if Ollama was unavailable, re-check every 60s
+        if (!_ollamaAvailable && (DateTime.UtcNow - _lastOllamaRetryTime) > OllamaRetryInterval)
+        {
+            _ollamaAvailable = true;
+            _lastOllamaRetryTime = DateTime.UtcNow;
+        }
+
+        // Route based on strategy
+        switch (routing)
+        {
+            case RoutingStrategy.LocalOnly:
+            {
+                var localResult = await TryOllama(prompt, systemPrompt, maxTokens, ct);
+                if (localResult != null) return localResult;
+                return "[LLM_UNAVAILABLE] Ollama is not running or did not respond. " +
+                       "Start Ollama with a model loaded, or switch to a cloud provider in Settings.";
+            }
+
+            case RoutingStrategy.CloudOnly:
+            {
+                var cloudResult = await TryCloud(prompt, systemPrompt, maxTokens, ct);
+                if (cloudResult != null) return cloudResult;
+                return "[LLM_UNAVAILABLE] Cloud AI returned no response. Check your provider settings, authentication, and connectivity. " +
+                       $"Provider: {_settings.PaidProvider}, Auth: {_settings.ChatGptPlusAuth}";
+            }
+
+            case RoutingStrategy.CloudPrimary:
+            {
+                var cpResult = await TryCloud(prompt, systemPrompt, maxTokens, ct)
+                    ?? await TryOllama(prompt, systemPrompt, maxTokens, ct);
+                if (cpResult != null) return cpResult;
+                return "[LLM_UNAVAILABLE] Neither cloud provider nor Ollama responded. " +
+                       $"Cloud: {_settings.PaidProvider}, Auth: {_settings.ChatGptPlusAuth}. Check both connections.";
+            }
+
+            case RoutingStrategy.LocalWithCloudFallback:
+            default:
+            {
+                var lcResult = await TryOllama(prompt, systemPrompt, maxTokens, ct)
+                    ?? await TryCloud(prompt, systemPrompt, maxTokens, ct);
+                if (lcResult != null) return lcResult;
+                return "[LLM_UNAVAILABLE] Neither Ollama nor cloud provider responded. " +
+                       "Start Ollama or configure a cloud provider in Settings.";
+            }
+        }
+    }
+
+    /// <summary>
+    /// Generate with tool calling support. The model can invoke tools and the caller
+    /// provides results. Loops until the model produces a final text response or
+    /// max tool calls are exhausted.
+    /// </summary>
+    /// <param name="prompt">User prompt</param>
+    /// <param name="systemPrompt">System prompt</param>
+    /// <param name="tools">Tool definitions (OpenAI format)</param>
+    /// <param name="executeToolCall">Callback to execute a tool call and return the result string</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>The model's final text response after tool use</returns>
+    public async Task<string> GenerateWithToolsAsync(
+        string prompt,
+        string? systemPrompt,
+        ToolDefinition[] tools,
+        Func<ToolCall, Task<string>> executeToolCall,
+        CancellationToken ct = default)
+    {
+        if (!_settings.EnableToolCalling || tools.Length == 0)
+            return await GenerateAsync(prompt, systemPrompt, ct: ct);
+
+        // Tool calling only works with chat-completion-compatible providers
+        var provider = ResolveActiveCloudProvider();
+        if (provider == PaidProviderType.None)
+        {
+            // Ollama doesn't support OpenAI-style tool calling — fall back to standard
+            return await GenerateAsync(prompt, systemPrompt, ct: ct);
+        }
+
+        // ChatGPT Plus via Codex CLI — uses native agent tool calling (web search, commands)
+        // rather than OpenAI API function-calling format (only in CodexOAuth mode)
+        if (provider == PaidProviderType.ChatGptPlus
+            && _settings.ChatGptPlusAuth == ChatGptPlusAuthMode.CodexOAuth)
+        {
+            if (_codexCli == null || !_codexCli.IsAvailable || !_codexCli.IsAuthenticated)
+                return await GenerateAsync(prompt, systemPrompt, ct: ct);
+            var fullPrompt = systemPrompt != null ? $"{systemPrompt}\n\n{prompt}" : prompt;
+
+            // Streamlined mode: enable web search so Codex does its own research alongside our evidence.
+            // Standard mode: disable web search so the model uses OUR evidence with proper [N] citations.
+            var useWebSearch = _settings.StreamlinedCodexMode;
+
+            // Try Codex, then retry once after a brief pause if it fails
+            var result = useWebSearch
+                ? await _codexCli.GenerateWithToolsAsync(fullPrompt, ct: ct)
+                : await _codexCli.GenerateAsync(fullPrompt, ct: ct);
+            RaiseCodexActivity();
+            if (result != null) return result;
+            // Retry once — transient failures (rate limits, token refresh) often resolve quickly
+            await Task.Delay(2000, ct);
+            result = useWebSearch
+                ? await _codexCli.GenerateWithToolsAsync(fullPrompt, ct: ct)
+                : await _codexCli.GenerateAsync(fullPrompt, ct: ct);
+            RaiseCodexActivity();
+            return result ?? await GenerateAsync(prompt, systemPrompt, ct: ct);
+        }
+
+        var apiKey = ResolveApiKey();
+        if (string.IsNullOrEmpty(apiKey))
+            return await GenerateAsync(prompt, systemPrompt, ct: ct);
+
+        var messages = new List<object>();
+        if (systemPrompt != null)
+            messages.Add(new { role = "system", content = systemPrompt });
+        messages.Add(new { role = "user", content = prompt });
+
+        var maxCalls = _settings.MaxToolCallsPerPhase;
+        var toolCallCount = 0;
+
+        // Anthropic has a different tool-calling format
+        if (provider == PaidProviderType.Anthropic)
+            return await AnthropicToolLoop(messages, tools, executeToolCall, apiKey, maxCalls, ct);
+
+        // OpenAI-compatible tool loop (OpenAI, GitHub Models, Mistral, OpenRouter, Azure)
+        var (url, headers, modelName) = BuildCloudEndpoint(provider, apiKey);
+
+        while (toolCallCount < maxCalls && !ct.IsCancellationRequested)
+        {
+            var chatReq = new
+            {
+                model = modelName,
+                messages,
+                temperature = 0.3,
+                max_tokens = 4000,
+                tools,
+                tool_choice = "auto"
+            };
+
+            using var req = new HttpRequestMessage(HttpMethod.Post, url);
+            foreach (var (key, val) in headers)
+                req.Headers.TryAddWithoutValidation(key, val);
+            req.Content = new StringContent(
+                JsonSerializer.Serialize(chatReq), Encoding.UTF8, "application/json");
+
+            var resp = await _httpClient.SendAsync(req, ct);
+            var json = await resp.Content.ReadAsStringAsync(ct);
+            using var doc = JsonDocument.Parse(json);
+
+            var choice = doc.RootElement.GetProperty("choices")[0];
+            var message = choice.GetProperty("message");
+
+            // Check for tool calls
+            if (message.TryGetProperty("tool_calls", out var toolCallsEl) && toolCallsEl.GetArrayLength() > 0)
+            {
+                // Add assistant message with tool calls to conversation
+                messages.Add(JsonSerializer.Deserialize<object>(message.GetRawText())!);
+
+                foreach (var tcEl in toolCallsEl.EnumerateArray())
+                {
+                    var tc = JsonSerializer.Deserialize<ToolCall>(tcEl.GetRawText()) ?? new ToolCall();
+                    toolCallCount++;
+
+                    var result = await executeToolCall(tc);
+                    messages.Add(new
+                    {
+                        role = "tool",
+                        tool_call_id = tc.Id,
+                        content = result
+                    });
+                }
+            }
+            else
+            {
+                // Final text response
+                return message.TryGetProperty("content", out var content)
+                    ? content.GetString() ?? ""
+                    : "";
+            }
+        }
+
+        // Max tool calls exhausted — ask the model for a final answer
+        messages.Add(new { role = "user", content = "Please provide your final answer based on all the information gathered." });
+        var finalReq = new { model = modelName, messages, temperature = 0.3, max_tokens = 4000 };
+        using var finalHttpReq = new HttpRequestMessage(HttpMethod.Post, url);
+        foreach (var (key, val) in headers)
+            finalHttpReq.Headers.TryAddWithoutValidation(key, val);
+        finalHttpReq.Content = new StringContent(
+            JsonSerializer.Serialize(finalReq), Encoding.UTF8, "application/json");
+        var finalResp = await _httpClient.SendAsync(finalHttpReq, ct);
+        var finalJson = await finalResp.Content.ReadAsStringAsync(ct);
+        using var finalDoc = JsonDocument.Parse(finalJson);
+        return finalDoc.RootElement.GetProperty("choices")[0]
+            .GetProperty("message").GetProperty("content").GetString() ?? "";
+    }
+
+    #region Anthropic Tool Loop
+
+    private async Task<string> AnthropicToolLoop(
+        List<object> messages,
+        ToolDefinition[] tools,
+        Func<ToolCall, Task<string>> executeToolCall,
+        string apiKey,
+        int maxCalls,
+        CancellationToken ct)
+    {
+        var endpoint = (_settings.PaidProviderEndpoint ?? "https://api.anthropic.com/v1") + "/messages";
+        var model = _settings.PaidProviderModel ?? "claude-sonnet-4-20250514";
+        var systemPrompt = "";
+        var anthropicMessages = new List<object>();
+
+        foreach (var msg in messages)
+        {
+            var msgJson = JsonSerializer.Serialize(msg);
+            using var msgDoc = JsonDocument.Parse(msgJson);
+            var role = msgDoc.RootElement.GetProperty("role").GetString();
+            var content = msgDoc.RootElement.GetProperty("content").GetString();
+            if (role == "system") systemPrompt = content ?? "";
+            else anthropicMessages.Add(new { role, content });
+        }
+
+        var toolCallCount = 0;
+        var anthropicTools = ResearchTools.ToAnthropicFormat();
+
+        while (toolCallCount < maxCalls && !ct.IsCancellationRequested)
+        {
+            var reqBody = new
+            {
+                model,
+                max_tokens = 4000,
+                system = systemPrompt,
+                messages = anthropicMessages,
+                tools = anthropicTools
+            };
+
+            using var req = new HttpRequestMessage(HttpMethod.Post, endpoint);
+            req.Headers.Add("x-api-key", apiKey);
+            req.Headers.Add("anthropic-version", "2023-06-01");
+            req.Content = new StringContent(
+                JsonSerializer.Serialize(reqBody), Encoding.UTF8, "application/json");
+
+            var resp = await _httpClient.SendAsync(req, ct);
+            var json = await resp.Content.ReadAsStringAsync(ct);
+            using var doc = JsonDocument.Parse(json);
+
+            var stopReason = doc.RootElement.TryGetProperty("stop_reason", out var sr) ? sr.GetString() : "end_turn";
+
+            if (stopReason == "tool_use")
+            {
+                var contentBlocks = doc.RootElement.GetProperty("content");
+                var assistantContent = new List<object>();
+                var toolResults = new List<object>();
+
+                foreach (var block in contentBlocks.EnumerateArray())
+                {
+                    var blockType = block.GetProperty("type").GetString();
+                    if (blockType == "text")
+                    {
+                        assistantContent.Add(new { type = "text", text = block.GetProperty("text").GetString() });
+                    }
+                    else if (blockType == "tool_use")
+                    {
+                        var toolId = block.GetProperty("id").GetString() ?? "";
+                        var toolName = block.GetProperty("name").GetString() ?? "";
+                        var toolInput = block.GetProperty("input").GetRawText();
+                        assistantContent.Add(JsonSerializer.Deserialize<object>(block.GetRawText())!);
+
+                        var tc = new ToolCall
+                        {
+                            Id = toolId,
+                            Function = new ToolCallFunction
+                            {
+                                Name = toolName,
+                                Arguments = toolInput
+                            }
+                        };
+                        toolCallCount++;
+                        var result = await executeToolCall(tc);
+                        toolResults.Add(new
+                        {
+                            type = "tool_result",
+                            tool_use_id = toolId,
+                            content = result
+                        });
+                    }
+                }
+
+                anthropicMessages.Add(new { role = "assistant", content = assistantContent });
+                anthropicMessages.Add(new { role = "user", content = toolResults });
+            }
+            else
+            {
+                // Final text response
+                var contentArray = doc.RootElement.GetProperty("content");
+                foreach (var block in contentArray.EnumerateArray())
+                {
+                    if (block.GetProperty("type").GetString() == "text")
+                        return block.GetProperty("text").GetString() ?? "";
+                }
+                return "";
+            }
+        }
+
+        return "Tool call limit reached. Please review the evidence gathered.";
+    }
+
+    #endregion
+
+    #region Routing helpers
+
+    private async Task<string?> TryOllama(string prompt, string? systemPrompt, int? maxTokens, CancellationToken ct)
+    {
+        if (!_ollamaAvailable) return null;
+
+        for (int attempt = 0; attempt < 2; attempt++)
+        {
+            try
+            {
+                var result = await CallOllamaAsync(prompt, systemPrompt, maxTokens, ct);
+                if (result != null) return result;
+                break;
+            }
+            catch when (attempt == 0)
+            {
+                await Task.Delay(800, ct); // Reduced from 1500ms
+            }
+            catch
+            {
+                _ollamaAvailable = false;
+                _lastOllamaRetryTime = DateTime.UtcNow;
+            }
+        }
+        return null;
+    }
+
+    private async Task<string?> TryCloud(string prompt, string? systemPrompt, int? maxTokens, CancellationToken ct)
+    {
+        var provider = ResolveActiveCloudProvider();
+        if (provider == PaidProviderType.None) return null;
+
+        // ChatGPT Plus via Codex CLI — no API key needed, uses OAuth (only in CodexOAuth mode)
+        if (provider == PaidProviderType.ChatGptPlus
+            && _settings.ChatGptPlusAuth == ChatGptPlusAuthMode.CodexOAuth)
+        {
+            if (_codexCli == null || !_codexCli.IsAvailable || !_codexCli.IsAuthenticated) return null;
+            try
+            {
+                var fullPrompt = systemPrompt != null ? $"{systemPrompt}\n\n{prompt}" : prompt;
+                // Regular generation: no web search — let the pipeline handle search/evidence
+                var result = await _codexCli.GenerateAsync(fullPrompt, maxTokens, ct);
+                RaiseCodexActivity();
+                if (result != null) return result;
+                // Retry once after brief pause for transient failures
+                await Task.Delay(1500, ct);
+                result = await _codexCli.GenerateAsync(fullPrompt, maxTokens, ct);
+                RaiseCodexActivity();
+                return result;
+            }
+            catch
+            {
+                RaiseCodexActivity();
+                return null;
+            }
+        }
+
+        var apiKey = ResolveApiKey();
+        if (string.IsNullOrEmpty(apiKey)) return null;
+
+        try
+        {
+            return await CallCloudProviderAsync(provider, apiKey, prompt, systemPrompt, ct);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Determine the currently active cloud provider (if any).
+    /// </summary>
+    private PaidProviderType ResolveActiveCloudProvider()
+    {
+        if (!_settings.UsePaidProvider) return PaidProviderType.None;
+        return _settings.PaidProvider;
+    }
+
+    /// <summary>
+    /// Resolve the API key/token for the active cloud provider.
+    /// </summary>
+    private string? ResolveApiKey()
+    {
+        var provider = _settings.PaidProvider;
+
+        // ChatGPT Plus uses OAuth via Codex CLI — no API key (CodexOAuth mode only)
+        if (provider == PaidProviderType.ChatGptPlus
+            && _settings.ChatGptPlusAuth == ChatGptPlusAuthMode.CodexOAuth)
+            return "codex-oauth"; // Sentinel value — actual auth is handled by CodexCliService
+
+        // ChatGPT Plus with ApiKey mode — treat like OpenAI
+        if (provider == PaidProviderType.ChatGptPlus
+            && _settings.ChatGptPlusAuth == ChatGptPlusAuthMode.ApiKey)
+        {
+            if (_settings.KeySource == ApiKeySource.EnvironmentVariable && !string.IsNullOrEmpty(_settings.KeyEnvironmentVariable))
+                return Environment.GetEnvironmentVariable(_settings.KeyEnvironmentVariable);
+            return _settings.PaidProviderApiKey;
+        }
+
+        // GitHub Models uses the GitHub PAT
+        if (provider == PaidProviderType.GitHubModels)
+            return _settings.GitHubPat;
+
+        // Environment variable source
+        if (_settings.KeySource == ApiKeySource.EnvironmentVariable && !string.IsNullOrEmpty(_settings.KeyEnvironmentVariable))
+            return Environment.GetEnvironmentVariable(_settings.KeyEnvironmentVariable);
+
+        // Direct key from settings
+        return _settings.PaidProviderApiKey;
+    }
+
+    #endregion
+
+    #region Provider calls
+
+    private async Task<string?> CallOllamaAsync(string prompt, string? systemPrompt, int? maxTokens, CancellationToken ct)
+    {
+        var options = new Dictionary<string, object>
+        {
+            ["temperature"] = 0.3
+        };
+        if (maxTokens.HasValue)
+            options["num_predict"] = maxTokens.Value;
+
+        var request = new
+        {
+            model = _settings.SynthesisModel,
+            prompt = prompt,
+            system = systemPrompt ?? "You are a research assistant. Provide thorough, evidence-based answers with clear citations.",
+            stream = false,
+            options
+        };
+
+        var response = await _httpClient.PostAsJsonAsync(
+            $"{_settings.OllamaBaseUrl}/api/generate", request, ct);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            _ollamaAvailable = false;
+            return null;
+        }
+
+        var json = await response.Content.ReadAsStringAsync(ct);
+        using var doc = JsonDocument.Parse(json);
+        return doc.RootElement.TryGetProperty("response", out var resp) ? resp.GetString() : null;
+    }
+
+    private async Task<string> CallCloudProviderAsync(
+        PaidProviderType provider, string apiKey,
+        string prompt, string? systemPrompt, CancellationToken ct)
+    {
+        switch (provider)
+        {
+            case PaidProviderType.Anthropic:
+            {
+                var url = (_settings.PaidProviderEndpoint ?? "https://api.anthropic.com/v1") + "/messages";
+                var model = _settings.PaidProviderModel ?? "claude-sonnet-4-20250514";
+                var anthropicReq = new
+                {
+                    model,
+                    max_tokens = 4000,
+                    system = systemPrompt ?? "You are a research assistant.",
+                    messages = new[] { new { role = "user", content = prompt } }
+                };
+                using var req = new HttpRequestMessage(HttpMethod.Post, url);
+                req.Headers.Add("x-api-key", apiKey);
+                req.Headers.Add("anthropic-version", "2023-06-01");
+                req.Content = new StringContent(
+                    JsonSerializer.Serialize(anthropicReq), Encoding.UTF8, "application/json");
+                var resp = await _httpClient.SendAsync(req, ct);
+                var json = await resp.Content.ReadAsStringAsync(ct);
+                using var doc = JsonDocument.Parse(json);
+                return doc.RootElement.GetProperty("content")[0].GetProperty("text").GetString() ?? "";
+            }
+
+            case PaidProviderType.GoogleGemini:
+            {
+                var model = _settings.PaidProviderModel ?? "gemini-pro";
+                var url = (_settings.PaidProviderEndpoint ?? "https://generativelanguage.googleapis.com/v1beta")
+                    + $"/models/{model}:generateContent";
+                var geminiReq = new
+                {
+                    contents = new[] { new { parts = new[] { new { text = (systemPrompt != null ? systemPrompt + "\n\n" : "") + prompt } } } }
+                };
+                using var req = new HttpRequestMessage(HttpMethod.Post, url);
+                req.Headers.Add("x-goog-api-key", apiKey);
+                req.Content = new StringContent(
+                    JsonSerializer.Serialize(geminiReq), Encoding.UTF8, "application/json");
+                var resp = await _httpClient.SendAsync(req, ct);
+                var json = await resp.Content.ReadAsStringAsync(ct);
+                using var doc = JsonDocument.Parse(json);
+                return doc.RootElement.GetProperty("candidates")[0]
+                    .GetProperty("content").GetProperty("parts")[0]
+                    .GetProperty("text").GetString() ?? "";
+            }
+
+            // OpenAI, MistralAI, OpenRouter, AzureOpenAI, GitHubModels — all OpenAI-compatible
+            default:
+            {
+                var (url, headers, modelName) = BuildCloudEndpoint(provider, apiKey);
+                var messages = new List<object>();
+                if (systemPrompt != null)
+                    messages.Add(new { role = "system", content = systemPrompt });
+                messages.Add(new { role = "user", content = prompt });
+                var chatReq = new { model = modelName, messages, temperature = 0.3, max_tokens = 4000 };
+                using var req = new HttpRequestMessage(HttpMethod.Post, url);
+                foreach (var (key, val) in headers)
+                    req.Headers.TryAddWithoutValidation(key, val);
+                req.Content = new StringContent(
+                    JsonSerializer.Serialize(chatReq), Encoding.UTF8, "application/json");
+                var resp = await _httpClient.SendAsync(req, ct);
+                var json = await resp.Content.ReadAsStringAsync(ct);
+                using var doc = JsonDocument.Parse(json);
+                return doc.RootElement.GetProperty("choices")[0]
+                    .GetProperty("message").GetProperty("content").GetString() ?? "";
+            }
+        }
+    }
+
+    /// <summary>
+    /// Build the endpoint URL, auth headers, and model name for an OpenAI-compatible provider.
+    /// </summary>
+    private (string url, List<(string key, string val)> headers, string model) BuildCloudEndpoint(
+        PaidProviderType provider, string apiKey)
+    {
+        var headers = new List<(string key, string val)>();
+
+        switch (provider)
+        {
+            case PaidProviderType.GitHubModels:
+                headers.Add(("Authorization", $"Bearer {apiKey}"));
+                headers.Add(("Accept", "application/vnd.github+json"));
+                headers.Add(("X-GitHub-Api-Version", "2022-11-28"));
+                return (
+                    "https://models.github.ai/inference/chat/completions",
+                    headers,
+                    _settings.PaidProviderModel ?? "openai/gpt-4o"
+                );
+
+            case PaidProviderType.MistralAI:
+                headers.Add(("Authorization", $"Bearer {apiKey}"));
+                return (
+                    (_settings.PaidProviderEndpoint ?? "https://api.mistral.ai/v1") + "/chat/completions",
+                    headers,
+                    _settings.PaidProviderModel ?? "mistral-large-latest"
+                );
+
+            case PaidProviderType.OpenRouter:
+                headers.Add(("Authorization", $"Bearer {apiKey}"));
+                return (
+                    (_settings.PaidProviderEndpoint ?? "https://openrouter.ai/api/v1") + "/chat/completions",
+                    headers,
+                    _settings.PaidProviderModel ?? "openai/gpt-4o"
+                );
+
+            case PaidProviderType.AzureOpenAI:
+                headers.Add(("api-key", apiKey));
+                return (
+                    (_settings.PaidProviderEndpoint ?? "https://api.openai.com/v1") + "/chat/completions",
+                    headers,
+                    _settings.PaidProviderModel ?? "gpt-4o"
+                );
+
+            case PaidProviderType.ChatGptPlus: // ApiKey mode — same as OpenAI
+                headers.Add(("Authorization", $"Bearer {apiKey}"));
+                return (
+                    (_settings.PaidProviderEndpoint ?? "https://api.openai.com/v1") + "/chat/completions",
+                    headers,
+                    _settings.PaidProviderModel ?? "gpt-4o"
+                );
+
+            default: // OpenAI
+                headers.Add(("Authorization", $"Bearer {apiKey}"));
+                return (
+                    (_settings.PaidProviderEndpoint ?? "https://api.openai.com/v1") + "/chat/completions",
+                    headers,
+                    _settings.PaidProviderModel ?? "gpt-4o"
+                );
+        }
+    }
+
+    #endregion
+
+    #region Deterministic fallback
+
+    private static string GenerateDeterministicResponse(string prompt)
+    {
+        var sb = new StringBuilder();
+
+        if (prompt.Contains("plan", StringComparison.OrdinalIgnoreCase))
+        {
+            sb.AppendLine("## Research Plan");
+            sb.AppendLine();
+            sb.AppendLine("1. Search for primary authoritative sources on the topic");
+            sb.AppendLine("2. Gather peer-reviewed and academic sources");
+            sb.AppendLine("3. Identify contrarian/alternative viewpoints");
+            sb.AppendLine("4. Compare and evaluate evidence quality");
+            sb.AppendLine("5. Synthesize findings with proper citations");
+        }
+        else if (prompt.Contains("search queries", StringComparison.OrdinalIgnoreCase))
+        {
+            var words = prompt.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            var topic = string.Join(' ', words.Take(Math.Min(10, words.Length)));
+            sb.AppendLine($"1. \"{topic}\" authoritative sources");
+            sb.AppendLine($"2. \"{topic}\" academic research");
+            sb.AppendLine($"3. \"{topic}\" alternative perspectives");
+            sb.AppendLine($"4. \"{topic}\" recent developments");
+            sb.AppendLine($"5. \"{topic}\" critical analysis");
+        }
+        else if (prompt.Contains("synthesize", StringComparison.OrdinalIgnoreCase) ||
+                 prompt.Contains("report", StringComparison.OrdinalIgnoreCase))
+        {
+            sb.AppendLine("## Most Supported View");
+            sb.AppendLine();
+            sb.AppendLine("Based on the evidence gathered, the most supported view is constructed from the available sources.");
+            sb.AppendLine("Each claim below is supported by the referenced evidence.");
+            sb.AppendLine();
+            sb.AppendLine("## Credible Alternatives / Broader Views");
+            sb.AppendLine();
+            sb.AppendLine("Alternative interpretations exist and are worth considering:");
+            sb.AppendLine("- Different methodological approaches may yield varying conclusions");
+            sb.AppendLine("- The evidence base has inherent limitations");
+            sb.AppendLine();
+            sb.AppendLine("## Limitations");
+            sb.AppendLine();
+            sb.AppendLine("- Evidence quality varies across sources");
+            sb.AppendLine("- Some claims remain hypotheses pending further investigation");
+        }
+        else
+        {
+            sb.AppendLine("Based on available evidence and analysis:");
+            sb.AppendLine();
+            sb.AppendLine("The requested information has been processed using deterministic extraction.");
+            sb.AppendLine("For enhanced synthesis quality, connect an LLM provider (Ollama recommended).");
+        }
+
+        return sb.ToString();
+    }
+
+    #endregion
+
+    #region Discovery / utility
+
+    public async Task<bool> CheckAvailabilityAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            var response = await _httpClient.GetAsync($"{_settings.OllamaBaseUrl}/api/tags", ct);
+            _ollamaAvailable = response.IsSuccessStatusCode;
+            return _ollamaAvailable;
+        }
+        catch
+        {
+            _ollamaAvailable = false;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Lists all locally-available Ollama model names by calling GET /api/tags.
+    /// Returns an empty list if Ollama is unreachable.
+    /// </summary>
+    public async Task<List<string>> ListModelsAsync(CancellationToken ct = default)
+    {
+        var models = new List<string>();
+        try
+        {
+            var response = await _httpClient.GetAsync($"{_settings.OllamaBaseUrl}/api/tags", ct);
+            if (!response.IsSuccessStatusCode) return models;
+
+            var json = await response.Content.ReadAsStringAsync(ct);
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.TryGetProperty("models", out var modelsArray))
+            {
+                foreach (var m in modelsArray.EnumerateArray())
+                {
+                    if (m.TryGetProperty("name", out var name))
+                        models.Add(name.GetString() ?? "");
+                }
+            }
+        }
+        catch { /* Ollama not reachable */ }
+        return models;
+    }
+
+    /// <summary>
+    /// Validate that an API key works for the given provider by making a minimal test request.
+    /// Returns true if the key is accepted, false otherwise.
+    /// </summary>
+    public async Task<(bool valid, string message)> ValidateApiKeyAsync(
+        PaidProviderType provider, string apiKey, CancellationToken ct = default)
+    {
+        try
+        {
+            switch (provider)
+            {
+                case PaidProviderType.ChatGptPlus:
+                {
+                    // CodexOAuth mode — validate via Codex CLI
+                    if (_settings.ChatGptPlusAuth == ChatGptPlusAuthMode.CodexOAuth)
+                    {
+                        if (_codexCli == null)
+                            return (false, "CodexCliService not configured.");
+                        return await _codexCli.ValidateAsync(ct);
+                    }
+                    // ApiKey mode — validate like OpenAI
+                    var endpoint = _settings.PaidProviderEndpoint ?? "https://api.openai.com/v1";
+                    var modelsUrlCgpt = endpoint.TrimEnd('/') + "/models";
+                    using var reqCgpt = new HttpRequestMessage(HttpMethod.Get, modelsUrlCgpt);
+                    reqCgpt.Headers.TryAddWithoutValidation("Authorization", $"Bearer {apiKey}");
+                    var respCgpt = await _httpClient.SendAsync(reqCgpt, ct);
+                    return respCgpt.IsSuccessStatusCode
+                        ? (true, "OpenAI API key valid!")
+                        : (false, $"HTTP {(int)respCgpt.StatusCode}: Invalid API key.");
+                }
+
+                case PaidProviderType.GitHubModels:
+                {
+                    using var req = new HttpRequestMessage(HttpMethod.Post,
+                        "https://models.github.ai/inference/chat/completions");
+                    req.Headers.Add("Authorization", $"Bearer {apiKey}");
+                    req.Headers.Add("Accept", "application/vnd.github+json");
+                    req.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
+                    req.Content = new StringContent(JsonSerializer.Serialize(new
+                    {
+                        model = "openai/gpt-4o-mini",
+                        messages = new[] { new { role = "user", content = "Hello" } },
+                        max_tokens = 5
+                    }), Encoding.UTF8, "application/json");
+                    var resp = await _httpClient.SendAsync(req, ct);
+                    return resp.IsSuccessStatusCode
+                        ? (true, "GitHub Models connection successful!")
+                        : (false, $"HTTP {(int)resp.StatusCode}: Check your GitHub PAT has 'models:read' scope.");
+                }
+
+                case PaidProviderType.Anthropic:
+                {
+                    using var req = new HttpRequestMessage(HttpMethod.Post,
+                        (_settings.PaidProviderEndpoint ?? "https://api.anthropic.com/v1") + "/messages");
+                    req.Headers.Add("x-api-key", apiKey);
+                    req.Headers.Add("anthropic-version", "2023-06-01");
+                    req.Content = new StringContent(JsonSerializer.Serialize(new
+                    {
+                        model = "claude-haiku-4-20250514",
+                        max_tokens = 5,
+                        messages = new[] { new { role = "user", content = "Hi" } }
+                    }), Encoding.UTF8, "application/json");
+                    var resp = await _httpClient.SendAsync(req, ct);
+                    return resp.IsSuccessStatusCode
+                        ? (true, "Anthropic API key valid!")
+                        : (false, $"HTTP {(int)resp.StatusCode}: Invalid API key.");
+                }
+
+                case PaidProviderType.GoogleGemini:
+                {
+                    using var req = new HttpRequestMessage(HttpMethod.Get,
+                        (_settings.PaidProviderEndpoint ?? "https://generativelanguage.googleapis.com/v1beta")
+                        + "/models");
+                    req.Headers.Add("x-goog-api-key", apiKey);
+                    var resp = await _httpClient.SendAsync(req, ct);
+                    return resp.IsSuccessStatusCode
+                        ? (true, "Google Gemini API key valid!")
+                        : (false, $"HTTP {(int)resp.StatusCode}: Invalid API key.");
+                }
+
+                default: // OpenAI-compatible (OpenAI, Mistral, OpenRouter, Azure)
+                {
+                    var (url, headers, modelName) = BuildCloudEndpoint(provider, apiKey);
+                    // Use the models endpoint for validation (lighter than chat)
+                    var modelsUrl = url.Replace("/chat/completions", "/models");
+                    using var req = new HttpRequestMessage(HttpMethod.Get, modelsUrl);
+                    foreach (var (key, val) in headers)
+                        req.Headers.TryAddWithoutValidation(key, val);
+                    var resp = await _httpClient.SendAsync(req, ct);
+                    return resp.IsSuccessStatusCode
+                        ? (true, $"{provider} API key valid!")
+                        : (false, $"HTTP {(int)resp.StatusCode}: Invalid API key.");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            return (false, $"Connection error: {ex.Message}");
+        }
+    }
+
+    #endregion
+}

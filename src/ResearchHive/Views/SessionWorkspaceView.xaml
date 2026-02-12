@@ -1,0 +1,1611 @@
+<UserControl x:Class="ResearchHive.Views.SessionWorkspaceView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:conv="clr-namespace:ResearchHive.Converters"
+             xmlns:ctrl="clr-namespace:ResearchHive.Controls">
+
+    <UserControl.Resources>
+        <conv:BoolToVisibilityConverter x:Key="BoolVis"/>
+        <conv:NullToVisibilityConverter x:Key="NullVis"/>
+        <conv:EqualityToVisibilityConverter x:Key="EqVis"/>
+        <conv:StringNotEmptyToVisibilityConverter x:Key="StrVis"/>
+        <conv:StringToColorBrushConverter x:Key="ColorConv"/>
+        <conv:CountToVisibilityConverter x:Key="EmptyVis"/>
+    </UserControl.Resources>
+
+    <Grid Background="{StaticResource BackgroundBrush}">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="160"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <!-- Tab Navigation (Left Strip) — data-bound, filtered by domain pack -->
+        <Border Grid.Column="0" Background="White" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,1,0">
+            <ListBox x:Name="TabList" Background="Transparent" BorderThickness="0"
+                     ItemsSource="{Binding VisibleTabs}"
+                     SelectedIndex="0" SelectionChanged="TabList_SelectionChanged">
+                <ListBox.ItemContainerStyle>
+                    <Style TargetType="ListBoxItem">
+                        <Setter Property="Tag" Value="{Binding Tag}"/>
+                        <Setter Property="Padding" Value="12,8"/>
+                        <Setter Property="Cursor" Value="Hand"/>
+                        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+                        <Setter Property="FontSize" Value="12"/>
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="ListBoxItem">
+                                    <Border x:Name="Bd" Background="Transparent" 
+                                            Padding="{TemplateBinding Padding}"
+                                            BorderThickness="3,0,0,0" BorderBrush="Transparent">
+                                        <ContentPresenter/>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="Bd" Property="Background" Value="#08000000"/>
+                                        </Trigger>
+                                        <Trigger Property="IsSelected" Value="True">
+                                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource PrimaryLightBrush}"/>
+                                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource PrimaryBrush}"/>
+                                            <Setter Property="FontWeight" Value="SemiBold"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </ListBox.ItemContainerStyle>
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <TextBlock Text="{Binding Label}" />
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </Border>
+
+        <!-- Tab Content (Right Area) -->
+        <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" Padding="20,16">
+            <Grid>
+                <!-- OVERVIEW TAB -->
+                <StackPanel Visibility="{Binding ActiveTab, Converter={StaticResource EqVis}, ConverterParameter=Overview}">
+                    <TextBlock Text="{Binding Session.Title}" FontSize="22" FontWeight="Bold" 
+                               Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,4"/>
+                    <TextBlock Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,0,0,12" TextWrapping="Wrap">
+                        <Run Text="{Binding StatDomainPack, Mode=OneWay}"/>
+                        <Run Text=" · "/>
+                        <Run Text="{Binding StatStatus, Mode=OneWay}"/>
+                        <Run Text=" · "/>
+                        <Run Text="{Binding StatTags, Mode=OneWay}"/>
+                    </TextBlock>
+
+                    <!-- Stats Grid -->
+                    <UniformGrid Columns="3" Margin="0,0,0,12">
+                        <Border Style="{StaticResource Card}" Margin="0,0,6,6">
+                            <StackPanel HorizontalAlignment="Center" Margin="8">
+                                <TextBlock Text="{Binding StatSources}" FontSize="28" FontWeight="Bold" 
+                                           Foreground="{StaticResource PrimaryBrush}" HorizontalAlignment="Center"/>
+                                <TextBlock Text="Sources" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center"/>
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource Card}" Margin="3,0,3,6">
+                            <StackPanel HorizontalAlignment="Center" Margin="8">
+                                <TextBlock Text="{Binding StatEvidence}" FontSize="28" FontWeight="Bold" 
+                                           Foreground="{StaticResource PrimaryBrush}" HorizontalAlignment="Center"/>
+                                <TextBlock Text="Evidence Chunks" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center"/>
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource Card}" Margin="6,0,0,6">
+                            <StackPanel HorizontalAlignment="Center" Margin="8">
+                                <TextBlock Text="{Binding StatReports}" FontSize="28" FontWeight="Bold" 
+                                           Foreground="{StaticResource AccentBrush}" HorizontalAlignment="Center"/>
+                                <TextBlock Text="Reports" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center"/>
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource Card}" Margin="0,0,6,0">
+                            <StackPanel HorizontalAlignment="Center" Margin="8">
+                                <TextBlock Text="{Binding StatJobs}" FontSize="28" FontWeight="Bold" 
+                                           Foreground="{StaticResource PrimaryBrush}" HorizontalAlignment="Center"/>
+                                <TextBlock Text="Jobs" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center"/>
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource Card}" Margin="3,0,3,0">
+                            <StackPanel HorizontalAlignment="Center" Margin="8">
+                                <TextBlock Text="{Binding StatPins}" FontSize="28" FontWeight="Bold" 
+                                           Foreground="{StaticResource PrimaryBrush}" HorizontalAlignment="Center"/>
+                                <TextBlock Text="Pinned" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center"/>
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource Card}" Margin="6,0,0,0">
+                            <StackPanel HorizontalAlignment="Center" Margin="8">
+                                <TextBlock Text="{Binding StatNotes}" FontSize="28" FontWeight="Bold" 
+                                           Foreground="{StaticResource PrimaryBrush}" HorizontalAlignment="Center"/>
+                                <TextBlock Text="Notes" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center"/>
+                            </StackPanel>
+                        </Border>
+                    </UniformGrid>
+
+                    <!-- Latest Summary -->
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="Latest Summary" Style="{StaticResource SectionHeader}" Margin="0,0,0,6"/>
+                            <TextBlock Text="{Binding OverviewText}" TextWrapping="Wrap" FontSize="13"
+                                       Foreground="{StaticResource TextSecondaryBrush}"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Session info + actions -->
+                    <Border Style="{StaticResource Card}" Margin="0,8,0,0">
+                        <StackPanel>
+                            <TextBlock FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,4">
+                                <Run Text="Created: "/><Run Text="{Binding Session.CreatedUtc, Mode=OneWay, StringFormat='{}{0:g}'}"/>
+                                <Run Text="  ·  Last activity: "/><Run Text="{Binding StatLastActivity, Mode=OneWay}"/>
+                            </TextBlock>
+                            <TextBlock FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,8">
+                                <Run Text="Path: "/><Run Text="{Binding Session.WorkspacePath, Mode=OneWay}"/>
+                            </TextBlock>
+                            <Button Content="📂 Open Folder" Style="{StaticResource SubtleButton}"
+                                    Command="{Binding OpenWorkspaceFolderCommand}" HorizontalAlignment="Left"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Quick-actions hint on overview -->
+                    <Border Background="#E3F2FD" CornerRadius="6" Padding="12,10" Margin="0,12,0,0"
+                            Visibility="{Binding HasPostResearchTip, Converter={StaticResource BoolVis}}">
+                        <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#1565C0">
+                            💡 Research data is ready! Use the tabs on the left to explore Evidence, Reports, Discovery Studio, Idea Fusion, and more.
+                        </TextBlock>
+                    </Border>
+                </StackPanel>
+
+                <!-- RESEARCH TAB -->
+                <StackPanel Visibility="{Binding ActiveTab, Converter={StaticResource EqVis}, ConverterParameter=Research}">
+                    <TextBlock Text="Research Agent" FontSize="20" FontWeight="Bold" 
+                               Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,4"/>
+                    <TextBlock TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,0,0,12">
+                        Enter a question and click Run. The agent automatically searches the web across multiple engines, 
+                        captures pages, indexes their content, evaluates coverage, and synthesizes evidence-backed reports 
+                        with inline citations. Set Target Sources to control depth.
+                    </TextBlock>
+
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="Research Prompt" Style="{StaticResource SectionHeader}"/>
+                            <TextBox Text="{Binding ResearchPrompt, UpdateSourceTrigger=PropertyChanged}" 
+                                     Style="{StaticResource ModernTextBox}" AcceptsReturn="True" 
+                                     Height="80" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Orientation="Horizontal" Grid.Column="0">
+                                    <TextBlock Text="Target Sources:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                    <TextBox Text="{Binding TargetSources}" Style="{StaticResource ModernTextBox}" Width="50"/>
+                                    <CheckBox Content="⚡ Streamlined"
+                                              IsChecked="{Binding IsStreamlinedCodex}"
+                                              ToolTip="Streamlined Codex: skip orchestration, let Codex research autonomously in one call. Faster, fewer API calls, comparable quality."
+                                              Visibility="{Binding ShowStreamlinedToggle, Converter={StaticResource BoolVis}}"
+                                              VerticalAlignment="Center" Margin="16,0,0,0"
+                                              Foreground="{StaticResource TextSecondaryBrush}" FontSize="12"/>
+                                    <CheckBox Content="🏅 Quality Rank"
+                                              IsChecked="{Binding IsSourceQualityOn}"
+                                              ToolTip="Boost academic/authoritative sources in ranking. Default off — useful for scholarly topics, may penalize informal subjects."
+                                              VerticalAlignment="Center" Margin="16,0,0,0"
+                                              Foreground="{StaticResource TextSecondaryBrush}" FontSize="12"/>
+                                    <TextBlock Text="Time:" VerticalAlignment="Center" Margin="16,0,4,0"
+                                               Foreground="{StaticResource TextSecondaryBrush}" FontSize="12"/>
+                                    <ComboBox ItemsSource="{Binding TimeRangeOptions}"
+                                              SelectedItem="{Binding SelectedTimeRange}"
+                                              VerticalAlignment="Center" MinWidth="100" FontSize="12"
+                                              ToolTip="Filter search results by recency. Any time = no filter."/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2" Orientation="Horizontal">
+                                    <Button Content="▶ Run" Style="{StaticResource PrimaryButton}"
+                                            Command="{Binding RunResearchCommand}"
+                                            IsEnabled="{Binding IsResearchRunning, Converter={x:Static conv:InverseBoolConverter.Instance}}"
+                                            Margin="0,0,4,0"/>
+                                    <Button Content="⏸ Pause" Style="{StaticResource SubtleButton}"
+                                            Command="{Binding PauseResearchCommand}"
+                                            Visibility="{Binding IsResearchRunning, Converter={StaticResource BoolVis}}"/>
+                                    <Button Content="▶ Resume" Style="{StaticResource AccentButton}"
+                                            Command="{Binding ResumeResearchCommand}" Margin="4,0,0,0"/>
+                                </StackPanel>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <ProgressBar Style="{StaticResource BusyIndicator}" Margin="0,4"
+                                 Visibility="{Binding IsResearchRunning, Converter={StaticResource BoolVis}}"/>
+                    <TextBlock Text="{Binding ResearchStatus}" Foreground="{StaticResource TextSecondaryBrush}" 
+                               FontSize="12" Margin="0,4"/>
+
+                    <!-- Live Progress Panel -->
+                    <Border Style="{StaticResource Card}" Margin="0,4"
+                            Visibility="{Binding ShowLiveProgress, Converter={StaticResource BoolVis}}">
+                        <StackPanel>
+                            <TextBlock Text="Live Progress" Style="{StaticResource SectionHeader}" Margin="0,0,0,8"/>
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <!-- Step description -->
+                                <TextBlock Grid.Column="0" Text="{Binding ProgressStep}" FontSize="13" 
+                                           FontWeight="Medium" Foreground="{StaticResource PrimaryBrush}" 
+                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                <!-- Iteration counter -->
+                                <TextBlock Grid.Column="1" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" 
+                                           VerticalAlignment="Center" Margin="12,0"
+                                           Text="{Binding IterationDisplay}"/>
+                                <!-- Coverage -->
+                                <Border Grid.Column="2" Style="{StaticResource Badge}">
+                                    <TextBlock FontSize="12" VerticalAlignment="Center">
+                                        <Run Text="Coverage: "/>
+                                        <Run Text="{Binding ProgressCoverageDisplay, Mode=OneWay}" FontWeight="Bold"/>
+                                    </TextBlock>
+                                </Border>
+                            </Grid>
+
+                            <!-- Source counters -->
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" Orientation="Horizontal">
+                                    <TextBlock Text="✅ Found: " FontSize="12" Foreground="{StaticResource SuccessBrush}"/>
+                                    <TextBlock Text="{Binding ProgressSourcesFound}" FontSize="12" FontWeight="Bold" 
+                                               Foreground="{StaticResource SuccessBrush}"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                    <TextBlock Text="❌ Failed: " FontSize="12" Foreground="{StaticResource ErrorBrush}"/>
+                                    <TextBlock Text="{Binding ProgressSourcesFailed}" FontSize="12" FontWeight="Bold" 
+                                               Foreground="{StaticResource ErrorBrush}"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2" Orientation="Horizontal">
+                                    <TextBlock Text="🎯 Target: " FontSize="12" Foreground="{StaticResource TextSecondaryBrush}"/>
+                                    <TextBlock Text="{Binding ProgressTargetSources}" FontSize="12" FontWeight="Bold"/>
+                                </StackPanel>
+                            </Grid>
+
+                            <!-- Quality metrics (sub-questions, grounding, browser pool) -->
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" Orientation="Horizontal">
+                                    <TextBlock Text="📋 Sub-Qs: " FontSize="12" Foreground="{StaticResource TextSecondaryBrush}"/>
+                                    <TextBlock Text="{Binding SubQuestionStatus}" FontSize="12" FontWeight="Bold"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                    <TextBlock Text="📌 Grounding: " FontSize="12" Foreground="{StaticResource TextSecondaryBrush}"/>
+                                    <TextBlock Text="{Binding GroundingScoreDisplay}" FontSize="12" FontWeight="Bold"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2" Orientation="Horizontal">
+                                    <TextBlock Text="🌐 Pool: " FontSize="12" Foreground="{StaticResource TextSecondaryBrush}"/>
+                                    <TextBlock FontSize="12" FontWeight="Bold">
+                                        <Run Text="{Binding BrowserPoolAvailable, Mode=OneWay}"/>
+                                        <Run Text="/"/>
+                                        <Run Text="{Binding BrowserPoolTotal, Mode=OneWay}"/>
+                                    </TextBlock>
+                                </StackPanel>
+                            </Grid>
+
+                            <!-- Live log -->
+                            <TextBlock Text="Activity Log" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,2"/>
+                            <ListBox x:Name="ActivityLogList" ItemsSource="{Binding LiveLogLines}" Height="120" FontSize="11" 
+                                     FontFamily="Consolas" Background="#FAFAFA" BorderBrush="{StaticResource BorderBrush}"
+                                     BorderThickness="1" ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                     SelectionMode="Extended"
+                                     KeyDown="ActivityLog_KeyDown"/>
+
+                            <!-- Cancel button (only while running) -->
+                            <Button Content="✕ Cancel Research" Style="{StaticResource DangerButton}" 
+                                    Command="{Binding CancelResearchCommand}" Margin="0,8,0,0"
+                                    HorizontalAlignment="Left"
+                                    Visibility="{Binding IsResearchRunning, Converter={StaticResource BoolVis}}"/>
+                            <!-- Dismiss button (after completion) -->
+                            <Button Content="✕ Dismiss" Margin="0,8,0,0"
+                                    HorizontalAlignment="Left" FontSize="12" Padding="12,4"
+                                    Visibility="{Binding IsResearchComplete, Converter={StaticResource BoolVis}}"
+                                    Click="DismissProgress_Click"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Post-research tips banner -->
+                    <Border Background="#E8F5E9" CornerRadius="6" Padding="12,10" Margin="0,10,0,0"
+                            Visibility="{Binding HasPostResearchTip, Converter={StaticResource BoolVis}}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="{Binding PostResearchTip}" TextWrapping="Wrap" FontSize="12"
+                                       Foreground="#2E7D32"/>
+                            <Button Grid.Column="1" Content="✕" Style="{StaticResource SubtleButton}" 
+                                    FontSize="10" Padding="4,2" VerticalAlignment="Top"
+                                    Command="{Binding DismissTipCommand}"/>
+                        </Grid>
+                    </Border>
+
+                    <!-- Continue Research (Incremental) -->
+                    <Border Style="{StaticResource Card}" Margin="0,8,0,0">
+                        <StackPanel>
+                            <TextBlock Text="📈 Continue Research" Style="{StaticResource SectionHeader}"/>
+                            <TextBlock TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,0,0,8">
+                                Add more sources to an existing research job and re-synthesize. Select a job below first.
+                            </TextBlock>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBox Text="{Binding ContinuePrompt, UpdateSourceTrigger=PropertyChanged}" 
+                                         Style="{StaticResource ModernTextBox}"
+                                         Tag="Optional: refine your question for the next round..."/>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="8,0">
+                                    <TextBlock Text="Extra sources:" VerticalAlignment="Center" Margin="0,0,4,0"
+                                               Foreground="{StaticResource TextSecondaryBrush}" FontSize="12"/>
+                                    <TextBox Text="{Binding AdditionalSources}" Style="{StaticResource ModernTextBox}" Width="40"/>
+                                </StackPanel>
+                                <Button Grid.Column="2" Content="📈 Continue" Style="{StaticResource AccentButton}"
+                                        Command="{Binding ContinueResearchCommand}"
+                                        IsEnabled="{Binding IsContinueRunning, Converter={x:Static conv:InverseBoolConverter.Instance}}"/>
+                            </Grid>
+                            <ProgressBar Style="{StaticResource BusyIndicator}" Margin="0,4"
+                                         Visibility="{Binding IsContinueRunning, Converter={StaticResource BoolVis}}"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Jobs List -->
+                    <TextBlock Text="Jobs" Style="{StaticResource SectionHeader}" Margin="0,16,0,8"/>
+                    <ItemsControl ItemsSource="{Binding Jobs}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Style="{StaticResource Card}" Cursor="Hand"
+                                        MouseLeftButtonDown="Job_Click">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="6"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Border Grid.Column="0" CornerRadius="3" Width="4"
+                                                Background="{Binding StateColor, Converter={StaticResource ColorConv}}"
+                                                VerticalAlignment="Stretch"/>
+                                        <StackPanel Grid.Column="1" Margin="10,0">
+                                            <TextBlock Text="{Binding Title}" FontWeight="Medium" FontSize="13"/>
+                                            <TextBlock Text="{Binding Created}" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}"/>
+                                        </StackPanel>
+                                        <TextBlock Grid.Column="2" Text="{Binding Sources}" FontSize="12" 
+                                                   VerticalAlignment="Center" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,8,0"/>
+                                        <Button Grid.Column="3" Content="✕" Style="{StaticResource SubtleButton}" FontSize="11" Padding="4,2"
+                                                ToolTip="Delete this job and all its reports"
+                                                Command="{Binding DataContext.DeleteJobCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                CommandParameter="{Binding}"/>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+
+                <!-- SNAPSHOTS TAB -->
+                <StackPanel Visibility="{Binding ActiveTab, Converter={StaticResource EqVis}, ConverterParameter=Snapshots}">
+                    <TextBlock Text="Web Snapshots" FontSize="20" FontWeight="Bold" 
+                               Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,4"/>
+                    <TextBlock TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,0,0,12">
+                        Captured web pages stored locally. The Research Agent populates this automatically during runs. 
+                        You can also manually capture any URL. Each snapshot saves the page HTML, extracted text, and metadata 
+                        so you can review sources offline.
+                    </TextBlock>
+
+                    <Border Style="{StaticResource Card}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBox Text="{Binding SnapshotUrl, UpdateSourceTrigger=PropertyChanged}" 
+                                     Style="{StaticResource ModernTextBox}" Margin="0,0,8,0"/>
+                            <Button Grid.Column="1" Content="📥 Capture" Style="{StaticResource PrimaryButton}"
+                                    Command="{Binding CaptureSnapshotCommand}"/>
+                        </Grid>
+                    </Border>
+
+                    <!-- Empty state -->
+                    <TextBlock Text="No snapshots yet. Run a research job or capture a URL above to get started."
+                               FontSize="13" Foreground="{StaticResource TextSecondaryBrush}" FontStyle="Italic"
+                               HorizontalAlignment="Center" Margin="0,20,0,0"
+                               Visibility="{Binding Snapshots.Count, Converter={StaticResource EmptyVis}}"/>
+
+                    <!-- Sort controls -->
+                    <StackPanel Orientation="Horizontal" Margin="0,8,0,4" HorizontalAlignment="Right">
+                        <TextBlock Text="Sort:" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" 
+                                   VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <Button Content="Newest" Style="{StaticResource SubtleButton}" FontSize="11" Padding="6,2"
+                                Command="{Binding SortSnapshotsCommand}" CommandParameter="Newest" Margin="0,0,2,0"/>
+                        <Button Content="Oldest" Style="{StaticResource SubtleButton}" FontSize="11" Padding="6,2"
+                                Command="{Binding SortSnapshotsCommand}" CommandParameter="Oldest" Margin="0,0,2,0"/>
+                        <Button Content="A-Z" Style="{StaticResource SubtleButton}" FontSize="11" Padding="6,2"
+                                Command="{Binding SortSnapshotsCommand}" CommandParameter="A-Z"/>
+                    </StackPanel>
+
+                    <Grid Margin="0,12,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="300"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <ListBox ItemsSource="{Binding Snapshots}" SelectedItem="{Binding SelectedSnapshot}"
+                                 Grid.Column="0" BorderThickness="1" BorderBrush="{StaticResource BorderBrush}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="4">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Title}" FontWeight="Medium" FontSize="12"
+                                                       TextTrimming="CharacterEllipsis"/>
+                                            <TextBlock Text="{Binding Url}" FontSize="10" 
+                                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                                       TextTrimming="CharacterEllipsis"/>
+                                            <TextBlock Text="{Binding Status}" FontSize="10" Margin="0,2,0,0"/>
+                                        </StackPanel>
+                                        <Button Grid.Column="1" Content="✕" Style="{StaticResource SubtleButton}" FontSize="10" Padding="3,1"
+                                                ToolTip="Delete this snapshot"
+                                                Command="{Binding DataContext.DeleteSnapshotCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                CommandParameter="{Binding}" VerticalAlignment="Top"/>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+
+                        <Border Grid.Column="1" Style="{StaticResource Card}" Margin="8,0,0,0">
+                            <TextBox Text="{Binding SnapshotViewerContent, Mode=OneWay}" 
+                                     IsReadOnly="True" TextWrapping="Wrap" 
+                                     VerticalScrollBarVisibility="Auto"
+                                     FontFamily="Consolas" FontSize="12"
+                                     Background="Transparent" BorderThickness="0"/>
+                        </Border>
+                    </Grid>
+                </StackPanel>
+
+                <!-- OCR TAB -->
+                <StackPanel Visibility="{Binding ActiveTab, Converter={StaticResource EqVis}, ConverterParameter=OCR}">
+                    <TextBlock Text="OCR / Captures" FontSize="20" FontWeight="Bold" 
+                               Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,4"/>
+                    <TextBlock TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,0,0,12">
+                        Extract text from images using OCR (Optical Character Recognition). Provide a path to an image file 
+                        and click OCR. The extracted text is indexed alongside web sources for unified search and evidence retrieval.
+                    </TextBlock>
+
+                    <Border Style="{StaticResource Card}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBox Text="{Binding CaptureImagePath, UpdateSourceTrigger=PropertyChanged}" 
+                                     Style="{StaticResource ModernTextBox}" Margin="0,0,8,0"/>
+                            <Button Grid.Column="1" Content="📷 OCR" Style="{StaticResource PrimaryButton}"
+                                    Command="{Binding CaptureScreenshotCommand}"/>
+                        </Grid>
+                    </Border>
+
+                    <ItemsControl ItemsSource="{Binding Captures}" Margin="0,12,0,0">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Style="{StaticResource Card}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Description}" FontWeight="Medium"/>
+                                            <TextBlock Text="{Binding Captured}" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}"/>
+                                            <TextBlock Text="{Binding OcrText}" TextWrapping="Wrap" Margin="0,8,0,0"
+                                                       FontFamily="Consolas" FontSize="12" MaxHeight="200"/>
+                                            <TextBlock FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,0">
+                                                <Run Text="Boxes:"/>
+                                                <Run Text="{Binding BoxCount, Mode=OneWay}"/>
+                                            </TextBlock>
+                                        </StackPanel>
+                                        <Button Grid.Column="1" Content="✕" Style="{StaticResource SubtleButton}" FontSize="10" Padding="3,1"
+                                                Command="{Binding DataContext.DeleteCaptureCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                CommandParameter="{Binding}" VerticalAlignment="Top" ToolTip="Delete capture"/>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+
+                <!-- EVIDENCE TAB -->
+                <StackPanel Visibility="{Binding ActiveTab, Converter={StaticResource EqVis}, ConverterParameter=Evidence}">
+                    <TextBlock Text="Search &amp; Evidence" FontSize="20" FontWeight="Bold" 
+                               Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,4"/>
+                    <TextBlock TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,0,0,12">
+                        Search across all indexed content (web snapshots, OCR captures, artifacts) using hybrid keyword + semantic search.  
+                        Pin the most relevant evidence chunks to keep them visible while you work. The Source Health grid shows  
+                        the fetch status of each URL the Research Agent attempted.
+                    </TextBlock>
+
+                    <Border Style="{StaticResource Card}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBox Text="{Binding SearchQuery, UpdateSourceTrigger=PropertyChanged}" 
+                                     Style="{StaticResource ModernTextBox}" Margin="0,0,8,0"/>
+                            <Button Grid.Column="1" Content="🔍 Search" Style="{StaticResource PrimaryButton}"
+                                    Command="{Binding SearchEvidenceCommand}"/>
+                        </Grid>
+                    </Border>
+
+                    <!-- Pinned Evidence -->
+                    <TextBlock Text="📌 Pinned Evidence" Style="{StaticResource SectionHeader}" Margin="0,12,0,4"
+                               Visibility="{Binding PinnedEvidence.Count, Converter={StaticResource NullVis}}"/>
+                    <ItemsControl ItemsSource="{Binding PinnedEvidence}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Style="{StaticResource Card}" BorderBrush="{StaticResource AccentBrush}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock FontSize="11" Foreground="{StaticResource TextSecondaryBrush}">
+                                                <Run Text="{Binding SourceType, Mode=OneWay}"/>
+                                                <Run Text="·"/>
+                                                <Run Text="{Binding ScoreDisplay, Mode=OneWay}"/>
+                                            </TextBlock>
+                                            <TextBlock Text="{Binding Text}" TextWrapping="Wrap" FontSize="12" Margin="0,4,0,0"/>
+                                            <TextBlock Text="{Binding SourceUrl}" FontSize="10" Foreground="{StaticResource AccentBrush}"
+                                                       TextTrimming="CharacterEllipsis" Margin="0,4,0,0"
+                                                       Visibility="{Binding HasSourceUrl, Converter={StaticResource BoolVis}}"
+                                                       ToolTip="{Binding SourceUrl}"/>
+                                        </StackPanel>
+                                        <Button Grid.Column="1" Content="✕" Style="{StaticResource SubtleButton}"
+                                                Command="{Binding DataContext.UnpinEvidenceCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                CommandParameter="{Binding}" VerticalAlignment="Top"/>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <!-- Search Results -->
+                    <Grid Margin="0,8,0,4">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Search Results" Style="{StaticResource SectionHeader}"/>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal">
+                            <TextBlock Text="Sort:" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" 
+                                       VerticalAlignment="Center" Margin="0,0,6,0"/>
+                            <Button Content="Score" Style="{StaticResource SubtleButton}" FontSize="11" Padding="6,2"
+                                    Command="{Binding SortEvidenceCommand}" CommandParameter="Score" Margin="0,0,2,0"/>
+                            <Button Content="A-Z" Style="{StaticResource SubtleButton}" FontSize="11" Padding="6,2"
+                                    Command="{Binding SortEvidenceCommand}" CommandParameter="A-Z" Margin="0,0,2,0"/>
+                            <Button Content="Source" Style="{StaticResource SubtleButton}" FontSize="11" Padding="6,2"
+                                    Command="{Binding SortEvidenceCommand}" CommandParameter="Source"/>
+                        </StackPanel>
+                    </Grid>
+                    <ItemsControl ItemsSource="{Binding EvidenceResults}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Style="{StaticResource Card}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock FontSize="11" Foreground="{StaticResource TextSecondaryBrush}">
+                                                <Run Text="{Binding SourceType, Mode=OneWay}"/>
+                                                <Run Text="· Score:"/>
+                                                <Run Text="{Binding ScoreDisplay, Mode=OneWay}"/>
+                                            </TextBlock>
+                                            <TextBlock Text="{Binding Text}" TextWrapping="Wrap" FontSize="12" Margin="0,4,0,0"/>
+                                            <TextBlock Text="{Binding SourceUrl}" FontSize="10" Foreground="{StaticResource AccentBrush}"
+                                                       TextTrimming="CharacterEllipsis" Margin="0,4,0,0"
+                                                       Visibility="{Binding HasSourceUrl, Converter={StaticResource BoolVis}}"
+                                                       ToolTip="{Binding SourceUrl}" Cursor="Hand"/>
+                                        </StackPanel>
+                                        <Button Grid.Column="1" Content="📌" Style="{StaticResource SubtleButton}"
+                                                Command="{Binding DataContext.PinEvidenceCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                CommandParameter="{Binding}" VerticalAlignment="Top"/>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <!-- Source Health -->
+                    <TextBlock Text="🩺 Source Health" Style="{StaticResource SectionHeader}" Margin="0,16,0,4"
+                               Visibility="{Binding SourceHealthItems.Count, Converter={StaticResource NullVis}}"/>
+                    <DataGrid ItemsSource="{Binding SourceHealthItems}" Style="{StaticResource ModernDataGrid}"
+                              Visibility="{Binding SourceHealthItems.Count, Converter={StaticResource NullVis}}"
+                              MaxHeight="300" Margin="0,0,0,8">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="" Binding="{Binding StatusIcon}" Width="30"/>
+                            <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="90"/>
+                            <DataGridTextColumn Header="HTTP" Binding="{Binding HttpStatus}" Width="50"/>
+                            <DataGridTextColumn Header="URL" Binding="{Binding Url}" Width="*">
+                                <DataGridTextColumn.ElementStyle>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                                    </Style>
+                                </DataGridTextColumn.ElementStyle>
+                            </DataGridTextColumn>
+                            <DataGridTextColumn Header="Reason" Binding="{Binding Reason}" Width="150">
+                                <DataGridTextColumn.ElementStyle>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                                    </Style>
+                                </DataGridTextColumn.ElementStyle>
+                            </DataGridTextColumn>
+                            <DataGridTextColumn Header="Time" Binding="{Binding Timestamp}" Width="70"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </StackPanel>
+
+                <!-- NOTEBOOK TAB -->
+                <StackPanel Visibility="{Binding ActiveTab, Converter={StaticResource EqVis}, ConverterParameter=Notebook}">
+                    <TextBlock Text="Notebook" FontSize="20" FontWeight="Bold" 
+                               Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,4"/>
+                    <TextBlock TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,0,0,12">
+                        Your personal research notes for this session. Jot down observations, hypotheses, or reminders. 
+                        Notes are auto-saved every 30 seconds and included when exporting a Research Packet.
+                    </TextBlock>
+
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBox Text="{Binding NewNoteTitle, UpdateSourceTrigger=PropertyChanged}" 
+                                     Style="{StaticResource ModernTextBox}" Margin="0,0,0,8"/>
+                            <TextBox Text="{Binding NewNoteContent, UpdateSourceTrigger=PropertyChanged}" 
+                                     Style="{StaticResource ModernTextBox}" AcceptsReturn="True"
+                                     Height="80" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                            <Button Content="+ Add Note" Style="{StaticResource PrimaryButton}" 
+                                    HorizontalAlignment="Right" Command="{Binding AddNoteCommand}"/>
+                        </StackPanel>
+                    </Border>
+
+                    <ItemsControl ItemsSource="{Binding NotebookEntries}" Margin="0,8,0,0">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Style="{StaticResource Card}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <!-- Read-only view -->
+                                        <StackPanel Visibility="{Binding IsEditing, Converter={StaticResource BoolVis}, ConverterParameter=Invert}">
+                                            <Grid>
+                                                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="14"/>
+                                                <TextBlock Text="{Binding Updated}" FontSize="10" 
+                                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                                           HorizontalAlignment="Right" Margin="0,0,60,0"/>
+                                            </Grid>
+                                            <TextBlock Text="{Binding Content}" TextWrapping="Wrap" FontSize="13" Margin="0,6,0,0"/>
+                                        </StackPanel>
+
+                                        <!-- Edit mode -->
+                                        <StackPanel Visibility="{Binding IsEditing, Converter={StaticResource BoolVis}}">
+                                            <TextBox Text="{Binding Title, UpdateSourceTrigger=PropertyChanged}" 
+                                                     Style="{StaticResource ModernTextBox}" FontWeight="SemiBold" FontSize="14" Margin="0,0,0,4"/>
+                                            <TextBox Text="{Binding Content, UpdateSourceTrigger=PropertyChanged}" 
+                                                     Style="{StaticResource ModernTextBox}" AcceptsReturn="True"
+                                                     TextWrapping="Wrap" MinHeight="60" FontSize="13"/>
+                                        </StackPanel>
+
+                                        <!-- Edit/Save toggle button -->
+                                        <Button Grid.Column="1" Style="{StaticResource SubtleButton}" FontSize="10" Padding="3,1"
+                                                VerticalAlignment="Top" Margin="0,0,4,0"
+                                                Click="ToggleNoteEdit_Click"
+                                                Tag="{Binding}">
+                                            <Button.Content>
+                                                <TextBlock>
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock">
+                                                            <Setter Property="Text" Value="✎"/>
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsEditing}" Value="True">
+                                                                    <Setter Property="Text" Value="✓"/>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+                                            </Button.Content>
+                                        </Button>
+
+                                        <Button Grid.Column="2" Content="✕" Style="{StaticResource SubtleButton}" FontSize="10" Padding="3,1"
+                                                ToolTip="Delete this note"
+                                                Command="{Binding DataContext.DeleteNotebookEntryCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                CommandParameter="{Binding}" VerticalAlignment="Top"/>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+
+                <!-- REPORTS TAB -->
+                <StackPanel Visibility="{Binding ActiveTab, Converter={StaticResource EqVis}, ConverterParameter=Reports}">
+                    <TextBlock Text="Reports" FontSize="20" FontWeight="Bold" 
+                               Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,4"/>
+                    <TextBlock TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,0,0,12">
+                        All generated reports for this session. Each research run produces an Executive Summary, Full Report 
+                        (with inline citations), Activity Report (step-by-step log), and Replay Timeline. Select a report on 
+                        the left to view its rendered Markdown content on the right.
+                    </TextBlock>
+
+                    <!-- Empty state -->
+                    <TextBlock Text="No reports yet. Run a research job from the Research tab to generate reports."
+                               FontSize="13" Foreground="{StaticResource TextSecondaryBrush}" FontStyle="Italic"
+                               HorizontalAlignment="Center" Margin="0,20,0,0"
+                               Visibility="{Binding Reports.Count, Converter={StaticResource EmptyVis}}"/>
+
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="250"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <ListBox ItemsSource="{Binding Reports}" SelectedItem="{Binding SelectedReport}"
+                                 Grid.Column="0" BorderThickness="1" BorderBrush="{StaticResource BorderBrush}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="4">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Title}" FontWeight="Medium" FontSize="12"
+                                                       TextTrimming="CharacterEllipsis"/>
+                                            <TextBlock FontSize="10" Foreground="{StaticResource TextSecondaryBrush}">
+                                                <Run Text="{Binding Type, Mode=OneWay}"/>
+                                                <Run Text="·"/>
+                                                <Run Text="{Binding Created, Mode=OneWay}"/>
+                                            </TextBlock>
+                                        </StackPanel>
+                                        <Button Grid.Column="1" Content="✕" Style="{StaticResource SubtleButton}" FontSize="10" Padding="3,1"
+                                                ToolTip="Delete this report"
+                                                Command="{Binding DataContext.DeleteReportCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                CommandParameter="{Binding}" VerticalAlignment="Top"/>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+
+                        <Border Grid.Column="1" Style="{StaticResource Card}" Margin="8,0,0,0">
+                            <ctrl:MarkdownViewer Markdown="{Binding ReportContent, Mode=OneWay}"/>
+                        </Border>
+                    </Grid>
+                </StackPanel>
+
+                <!-- Q&A TAB -->
+                <StackPanel Visibility="{Binding ActiveTab, Converter={StaticResource EqVis}, ConverterParameter=QA}">
+                    <TextBlock Text="Follow-Up Q&amp;A" FontSize="20" FontWeight="Bold" 
+                               Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,4"/>
+                    <TextBlock TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,0,0,12">
+                        Ask follow-up questions about your research. Choose a scope: query the entire session's evidence,
+                        or focus on a specific report. The agent retrieves relevant context and answers using your research data.
+                    </TextBlock>
+
+                    <!-- Scope selector -->
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,8">
+                        <StackPanel>
+                            <TextBlock Text="Scope" Style="{StaticResource SectionHeader}" Margin="0,0,0,4"/>
+                            <ComboBox ItemsSource="{Binding QaScopeOptions}"
+                                      SelectedValue="{Binding QaScope}"
+                                      SelectedValuePath="Value"
+                                      MinWidth="250" FontSize="13"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Chat messages -->
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,8" MaxHeight="500">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <ItemsControl ItemsSource="{Binding QaMessages}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Margin="0,0,0,12">
+                                            <TextBlock FontWeight="SemiBold" Foreground="{StaticResource AccentBrush}" Margin="0,0,0,2">
+                                                <Run Text="Q: "/><Run Text="{Binding Question, Mode=OneWay}"/>
+                                            </TextBlock>
+                                            <ctrl:MarkdownViewer Markdown="{Binding Answer, Mode=OneWay}" 
+                                                                 MaxHeight="300" FontSize="13"/>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </Border>
+
+                    <!-- Ask input -->
+                    <Border Style="{StaticResource Card}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBox Text="{Binding QaQuestion, UpdateSourceTrigger=PropertyChanged}"
+                                     Style="{StaticResource ModernTextBox}"
+                                     AcceptsReturn="False" Height="36" VerticalContentAlignment="Center"
+                                     FontSize="13"/>
+                            <Button Grid.Column="1" Content="Ask" Style="{StaticResource PrimaryButton}"
+                                    Command="{Binding AskFollowUpCommand}" Margin="8,0,0,0"
+                                    IsEnabled="{Binding IsQaRunning, Converter={x:Static conv:InverseBoolConverter.Instance}}"/>
+                        </Grid>
+                    </Border>
+
+                    <ProgressBar Style="{StaticResource BusyIndicator}" Margin="0,4"
+                                 Visibility="{Binding IsQaRunning, Converter={StaticResource BoolVis}}"/>
+                </StackPanel>
+
+                <!-- REPLAY TAB -->
+                <StackPanel Visibility="{Binding ActiveTab, Converter={StaticResource EqVis}, ConverterParameter=Replay}">
+                    <TextBlock Text="Research Replay" FontSize="20" FontWeight="Bold" 
+                               Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,4"/>
+                    <TextBlock TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,0,0,12">
+                        A chronological timeline of every step the Research Agent took during a job — planning, searching, 
+                        capturing pages, evaluating coverage, refining queries, and synthesizing the report. Select a job 
+                        from the Research tab first, then view its replay here.
+                    </TextBlock>
+
+                    <ItemsControl ItemsSource="{Binding ReplayEntries}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Style="{StaticResource Card}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="50"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0">
+                                            <TextBlock Text="{Binding Order}" FontSize="20" FontWeight="Bold" 
+                                                       Foreground="{StaticResource PrimaryBrush}" HorizontalAlignment="Center"/>
+                                            <TextBlock Text="{Binding Timestamp}" FontSize="9" 
+                                                       Foreground="{StaticResource TextSecondaryBrush}" HorizontalAlignment="Center"/>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1" Margin="8,0,0,0">
+                                            <TextBlock FontSize="11" Foreground="{StaticResource PrimaryBrush}" FontWeight="Medium">
+                                                <Run Text="{Binding Type, Mode=OneWay}"/>
+                                            </TextBlock>
+                                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="13" Margin="0,2,0,0"/>
+                                            <TextBlock Text="{Binding Description}" TextWrapping="Wrap" FontSize="12" 
+                                                       Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,0"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+
+                <!-- DISCOVERY TAB -->
+                <StackPanel Visibility="{Binding ActiveTab, Converter={StaticResource EqVis}, ConverterParameter=Discovery}">
+                    <TextBlock Text="Discovery Studio" FontSize="20" FontWeight="Bold" 
+                               Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,4"/>
+                    <TextBlock TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,0,0,12">
+                        Generate novel idea cards for a problem. The agent first researches existing solutions, builds a 
+                        “known map” of prior art, then produces creative hypotheses with mechanisms, test plans, risks, and 
+                        falsification criteria. Each idea is scored on Novelty, Feasibility, Safety, Testability, and Impact.
+                    </TextBlock>
+
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="Problem Statement" Style="{StaticResource SectionHeader}"/>
+                            <TextBox Text="{Binding DiscoveryProblem, UpdateSourceTrigger=PropertyChanged}" 
+                                     Style="{StaticResource ModernTextBox}" AcceptsReturn="True"
+                                     Height="60" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                            <TextBlock Text="Constraints (optional)" Style="{StaticResource SubHeader}"/>
+                            <TextBox Text="{Binding DiscoveryConstraints, UpdateSourceTrigger=PropertyChanged}" 
+                                     Style="{StaticResource ModernTextBox}" Margin="0,0,0,8"/>
+                            <Button Content="💡 Generate Ideas" Style="{StaticResource AccentButton}"
+                                    HorizontalAlignment="Right" Command="{Binding RunDiscoveryCommand}"
+                                    IsEnabled="{Binding IsDiscoveryRunning, Converter={x:Static conv:InverseBoolConverter.Instance}}"/>
+                        </StackPanel>
+                    </Border>
+
+                    <ProgressBar Style="{StaticResource BusyIndicator}" Margin="0,4"
+                                 Visibility="{Binding IsDiscoveryRunning, Converter={StaticResource BoolVis}}"/>
+
+                    <TextBlock Text="Idea Cards" Style="{StaticResource SectionHeader}" Margin="0,12,0,4"/>
+                    <ItemsControl ItemsSource="{Binding IdeaCards}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Style="{StaticResource Card}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                        <TextBlock Text="{Binding Title}" FontSize="15" FontWeight="SemiBold"/>
+                                        <TextBlock Text="{Binding Hypothesis}" TextWrapping="Wrap" FontSize="13" Margin="0,6,0,0"/>
+
+                                        <Grid Margin="0,8,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Grid.Column="0">
+                                                <TextBlock Text="Mechanism" Style="{StaticResource SubHeader}"/>
+                                                <TextBlock Text="{Binding Mechanism}" TextWrapping="Wrap" FontSize="12"/>
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1">
+                                                <TextBlock Text="Minimal Test Plan" Style="{StaticResource SubHeader}"/>
+                                                <TextBlock Text="{Binding TestPlan}" TextWrapping="Wrap" FontSize="12"/>
+                                            </StackPanel>
+                                        </Grid>
+
+                                        <TextBlock Text="Falsification" Style="{StaticResource SubHeader}" Margin="0,8,0,0"/>
+                                        <TextBlock Text="{Binding Falsification}" TextWrapping="Wrap" FontSize="12"/>
+
+                                        <Grid Margin="0,8,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="{Binding NoveltyCheck}" FontSize="11" 
+                                                       Foreground="{StaticResource TextSecondaryBrush}"/>
+                                            <Border Grid.Column="1" Style="{StaticResource Badge}">
+                                                <TextBlock FontSize="12" FontWeight="SemiBold">
+                                                    <Run Text="Score: "/>
+                                                    <Run Text="{Binding Score, Mode=OneWay}"/>
+                                                </TextBlock>
+                                            </Border>
+                                        </Grid>
+                                        </StackPanel>
+                                        <Button Grid.Column="1" Content="✕" Style="{StaticResource SubtleButton}" FontSize="10" Padding="3,1"
+                                                Command="{Binding DataContext.DeleteIdeaCardCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                CommandParameter="{Binding}" VerticalAlignment="Top" ToolTip="Remove idea card"/>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+
+                <!-- MATERIALS TAB -->
+                <StackPanel Visibility="{Binding ActiveTab, Converter={StaticResource EqVis}, ConverterParameter=Materials}">
+                    <TextBlock Text="Materials Explorer" FontSize="20" FontWeight="Bold" 
+                               Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,4"/>
+                    <TextBlock TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,0,0,12">
+                        Find and compare real-world materials (metals, polymers, composites, etc.) that match your requirements. 
+                        Enter desired properties as key:value pairs (e.g. "strength: high"), optional filters, and materials to avoid. 
+                        Results include safety data, DIY feasibility, a test checklist, and fit scores.
+                    </TextBlock>
+
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="Desired Properties (key:value per line)" Style="{StaticResource SectionHeader}"/>
+                            <TextBox Text="{Binding MaterialProperties, UpdateSourceTrigger=PropertyChanged}" 
+                                     Style="{StaticResource ModernTextBox}" AcceptsReturn="True"
+                                     Height="60" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                            <TextBlock Text="Filters (key:value per line)" Style="{StaticResource SubHeader}"/>
+                            <TextBox Text="{Binding MaterialFilters, UpdateSourceTrigger=PropertyChanged}" 
+                                     Style="{StaticResource ModernTextBox}" AcceptsReturn="True"
+                                     Height="40" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                            <TextBlock Text="Avoid (comma separated)" Style="{StaticResource SubHeader}"/>
+                            <TextBox Text="{Binding MaterialAvoid, UpdateSourceTrigger=PropertyChanged}" 
+                                     Style="{StaticResource ModernTextBox}" Margin="0,0,0,8"/>
+                            <TextBlock Text="Include specific materials (comma separated, optional)" Style="{StaticResource SubHeader}"/>
+                            <TextBox Text="{Binding MaterialInclude, UpdateSourceTrigger=PropertyChanged}" 
+                                     Style="{StaticResource ModernTextBox}" Margin="0,0,0,8"/>
+                            <Button Content="🧪 Search Materials" Style="{StaticResource PrimaryButton}"
+                                    HorizontalAlignment="Right" Command="{Binding RunMaterialsSearchCommand}"
+                                    IsEnabled="{Binding IsMaterialsRunning, Converter={x:Static conv:InverseBoolConverter.Instance}}"/>
+                        </StackPanel>
+                    </Border>
+
+                    <ProgressBar Style="{StaticResource BusyIndicator}" Margin="0,4"
+                                 Visibility="{Binding IsMaterialsRunning, Converter={StaticResource BoolVis}}"/>
+
+                    <ItemsControl ItemsSource="{Binding MaterialCandidates}" Margin="0,8,0,0">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Style="{StaticResource Card}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" FontSize="18" FontWeight="Bold" 
+                                                       Foreground="{StaticResource PrimaryBrush}" Margin="0,0,10,0">
+                                                <Run Text="#"/><Run Text="{Binding Rank, Mode=OneWay}"/>
+                                            </TextBlock>
+                                            <StackPanel Grid.Column="1">
+                                                <TextBlock Text="{Binding Name}" FontSize="15" FontWeight="SemiBold"/>
+                                                <TextBlock Text="{Binding Category}" FontSize="11" 
+                                                           Foreground="{StaticResource TextSecondaryBrush}"/>
+                                            </StackPanel>
+                                            <Border Grid.Column="2" Style="{StaticResource Badge}">
+                                                <TextBlock Text="{Binding FitScore}" FontWeight="SemiBold"/>
+                                            </Border>
+                                        </Grid>
+
+                                        <TextBlock Text="{Binding FitRationale}" TextWrapping="Wrap" FontSize="12" Margin="0,8,0,0"/>
+
+                                        <!-- Safety Section -->
+                                        <Border Background="#FFF3E0" CornerRadius="4" Padding="8" Margin="0,8,0,0">
+                                            <StackPanel>
+                                                <TextBlock Text="⚠ Safety" FontWeight="SemiBold" FontSize="12"/>
+                                                <TextBlock FontSize="11" Margin="0,4,0,0">
+                                                    <Run Text="Level: "/><Run Text="{Binding Safety, Mode=OneWay}"/>
+                                                </TextBlock>
+                                                <TextBlock FontSize="11">
+                                                    <Run Text="Environment: "/><Run Text="{Binding Environment, Mode=OneWay}"/>
+                                                </TextBlock>
+                                                <TextBlock FontSize="11">
+                                                    <Run Text="PPE: "/><Run Text="{Binding PPE, Mode=OneWay}"/>
+                                                </TextBlock>
+                                                <TextBlock FontSize="11">
+                                                    <Run Text="Hazards: "/><Run Text="{Binding Hazards, Mode=OneWay}"/>
+                                                </TextBlock>
+                                            </StackPanel>
+                                        </Border>
+
+                                        <TextBlock Text="Properties" Style="{StaticResource SubHeader}" Margin="0,8,0,0"/>
+                                        <TextBlock Text="{Binding Properties}" FontFamily="Consolas" FontSize="11"/>
+
+                                        <TextBlock Text="Test Checklist" Style="{StaticResource SubHeader}" Margin="0,8,0,0"/>
+                                        <TextBlock Text="{Binding TestChecklist}" FontSize="12"/>
+                                        </StackPanel>
+                                        <Button Grid.Column="1" Content="✕" Style="{StaticResource SubtleButton}" FontSize="10" Padding="3,1"
+                                                Command="{Binding DataContext.DeleteMaterialCandidateCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                CommandParameter="{Binding}" VerticalAlignment="Top" ToolTip="Remove material"/>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <!-- Material Comparison Table -->
+                    <Border Style="{StaticResource Card}" Margin="0,12,0,0"
+                            Visibility="{Binding MaterialComparisonTable, Converter={StaticResource NullVis}}">
+                        <StackPanel>
+                            <TextBlock Text="Property Comparison Table" Style="{StaticResource SectionHeader}"/>
+                            <ctrl:MarkdownViewer Markdown="{Binding MaterialComparisonTable, Mode=OneWay}" Margin="0,4,0,0"/>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <!-- PROGRAMMING TAB -->
+                <StackPanel Visibility="{Binding ActiveTab, Converter={StaticResource EqVis}, ConverterParameter=Programming}">
+                    <TextBlock Text="Programming Research &amp; IP" FontSize="20" FontWeight="Bold" 
+                               Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,4"/>
+                    <TextBlock TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,0,0,12">
+                        Research software approaches for a technical problem. Generates an Approach Matrix comparing 
+                        different solutions with evaluations across multiple criteria. Includes IP/licensing analysis 
+                        (license signals, risk flags, design-around options) for each approach.
+                    </TextBlock>
+
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="Problem Description" Style="{StaticResource SectionHeader}"/>
+                            <TextBox Text="{Binding ProgrammingProblem, UpdateSourceTrigger=PropertyChanged}" 
+                                     Style="{StaticResource ModernTextBox}" AcceptsReturn="True"
+                                     Height="60" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                            <Button Content="💻 Research" Style="{StaticResource PrimaryButton}"
+                                    HorizontalAlignment="Right" Command="{Binding RunProgrammingResearchCommand}"
+                                    IsEnabled="{Binding IsProgrammingRunning, Converter={x:Static conv:InverseBoolConverter.Instance}}"/>
+                        </StackPanel>
+                    </Border>
+
+                    <ProgressBar Style="{StaticResource BusyIndicator}" Margin="0,4"
+                                 Visibility="{Binding IsProgrammingRunning, Converter={StaticResource BoolVis}}"/>
+
+                    <!-- Approach Matrix -->
+                    <TextBlock Text="Approach Matrix" Style="{StaticResource SectionHeader}" Margin="0,12,0,4"/>
+                    <ItemsControl ItemsSource="{Binding Approaches}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Style="{StaticResource Card}"
+                                        Background="{Binding IsRecommended, Converter={x:Static conv:BoolToHighlightBrushConverter.Instance}}">
+                                    <StackPanel>
+                                        <Grid>
+                                            <TextBlock Text="{Binding Name}" FontSize="15" FontWeight="SemiBold"/>
+                                            <TextBlock Text="★ Recommended" HorizontalAlignment="Right" 
+                                                       Foreground="{StaticResource SuccessBrush}" FontWeight="Bold"
+                                                       Visibility="{Binding IsRecommended, Converter={StaticResource BoolVis}}"/>
+                                        </Grid>
+                                        <TextBlock Text="{Binding Description}" TextWrapping="Wrap" FontSize="12" Margin="0,6,0,0"/>
+
+                                        <TextBlock Text="Evaluation" Style="{StaticResource SubHeader}" Margin="0,8,0,0"/>
+                                        <TextBlock Text="{Binding Evaluation}" FontFamily="Consolas" FontSize="11"/>
+
+                                        <TextBlock Text="IP Analysis" Style="{StaticResource SubHeader}" Margin="0,8,0,0"/>
+                                        <TextBlock Text="{Binding IpInfo}" FontSize="11" TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <!-- Full Report -->
+                    <TextBlock Text="Full Report" Style="{StaticResource SectionHeader}" Margin="0,12,0,4"
+                               Visibility="{Binding ProgrammingReport, Converter={StaticResource StrVis}}"/>
+                    <Border Style="{StaticResource Card}" Visibility="{Binding ProgrammingReport, Converter={StaticResource StrVis}}">
+                        <ctrl:MarkdownViewer Markdown="{Binding ProgrammingReport, Mode=OneWay}" MaxHeight="500"/>
+                    </Border>
+                </StackPanel>
+
+                <!-- FUSION TAB -->
+                <StackPanel Visibility="{Binding ActiveTab, Converter={StaticResource EqVis}, ConverterParameter=Fusion}">
+                    <TextBlock Text="Idea Fusion Engine" FontSize="20" FontWeight="Bold" 
+                               Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,4"/>
+                    <TextBlock TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,0,0,12">
+                        Combine existing research, notes, and evidence from this session into novel proposals. Choose a fusion mode:
+                        • Blend — merge best elements into a cohesive proposal  
+                        • Cross-Apply — apply concepts from one domain to another  
+                        • Substitute — find safer or more accessible alternatives  
+                        • Optimize — refine for efficiency and practicality. 
+                        Each result includes a provenance map tracing claims back to their source, plus safety and IP flags.
+                    </TextBlock>
+
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <!-- Template Picker -->
+                            <TextBlock Text="Quick Templates" Style="{StaticResource SectionHeader}"/>
+                            <TextBlock Text="Choose a template to auto-fill, or select 'Custom Prompt' to write your own."
+                                       Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,6"/>
+                            <ComboBox ItemsSource="{Binding FusionPromptTemplates}" 
+                                      SelectedItem="{Binding SelectedFusionTemplate}"
+                                      DisplayMemberPath="DisplayName"
+                                      Width="360" HorizontalAlignment="Left" Margin="0,0,0,4"/>
+                            <TextBlock Text="{Binding SelectedFusionTemplate.Description}" 
+                                       Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" FontStyle="Italic"
+                                       TextWrapping="Wrap" Margin="0,0,0,10"
+                                       Visibility="{Binding SelectedFusionTemplate, Converter={StaticResource NullVis}}"/>
+
+                            <!-- Manual Prompt -->
+                            <TextBlock Text="Fusion Prompt" Style="{StaticResource SectionHeader}"/>
+                            <TextBox Text="{Binding FusionPrompt, UpdateSourceTrigger=PropertyChanged}" 
+                                     Style="{StaticResource ModernTextBox}" AcceptsReturn="True"
+                                     Height="80" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="Mode:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                    <ComboBox ItemsSource="{Binding FusionModes}" SelectedItem="{Binding FusionMode}" Width="140"/>
+                                </StackPanel>
+                                <Button Grid.Column="1" Content="🔗 Fuse" Style="{StaticResource AccentButton}"
+                                        Command="{Binding RunFusionCommand}"
+                                        IsEnabled="{Binding IsFusionRunning, Converter={x:Static conv:InverseBoolConverter.Instance}}"/>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <ProgressBar Style="{StaticResource BusyIndicator}" Margin="0,4"
+                                 Visibility="{Binding IsFusionRunning, Converter={StaticResource BoolVis}}"/>
+
+                    <ItemsControl ItemsSource="{Binding FusionResults}" Margin="0,8,0,0">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Style="{StaticResource Card}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <Grid>
+                                                <Border Style="{StaticResource Badge}" HorizontalAlignment="Left">
+                                                    <TextBlock Text="{Binding Mode}" FontWeight="Medium" FontSize="11"/>
+                                                </Border>
+                                                <TextBlock Text="{Binding Created}" HorizontalAlignment="Right"
+                                                           FontSize="10" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,28,0"/>
+                                            </Grid>
+                                            <TextBlock Text="{Binding Proposal}" TextWrapping="Wrap" FontSize="13" Margin="0,8,0,0"/>
+
+                                            <TextBlock Text="Provenance" Style="{StaticResource SubHeader}" Margin="0,8,0,0"/>
+                                            <TextBlock Text="{Binding ProvenanceMap}" FontSize="11" TextWrapping="Wrap"/>
+
+                                            <!-- Safety Notes (shown when present) -->
+                                            <Border Background="#FFF3E0" CornerRadius="4" Padding="8,4" Margin="0,8,0,0"
+                                                    Visibility="{Binding HasSafetyNotes, Converter={StaticResource BoolVis}}">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="⚠️ Safety: " FontWeight="SemiBold" FontSize="11" Foreground="#E65100"/>
+                                                    <TextBlock Text="{Binding SafetyNotes}" FontSize="11" Foreground="#E65100" TextWrapping="Wrap"/>
+                                                </StackPanel>
+                                            </Border>
+
+                                            <!-- IP/License Notes (shown when present) -->
+                                            <Border Background="#E8EAF6" CornerRadius="4" Padding="8,4" Margin="0,4,0,0"
+                                                    Visibility="{Binding HasIpNotes, Converter={StaticResource BoolVis}}">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="📜 IP/License: " FontWeight="SemiBold" FontSize="11" Foreground="#283593"/>
+                                                    <TextBlock Text="{Binding IpNotes}" FontSize="11" Foreground="#283593" TextWrapping="Wrap"/>
+                                                </StackPanel>
+                                            </Border>
+                                        </StackPanel>
+                                        <Button Grid.Column="1" Content="✕" Style="{StaticResource SubtleButton}" FontSize="10" Padding="3,1"
+                                                Command="{Binding DataContext.DeleteFusionResultCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                CommandParameter="{Binding}" VerticalAlignment="Top" ToolTip="Remove fusion result"/>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+
+                <!-- ARTIFACTS TAB -->
+                <StackPanel Visibility="{Binding ActiveTab, Converter={StaticResource EqVis}, ConverterParameter=Artifacts}">
+                    <TextBlock Text="Artifacts" FontSize="20" FontWeight="Bold" 
+                               Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,4"/>
+                    <TextBlock TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,0,0,12">
+                        Files you’ve ingested into this session (PDFs, documents, data files, etc.). Drag &amp; drop files 
+                        onto the window or use the ingest button. Each file is content-hashed for deduplication, 
+                        then its text is extracted and indexed for search alongside web sources.
+                    </TextBlock>
+
+                    <DataGrid ItemsSource="{Binding Artifacts}" Style="{StaticResource ModernDataGrid}" MaxHeight="600">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="*"/>
+                            <DataGridTextColumn Header="Type" Binding="{Binding Type}" Width="120"/>
+                            <DataGridTextColumn Header="Size" Binding="{Binding Size}" Width="80"/>
+                            <DataGridTextColumn Header="Ingested" Binding="{Binding Ingested}" Width="140"/>
+                            <DataGridTemplateColumn Header="" Width="30">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <Button Content="✕" Style="{StaticResource SubtleButton}" FontSize="10" Padding="2,0"
+                                                ToolTip="Delete artifact"
+                                                Command="{Binding DataContext.DeleteArtifactCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                CommandParameter="{Binding}"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </StackPanel>
+
+                <!-- LOGS TAB -->
+                <StackPanel Visibility="{Binding ActiveTab, Converter={StaticResource EqVis}, ConverterParameter=Logs}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="Audit Logs" FontSize="20" FontWeight="Bold" 
+                                       Foreground="{StaticResource TextPrimaryBrush}"/>
+                            <TextBlock TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,4,0,0">
+                                Structured audit trail of all operations in this session. Click Refresh to load the latest log entries.
+                            </TextBlock>
+                        </StackPanel>
+                        <Button Grid.Column="1" Content="🔄 Refresh" Style="{StaticResource SubtleButton}"
+                                Command="{Binding ViewLogsCommand}" VerticalAlignment="Top"/>
+                    </Grid>
+                    <Border Style="{StaticResource Card}" Margin="0,12,0,0">
+                        <TextBox Text="{Binding LogContent, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap"
+                                 FontFamily="Consolas" FontSize="11" Background="Transparent" BorderThickness="0"
+                                 VerticalScrollBarVisibility="Auto" MaxHeight="600"/>
+                    </Border>
+                </StackPanel>
+
+                <!-- EXPORT TAB -->
+                <StackPanel Visibility="{Binding ActiveTab, Converter={StaticResource EqVis}, ConverterParameter=Export}">
+                    <TextBlock Text="Export" FontSize="20" FontWeight="Bold" 
+                               Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,12"/>
+
+                    <!-- Session ZIP -->
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="📦 Session Archive" Style="{StaticResource SectionHeader}"/>
+                            <TextBlock Text="Export the entire session to a ZIP archive containing all artifacts, snapshots, reports, and metadata." 
+                                       TextWrapping="Wrap" FontSize="13" Margin="0,0,0,12"/>
+                            <Button Content="📤 Export Session ZIP" Style="{StaticResource PrimaryButton}"
+                                    Command="{Binding ExportSessionCommand}"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Report HTML -->
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="📄 Export Report as HTML" Style="{StaticResource SectionHeader}"/>
+                            <TextBlock Text="Export the currently selected report (from the Reports tab) as a standalone HTML file with embedded styling." 
+                                       TextWrapping="Wrap" FontSize="13" Margin="0,0,0,8"/>
+                            <TextBlock FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,8">
+                                <Run Text="Selected: "/>
+                                <Run Text="{Binding SelectedReport.Title, Mode=OneWay, FallbackValue='(none)'}"/>
+                            </TextBlock>
+                            <Button Content="📄 Export HTML" Style="{StaticResource PrimaryButton}"
+                                    Command="{Binding ExportReportAsHtmlCommand}"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Research Packet -->
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="📋 Research Packet" Style="{StaticResource SectionHeader}"/>
+                            <TextBlock TextWrapping="Wrap" FontSize="13" Margin="0,0,0,12">
+                                Export a self-contained research packet with:
+                            </TextBlock>
+                            <StackPanel Margin="12,0,0,12">
+                                <TextBlock Text="• All reports as styled HTML pages" FontSize="12"/>
+                                <TextBlock Text="• sources.csv — all captured sources" FontSize="12"/>
+                                <TextBlock Text="• notebook.html — your research notes" FontSize="12"/>
+                                <TextBlock Text="• index.html — packet overview with statistics" FontSize="12"/>
+                            </StackPanel>
+                            <Button Content="📋 Export Research Packet" Style="{StaticResource AccentButton}"
+                                    Command="{Binding ExportResearchPacketCommand}"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Open folder -->
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="📂 Workspace" Style="{StaticResource SectionHeader}"/>
+                            <Button Content="📂 Open Workspace Folder" Style="{StaticResource SubtleButton}"
+                                    Command="{Binding OpenWorkspaceFolderCommand}" HorizontalAlignment="Left"/>
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock Text="{Binding ResearchStatus}" Foreground="{StaticResource TextSecondaryBrush}" 
+                               FontSize="12" Margin="0,8"/>
+                </StackPanel>
+
+                <!-- ===== Citation Verification Tab ===== -->
+                <StackPanel Visibility="{Binding ActiveTab, Converter={StaticResource EqVis}, ConverterParameter=Verify}">
+                    <TextBlock Text="✅ Citation Verification" FontSize="20" FontWeight="Bold" 
+                               Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,4"/>
+                    <TextBlock TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,0,0,12">
+                        Verify that citations in the selected report are actually supported by the source material. Select a report in the Reports tab first.
+                    </TextBlock>
+
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                        <Button Content="🔍 Quick Verify" Style="{StaticResource AccentButton}"
+                                Command="{Binding VerifyCitationsCommand}" Margin="0,0,8,0"/>
+                        <Button Content="🔬 Deep Verify (LLM)" Style="{StaticResource SubtleButton}"
+                                Command="{Binding DeepVerifyCitationsCommand}" Margin="0,0,8,0"/>
+                        <ProgressBar IsIndeterminate="True" Width="80" Height="4" VerticalAlignment="Center"
+                                     Visibility="{Binding IsDeepVerifying, Converter={StaticResource BoolVis}}" Margin="0,0,8,0"/>
+                        <TextBlock Text="{Binding VerificationSummaryText}" VerticalAlignment="Center"
+                                   FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}"/>
+                    </StackPanel>
+
+                    <!-- Verification results list -->
+                    <Border Style="{StaticResource Card}" MaxHeight="500">
+                        <ListView ItemsSource="{Binding CitationVerifications}" 
+                                  Background="Transparent" BorderThickness="0">
+                            <ListView.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="0,4">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="32"/>
+                                            <ColumnDefinition Width="60"/>
+                                            <ColumnDefinition Width="60"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding StatusIcon}" FontSize="16" VerticalAlignment="Center"/>
+                                        <TextBlock Grid.Column="1" Text="{Binding CitationLabel}" FontWeight="Bold"
+                                                   Foreground="{StaticResource TextPrimaryBrush}" VerticalAlignment="Center"/>
+                                        <TextBlock Grid.Column="2" Text="{Binding OverlapDisplay}" 
+                                                   Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center"/>
+                                        <TextBlock Grid.Column="3" Text="{Binding Claim}" TextTrimming="CharacterEllipsis"
+                                                   Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center"/>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                    </Border>
+                </StackPanel>
+
+                <!-- ===== Contradictions Tab ===== -->
+                <StackPanel Visibility="{Binding ActiveTab, Converter={StaticResource EqVis}, ConverterParameter=Contradictions}">
+                    <TextBlock Text="⚡ Contradiction Detection" FontSize="20" FontWeight="Bold" 
+                               Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,4"/>
+                    <TextBlock TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,0,0,12">
+                        Scan evidence chunks for conflicting claims across different sources.
+                    </TextBlock>
+
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                        <Button Content="⚡ Quick Detect" Style="{StaticResource AccentButton}"
+                                Command="{Binding DetectContradictionsCommand}" Margin="0,0,8,0"/>
+                        <Button Content="🔬 Deep Detect (Embeddings + LLM)" Style="{StaticResource SubtleButton}"
+                                Command="{Binding DeepDetectContradictionsCommand}" Margin="0,0,8,0"/>
+                        <ProgressBar IsIndeterminate="True" Width="80" Height="4" VerticalAlignment="Center"
+                                     Visibility="{Binding IsDeepContradictionRunning, Converter={StaticResource BoolVis}}" Margin="0,0,8,0"/>
+                        <TextBlock Text="{Binding ContradictionStatus}" VerticalAlignment="Center"
+                                   Foreground="{StaticResource TextSecondaryBrush}" FontSize="13"/>
+                    </StackPanel>
+
+                    <Border Style="{StaticResource Card}" MaxHeight="500">
+                        <ListView ItemsSource="{Binding Contradictions}" 
+                                  Background="Transparent" BorderThickness="0">
+                            <ListView.ItemTemplate>
+                                <DataTemplate>
+                                    <Border BorderBrush="#44FFFFFF" BorderThickness="0,0,0,1" Padding="0,8">
+                                        <Grid>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                            </Grid.RowDefinitions>
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="{Binding TypeIcon}" FontSize="16" Margin="0,0,6,0"/>
+                                                <TextBlock Text="{Binding Type}" FontWeight="Bold" 
+                                                           Foreground="{StaticResource TextPrimaryBrush}"/>
+                                                <TextBlock Text=" — Score: " Foreground="{StaticResource TextSecondaryBrush}"/>
+                                                <TextBlock Text="{Binding Score}" Foreground="#FF9800" FontWeight="Bold"/>
+                                            </StackPanel>
+                                            <TextBlock Grid.Row="1" Text="{Binding TextA}" TextWrapping="Wrap"
+                                                       Foreground="{StaticResource TextPrimaryBrush}" Margin="0,4,0,0"
+                                                       FontSize="12"/>
+                                            <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,4,0,0">
+                                                <TextBlock Text="vs: " FontWeight="Bold" Foreground="#FF5252" FontSize="12"/>
+                                                <TextBlock Text="{Binding TextB}" TextWrapping="Wrap"
+                                                           Foreground="{StaticResource TextSecondaryBrush}" FontSize="12"/>
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                    </Border>
+                </StackPanel>
+
+                <!-- ===== Research Comparison Tab ===== -->
+                <StackPanel Visibility="{Binding ActiveTab, Converter={StaticResource EqVis}, ConverterParameter=Compare}">
+                    <TextBlock Text="📈 Research Comparison" FontSize="20" FontWeight="Bold" 
+                               Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,4"/>
+                    <TextBlock TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,0,0,12">
+                        Compare two research jobs from this session — side-by-side metrics, shared topics, and unique findings.
+                    </TextBlock>
+
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="Job A" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,4"/>
+                            <ComboBox ItemsSource="{Binding CompareJobsA}" SelectedItem="{Binding SelectedCompareA}"
+                                      DisplayMemberPath="Title" MinWidth="200"/>
+                        </StackPanel>
+                        <Button Grid.Column="1" Content="📊 Compare" Style="{StaticResource AccentButton}"
+                                Command="{Binding CompareResearchCommand}" Margin="12,16,12,0"/>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="Job B" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,4"/>
+                            <ComboBox ItemsSource="{Binding CompareJobsB}" SelectedItem="{Binding SelectedCompareB}"
+                                      DisplayMemberPath="Title" MinWidth="200"/>
+                        </StackPanel>
+                    </Grid>
+
+                    <Border Style="{StaticResource Card}">
+                        <ctrl:MarkdownViewer Markdown="{Binding ComparisonResultMarkdown, Mode=OneWay}" MaxHeight="600"/>
+                    </Border>
+                </StackPanel>
+
+                <!-- ===== Global Search Tab ===== -->
+                <StackPanel Visibility="{Binding ActiveTab, Converter={StaticResource EqVis}, ConverterParameter=GlobalSearch}">
+                    <TextBlock Text="🌍 Cross-Session Search" FontSize="20" FontWeight="Bold" 
+                               Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,4"/>
+                    <TextBlock TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,0,0,12">
+                        Search across ALL research sessions — find evidence you've previously gathered on any topic.
+                    </TextBlock>
+
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox Text="{Binding GlobalSearchQuery, UpdateSourceTrigger=PropertyChanged}" 
+                                 Style="{StaticResource ModernTextBox}"/>
+                        <CheckBox Grid.Column="1" Content="Search Reports" VerticalAlignment="Center"
+                                  IsChecked="{Binding GlobalSearchReports}" Foreground="{StaticResource TextSecondaryBrush}"
+                                  Margin="8,0,0,0"/>
+                        <Button Grid.Column="2" Content="🔍 Search" Style="{StaticResource AccentButton}"
+                                Command="{Binding SearchGlobalCommand}" Margin="8,0,0,0"/>
+                        <Button Grid.Column="3" Content="📊 Stats" Style="{StaticResource SubtleButton}"
+                                Command="{Binding LoadGlobalStatsCommand}" Margin="8,0,0,0"/>
+                    </Grid>
+                    <TextBlock Text="{Binding GlobalSearchStatus}" Foreground="{StaticResource TextSecondaryBrush}" 
+                               FontSize="12" Margin="0,0,0,8"/>
+
+                    <!-- Global Stats -->
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,8"
+                            Visibility="{Binding GlobalStatsText, Converter={StaticResource NullVis}}">
+                        <StackPanel>
+                            <TextBlock Text="📊 Global Statistics" Style="{StaticResource SectionHeader}"/>
+                            <TextBlock Text="{Binding GlobalStatsText}" TextWrapping="Wrap"
+                                       Foreground="{StaticResource TextSecondaryBrush}" FontSize="12"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Evidence Results (default) -->
+                    <Border Style="{StaticResource Card}" MaxHeight="500">
+                        <ListView ItemsSource="{Binding GlobalSearchResults}" 
+                                  Background="Transparent" BorderThickness="0">
+                            <ListView.ItemTemplate>
+                                <DataTemplate>
+                                    <Border BorderBrush="#44FFFFFF" BorderThickness="0,0,0,1" Padding="0,8">
+                                        <StackPanel>
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="{Binding SessionTitle}" FontWeight="Bold"
+                                                           Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,8,0"/>
+                                                <TextBlock Text="{Binding DomainPack}" FontSize="11"
+                                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                                           Background="#22FFFFFF" Padding="4,1"/>
+                                            </StackPanel>
+                                            <TextBlock Text="{Binding SourceUrl}" Foreground="#64B5F6" FontSize="11" Margin="0,2,0,0"/>
+                                            <TextBlock Text="{Binding ChunkText}" TextWrapping="Wrap" MaxHeight="60"
+                                                       Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,4,0,0"/>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                    </Border>
+
+                    <!-- Report Results (when Search Reports is checked) -->
+                    <Border Style="{StaticResource Card}" MaxHeight="400" Margin="0,8,0,0"
+                            Visibility="{Binding GlobalSearchReports, Converter={StaticResource BoolVis}}">
+                        <StackPanel>
+                            <TextBlock Text="📑 Report Matches" Style="{StaticResource SectionHeader}"/>
+                            <ListView ItemsSource="{Binding GlobalReportResults}" 
+                                      Background="Transparent" BorderThickness="0">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border BorderBrush="#44FFFFFF" BorderThickness="0,0,0,1" Padding="0,8">
+                                            <StackPanel>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="{Binding SessionTitle}" FontWeight="Bold"
+                                                               Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,8,0"/>
+                                                    <TextBlock Text="{Binding ReportType}" FontSize="11"
+                                                               Foreground="#81C784" Background="#22FFFFFF" Padding="4,1"/>
+                                                </StackPanel>
+                                                <TextBlock Text="{Binding ReportTitle}" Foreground="#64B5F6" FontSize="12" Margin="0,2,0,0"/>
+                                                <TextBlock Text="{Binding Snippet}" TextWrapping="Wrap" MaxHeight="60"
+                                                           Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,4,0,0"/>
+                                                <TextBlock Text="{Binding Created, StringFormat='Created: {0:g}'}" FontSize="10"
+                                                           Foreground="{StaticResource TextSecondaryBrush}" Margin="0,2,0,0"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+            </Grid>
+        </ScrollViewer>
+    </Grid>
+</UserControl>

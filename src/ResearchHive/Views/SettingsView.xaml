@@ -1,0 +1,451 @@
+<UserControl x:Class="ResearchHive.Views.SettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:conv="clr-namespace:ResearchHive.Converters">
+
+    <UserControl.Resources>
+        <conv:StringNotEmptyToVisibilityConverter x:Key="StrVis"/>
+        <conv:BoolToVisibilityConverter x:Key="BoolVis"/>
+    </UserControl.Resources>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="24">
+        <StackPanel MaxWidth="720">
+            <TextBlock Text="Settings" FontSize="24" FontWeight="Bold" 
+                       Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,20"/>
+
+            <!-- ═══════════════════════════════════════════════ -->
+            <!-- SECTION 1: AI Routing Strategy                 -->
+            <!-- ═══════════════════════════════════════════════ -->
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock Text="⚡ AI Routing Strategy" Style="{StaticResource SectionHeader}"/>
+                    <TextBlock Text="Controls how ResearchHive chooses between local and cloud AI models" 
+                               FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,10"/>
+
+                    <ComboBox ItemsSource="{Binding RoutingStrategies}" 
+                              SelectedItem="{Binding SelectedRouting}"
+                              Margin="0,0,0,8"/>
+
+                    <!-- Routing explanation -->
+                    <Border Background="#1A1A2E" CornerRadius="6" Padding="12,8" Margin="0,4,0,0">
+                        <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}">
+                            <Run FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}">LocalOnly</Run>
+                            <Run> — Only uses Ollama. No cloud calls. </Run>
+                            <LineBreak/>
+                            <Run FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}">LocalWithCloudFallback</Run>
+                            <Run> — Tries Ollama first, uses cloud if unavailable. (Default) </Run>
+                            <LineBreak/>
+                            <Run FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}">CloudPrimary</Run>
+                            <Run> — Uses cloud first, Ollama as fallback. </Run>
+                            <LineBreak/>
+                            <Run FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}">CloudOnly</Run>
+                            <Run> — Only uses cloud. Ollama is skipped entirely.</Run>
+                        </TextBlock>
+                    </Border>
+                </StackPanel>
+            </Border>
+
+            <!-- ═══════════════════════════════════════════════ -->
+            <!-- SECTION 2: Local AI (Ollama)                  -->
+            <!-- ═══════════════════════════════════════════════ -->
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="🖥 Local AI (Ollama)" Style="{StaticResource SectionHeader}"/>
+                        <Button Grid.Column="1" Content="🔄 Refresh Models" 
+                                Style="{StaticResource SubtleButton}" FontSize="11"
+                                Command="{Binding RefreshModelsCommand}" VerticalAlignment="Center"/>
+                    </Grid>
+
+                    <TextBlock Text="{Binding OllamaStatus}" FontSize="11" Margin="0,2,0,10"
+                               Foreground="{StaticResource TextSecondaryBrush}"/>
+
+                    <TextBlock Text="Base URL" Style="{StaticResource SubHeader}"/>
+                    <TextBox Text="{Binding OllamaBaseUrl, UpdateSourceTrigger=PropertyChanged}" 
+                             Style="{StaticResource ModernTextBox}" Margin="0,0,0,12"/>
+
+                    <Grid Margin="0,0,0,4">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Embedding Model -->
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="Embedding Model" Style="{StaticResource SubHeader}"/>
+                            <TextBlock Text="Semantic search &amp; similarity" 
+                                       FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,4"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <ComboBox ItemsSource="{Binding AvailableModels}" 
+                                          Text="{Binding EmbeddingModel, UpdateSourceTrigger=PropertyChanged}"
+                                          IsEditable="True" IsTextSearchEnabled="True"/>
+                                <ProgressBar Grid.Column="1" IsIndeterminate="True" Width="40" Height="4" Margin="6,0,0,0"
+                                             Visibility="{Binding IsLoadingModels, Converter={StaticResource BoolVis}}"/>
+                            </Grid>
+                        </StackPanel>
+
+                        <!-- Synthesis Model -->
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="Synthesis Model" Style="{StaticResource SubHeader}"/>
+                            <TextBlock Text="Planning, reports &amp; analysis" 
+                                       FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,4"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <ComboBox ItemsSource="{Binding AvailableModels}" 
+                                          Text="{Binding SynthesisModel, UpdateSourceTrigger=PropertyChanged}"
+                                          IsEditable="True" IsTextSearchEnabled="True"/>
+                                <ProgressBar Grid.Column="1" IsIndeterminate="True" Width="40" Height="4" Margin="6,0,0,0"
+                                             Visibility="{Binding IsLoadingModels, Converter={StaticResource BoolVis}}"/>
+                            </Grid>
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- ═══════════════════════════════════════════════ -->
+            <!-- SECTION 3: Cloud AI Provider                  -->
+            <!-- ═══════════════════════════════════════════════ -->
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock Text="☁ Cloud AI Provider" Style="{StaticResource SectionHeader}"/>
+                    <TextBlock Text="Use cloud AI models for synthesis and research — required for tool calling" 
+                               FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,8"/>
+
+                    <CheckBox Content="Enable cloud provider" IsChecked="{Binding UsePaidProvider}" Margin="0,0,0,12"
+                              FontSize="13"/>
+
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Provider Selection -->
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="Provider" Style="{StaticResource SubHeader}"/>
+                            <ComboBox ItemsSource="{Binding PaidProviderTypes}" 
+                                      SelectedItem="{Binding SelectedPaidProvider}"/>
+                        </StackPanel>
+
+                        <!-- Cloud Model Selection -->
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="Model" Style="{StaticResource SubHeader}"/>
+                            <ComboBox ItemsSource="{Binding AvailableCloudModels}" 
+                                      Text="{Binding SelectedCloudModel, UpdateSourceTrigger=PropertyChanged}"
+                                      IsEditable="True" IsTextSearchEnabled="True"
+                                      ToolTip="Select a model or type a custom model name"/>
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- Provider-specific display -->
+                    <TextBlock Text="{Binding ProviderDisplayName}" FontSize="14" FontWeight="SemiBold"
+                               Foreground="{StaticResource AccentBrush}" Margin="0,0,0,8"/>
+
+                    <!-- ChatGPT Plus: Auth Mode Selector (only visible for ChatGptPlus) -->
+                    <StackPanel Visibility="{Binding IsChatGptPlusSelected, Converter={StaticResource BoolVis}}"
+                                Margin="0,0,0,12">
+                        <TextBlock Text="Authentication Mode" Style="{StaticResource SubHeader}"/>
+                        <TextBlock Text="Choose how to authenticate — Codex OAuth uses your ChatGPT Plus login, API Key uses pay-per-token" 
+                                   FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,4"/>
+                        <ComboBox ItemsSource="{Binding ChatGptPlusAuthModes}" 
+                                  SelectedItem="{Binding SelectedChatGptPlusAuth}"
+                                  Margin="0,0,0,8"/>
+                    </StackPanel>
+
+                    <!-- Codex OAuth section (ChatGptPlus + CodexOAuth only) -->
+                    <StackPanel Visibility="{Binding ShowCodexOAuthSection, Converter={StaticResource BoolVis}}">
+                        <!-- Auth status indicator -->
+                        <Border CornerRadius="6" Padding="10,6" Margin="0,0,0,8">
+                            <Border.Style>
+                                <Style TargetType="Border">
+                                    <Setter Property="Background" Value="#331E3A2E"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding CodexIsReady}" Value="False">
+                                            <Setter Property="Background" Value="#33442222"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
+                            <TextBlock Text="{Binding CodexAuthStatus}" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Foreground" Value="#FF4CAF50"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding CodexIsReady}" Value="False">
+                                                <Setter Property="Foreground" Value="#FFF44336"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </Border>
+
+                        <!-- Validate button for Codex OAuth -->
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                            <Button Content="✓ Validate" 
+                                    Style="{StaticResource SubtleButton}" FontSize="11"
+                                    Command="{Binding ValidateKeyCommand}"/>
+                            <TextBlock Text="{Binding KeyValidationStatus}" FontSize="11" 
+                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                       VerticalAlignment="Center" Margin="12,0,0,0"
+                                       Visibility="{Binding KeyValidationStatus, Converter={StaticResource StrVis}}"/>
+                        </StackPanel>
+
+                        <!-- Setup instructions -->
+                        <Border Background="#1A1A2E" CornerRadius="6" Padding="12,8" Margin="0,4,0,0">
+                            <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}">
+                                <Run FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}">Quick Setup:</Run>
+                                <Run> 1) Install: npm install -g @openai/codex</Run>
+                                <LineBreak/>
+                                <Run> 2) Authenticate: run 'codex login' in a terminal → sign in with your ChatGPT Plus account</Run>
+                                <LineBreak/>
+                                <Run> 3) Model: gpt-5.3-codex (default). Uses your Plus rate budget — no API charges.</Run>
+                                <LineBreak/>
+                                <Run FontWeight="SemiBold" Foreground="{StaticResource AccentBrush}">Native capabilities: live web search, shell commands, structured JSON, reasoning traces</Run>
+                            </TextBlock>
+                        </Border>
+                    </StackPanel>
+
+                    <!-- API Key sections (all providers except ChatGptPlus/CodexOAuth) -->
+                    <StackPanel Visibility="{Binding ShowApiKeySection, Converter={StaticResource BoolVis}}">
+                        <!-- API Key Source -->
+                        <Grid Margin="0,0,0,12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="12"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="Key Source" Style="{StaticResource SubHeader}"/>
+                                <ComboBox ItemsSource="{Binding ApiKeySources}" 
+                                          SelectedItem="{Binding SelectedKeySource}"/>
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="Environment Variable" Style="{StaticResource SubHeader}"/>
+                                <TextBox Text="{Binding KeyEnvironmentVariable, UpdateSourceTrigger=PropertyChanged}" 
+                                         Style="{StaticResource ModernTextBox}"
+                                         ToolTip="e.g. OPENAI_API_KEY, ANTHROPIC_API_KEY"/>
+                            </StackPanel>
+                        </Grid>
+
+                        <!-- API Key Input -->
+                        <TextBlock Text="API Key" Style="{StaticResource SubHeader}"/>
+                        <TextBlock Text="Encrypted with Windows DPAPI — never stored in plaintext" 
+                                   FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,4"/>
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid>
+                                <TextBox x:Name="ApiKeyBox" 
+                                         Text="{Binding PaidProviderApiKey, UpdateSourceTrigger=PropertyChanged}" 
+                                         Style="{StaticResource ModernTextBox}"/>
+                                <TextBlock Text="sk-... or your provider's API key" Foreground="#B0BEC5" FontSize="11"
+                                           VerticalAlignment="Center" Margin="10,0,0,0" IsHitTestVisible="False">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Text, ElementName=ApiKeyBox}" Value="">
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Grid>
+                            <Button Grid.Column="1" Content="✓ Validate" 
+                                    Style="{StaticResource SubtleButton}" FontSize="11" Margin="8,0,0,0"
+                                    Command="{Binding ValidateKeyCommand}"/>
+                        </Grid>
+                        <TextBlock Text="{Binding KeyValidationStatus}" FontSize="11" Margin="0,0,0,8"
+                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                   Visibility="{Binding KeyValidationStatus, Converter={StaticResource StrVis}}"/>
+
+                        <!-- Endpoint URL -->
+                        <TextBlock Text="Endpoint URL" Style="{StaticResource SubHeader}"/>
+                        <TextBlock Text="Auto-filled for most providers — edit only for custom endpoints" 
+                                   FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,4"/>
+                        <TextBox Text="{Binding PaidProviderEndpoint, UpdateSourceTrigger=PropertyChanged}" 
+                                 Style="{StaticResource ModernTextBox}"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- ═══════════════════════════════════════════════ -->
+            <!-- SECTION 4: GitHub Models (Free)               -->
+            <!-- ═══════════════════════════════════════════════ -->
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock Text="⬡ GitHub Models (Free)" Style="{StaticResource SectionHeader}"/>
+                    <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,10">
+                        <Run>Access GPT-4o, GPT-4.1, and other models for free with your GitHub account.</Run>
+                        <LineBreak/>
+                        <Run>Create a PAT at github.com/settings/tokens with the</Run>
+                        <Run FontWeight="SemiBold">models:read</Run>
+                        <Run>scope.</Run>
+                        <LineBreak/>
+                        <Run>Copilot Pro/Business subscribers get higher rate limits.</Run>
+                    </TextBlock>
+
+                    <TextBlock Text="GitHub Personal Access Token" Style="{StaticResource SubHeader}"/>
+                    <Grid Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid>
+                            <TextBox x:Name="GitHubPatBox" 
+                                     Text="{Binding GitHubPat, UpdateSourceTrigger=PropertyChanged}" 
+                                     Style="{StaticResource ModernTextBox}"/>
+                            <TextBlock Text="ghp_... or github_pat_..." Foreground="#B0BEC5" FontSize="11"
+                                       VerticalAlignment="Center" Margin="10,0,0,0" IsHitTestVisible="False">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding Text, ElementName=GitHubPatBox}" Value="">
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </Grid>
+                        <Button Grid.Column="1" Content="✓ Validate" 
+                                Style="{StaticResource SubtleButton}" FontSize="11" Margin="8,0,0,0"
+                                Command="{Binding ValidateKeyCommand}"/>
+                    </Grid>
+                    <TextBlock Text="{Binding GitHubStatus}" FontSize="11" 
+                               Foreground="{StaticResource TextSecondaryBrush}"
+                               Visibility="{Binding GitHubStatus, Converter={StaticResource StrVis}}"/>
+
+                    <!-- Quick setup hint -->
+                    <Border Background="#1A1A2E" CornerRadius="6" Padding="12,8" Margin="0,8,0,0">
+                        <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}">
+                            <Run FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}">Quick Setup:</Run>
+                            <Run> Set Provider to "GitHubModels" above, paste your PAT here, and select a model like "openai/gpt-4o".</Run>
+                            <LineBreak/>
+                            <Run>Free tier: 15 req/min, 150 req/day for GPT-4o class models.</Run>
+                        </TextBlock>
+                    </Border>
+                </StackPanel>
+            </Border>
+
+            <!-- ═══════════════════════════════════════════════ -->
+            <!-- SECTION 5: Tool Calling (Agentic Research)    -->
+            <!-- ═══════════════════════════════════════════════ -->
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock Text="🔧 Tool Calling (Agentic Research)" Style="{StaticResource SectionHeader}"/>
+                    <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,10">
+                        <Run>When enabled, the AI can actively search evidence, fetch new sources, read full documents, and verify claims during synthesis.</Run>
+                        <LineBreak/>
+                        <Run>Requires a cloud provider that supports function calling (OpenAI, Anthropic, GitHub Models, Mistral, ChatGPT Plus via Codex CLI).</Run>
+                    </TextBlock>
+
+                    <CheckBox Content="Enable tool calling during synthesis" 
+                              IsChecked="{Binding EnableToolCalling}" Margin="0,0,0,12"
+                              FontSize="13"/>
+
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Max tool calls per phase" Style="{StaticResource SubHeader}" 
+                                   VerticalAlignment="Center" Margin="0,0,12,0"/>
+                        <TextBox Grid.Column="1" 
+                                 Text="{Binding MaxToolCallsPerPhase, UpdateSourceTrigger=PropertyChanged}" 
+                                 Style="{StaticResource ModernTextBox}" MaxWidth="80" HorizontalAlignment="Left"/>
+                    </Grid>
+
+                    <!-- Tool list -->
+                    <Border Background="#1A1A2E" CornerRadius="6" Padding="12,8" Margin="0,8,0,0">
+                        <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}">
+                            <Run FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}">Available tools:</Run>
+                            <LineBreak/>
+                            <Run FontWeight="SemiBold">search_evidence</Run>
+                            <Run> — Query indexed chunks (FTS5 + semantic)</Run>
+                            <LineBreak/>
+                            <Run FontWeight="SemiBold">search_web</Run>
+                            <Run> — Trigger new web search + fetch cycle</Run>
+                            <LineBreak/>
+                            <Run FontWeight="SemiBold">get_source</Run>
+                            <Run> — Read full text of a cited source</Run>
+                            <LineBreak/>
+                            <Run FontWeight="SemiBold">verify_claim</Run>
+                            <Run> — Check if a claim is grounded in evidence</Run>
+                        </TextBlock>
+                    </Border>
+                </StackPanel>
+            </Border>
+
+            <!-- ═══════════════════════════════════════════════ -->
+            <!-- SECTION 6: Data Storage                        -->
+            <!-- ═══════════════════════════════════════════════ -->
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock Text="📁 Data Storage" Style="{StaticResource SectionHeader}"/>
+                    <TextBlock Text="Root data path for sessions and artifacts" Style="{StaticResource SubHeader}"/>
+                    <TextBox Text="{Binding DataRootPath, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource ModernTextBox}"/>
+                </StackPanel>
+            </Border>
+
+            <!-- ═══════════════════════════════════════════════ -->
+            <!-- SECTION 7: Polite Browsing                     -->
+            <!-- ═══════════════════════════════════════════════ -->
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock Text="🌐 Polite Browsing" Style="{StaticResource SectionHeader}"/>
+                    <TextBlock Text="Controls how aggressively ResearchHive fetches web pages during research" 
+                               FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,8"/>
+                    <Grid Margin="0,4">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                            <TextBlock Text="Max Concurrent" Style="{StaticResource SubHeader}"/>
+                            <TextBox Text="{Binding MaxConcurrentFetches, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource ModernTextBox}"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Margin="0,0,8,0">
+                            <TextBlock Text="Min Delay (s)" Style="{StaticResource SubHeader}"/>
+                            <TextBox Text="{Binding MinDomainDelay, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource ModernTextBox}"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="Max Delay (s)" Style="{StaticResource SubHeader}"/>
+                            <TextBox Text="{Binding MaxDomainDelay, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource ModernTextBox}"/>
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- Save -->
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,20">
+                <TextBlock Text="{Binding StatusMessage}" Foreground="{StaticResource SuccessBrush}" 
+                           VerticalAlignment="Center" Margin="0,0,12,0"
+                           Visibility="{Binding StatusMessage, Converter={StaticResource StrVis}}"/>
+                <Button Content="Save Settings" Style="{StaticResource PrimaryButton}" 
+                        Command="{Binding SaveCommand}"/>
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

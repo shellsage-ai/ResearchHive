@@ -1,0 +1,211 @@
+<UserControl x:Class="ResearchHive.Views.SessionsSidebarView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:conv="clr-namespace:ResearchHive.Converters">
+
+    <UserControl.Resources>
+        <conv:BoolToVisibilityConverter x:Key="BoolVis"/>
+        <conv:StringToColorBrushConverter x:Key="ColorConv"/>
+        <conv:DomainPackDisplayConverter x:Key="PackDisplay"/>
+    </UserControl.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Search -->
+        <Grid Grid.Row="0" Margin="12,8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <Grid>
+                <TextBox x:Name="SearchBox" Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" 
+                         Style="{StaticResource ModernTextBox}" 
+                         Foreground="White" Background="#37474F"
+                         BorderBrush="#546E7A"/>
+                <TextBlock Text="Search sessions..." Foreground="#78909C" FontSize="12"
+                           VerticalAlignment="Center" Margin="10,0,0,0" IsHitTestVisible="False">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding Text, ElementName=SearchBox}" Value="">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+            </Grid>
+            <Button Grid.Column="1" Content="🔄" Margin="4,0,0,0"
+                    Style="{StaticResource SubtleButton}" Foreground="White"
+                    Command="{Binding RefreshSessionsCommand}" ToolTip="Refresh"/>
+        </Grid>
+
+        <!-- New Session Panel -->
+        <StackPanel Grid.Row="1" Margin="12,0" 
+                    Visibility="{Binding IsCreatingSession, Converter={StaticResource BoolVis}}">
+            <Border Background="#37474F" CornerRadius="6" Padding="10" Margin="0,0,0,8">
+                <StackPanel>
+                    <TextBlock Text="New Session" Foreground="White" FontWeight="SemiBold" FontSize="13" Margin="0,0,0,8"/>
+
+                    <TextBlock Text="Title" Foreground="#B0BEC5" FontSize="11" Margin="0,0,0,3"/>
+                    <Grid Margin="0,0,0,6">
+                        <TextBox x:Name="TitleBox" Text="{Binding NewTitle, UpdateSourceTrigger=PropertyChanged}" 
+                                 Style="{StaticResource ModernTextBox}" Background="#455A64" Foreground="White"
+                                 BorderBrush="#546E7A"/>
+                        <TextBlock Text="e.g. Climate change effects on coral reefs" Foreground="#607D8B" FontSize="11"
+                                   VerticalAlignment="Center" Margin="10,0,0,0" IsHitTestVisible="False">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Text, ElementName=TitleBox}" Value="">
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </Grid>
+
+                    <TextBlock Text="Description" Foreground="#B0BEC5" FontSize="11" Margin="0,0,0,3"/>
+                    <Grid Margin="0,0,0,6">
+                        <TextBox x:Name="DescBox" Text="{Binding NewDescription, UpdateSourceTrigger=PropertyChanged}" 
+                                 Style="{StaticResource ModernTextBox}" Background="#455A64" Foreground="White"
+                                 BorderBrush="#546E7A"
+                                 AcceptsReturn="True" Height="50" TextWrapping="Wrap"/>
+                        <TextBlock Text="Describe what you want to research..." Foreground="#607D8B" FontSize="11"
+                                   VerticalAlignment="Top" Margin="10,8,0,0" IsHitTestVisible="False">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Text, ElementName=DescBox}" Value="">
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </Grid>
+
+                    <TextBlock Text="Domain Pack" Foreground="#B0BEC5" FontSize="11" Margin="0,0,0,3"/>
+                    <ComboBox ItemsSource="{Binding DomainPacks}" 
+                              SelectedItem="{Binding NewPack}"
+                              Margin="0,0,0,6">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding Converter={StaticResource PackDisplay}}"/>
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+
+                    <TextBlock Text="Tags" Foreground="#B0BEC5" FontSize="11" Margin="0,0,0,3"/>
+                    <Grid Margin="0,0,0,8">
+                        <TextBox x:Name="TagsBox" Text="{Binding NewTags, UpdateSourceTrigger=PropertyChanged}" 
+                                 Style="{StaticResource ModernTextBox}" Background="#455A64" Foreground="White"
+                                 BorderBrush="#546E7A"/>
+                        <TextBlock Text="Comma-separated, e.g. biology, marine" Foreground="#607D8B" FontSize="11"
+                                   VerticalAlignment="Center" Margin="10,0,0,0" IsHitTestVisible="False">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Text, ElementName=TagsBox}" Value="">
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </Grid>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                        <Button Content="Cancel" Style="{StaticResource SubtleButton}" Foreground="White"
+                                Command="{Binding CancelCreateSessionCommand}" Margin="0,0,6,0"/>
+                        <Button Content="Create" Style="{StaticResource PrimaryButton}"
+                                Command="{Binding ConfirmCreateSessionCommand}"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+
+        <!-- Sessions List -->
+        <ListBox Grid.Row="2" 
+                 ItemsSource="{Binding Sessions}" 
+                 SelectedItem="{Binding SelectedSession}"
+                 Background="Transparent" BorderThickness="0"
+                 ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <Border Margin="8,2" Padding="10,8" CornerRadius="6" Cursor="Hand">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="Transparent"/>
+                                <Style.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter Property="Background" Value="#10FFFFFF"/>
+                                    </Trigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="6"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <!-- Status indicator -->
+                            <Border Grid.Column="0" CornerRadius="3" Width="4" Margin="0,2"
+                                    Background="{Binding StatusColor, Converter={StaticResource ColorConv}}"
+                                    VerticalAlignment="Stretch"/>
+                            <StackPanel Grid.Column="1" Margin="8,0,0,0">
+                                <TextBlock Text="{Binding Title}" Foreground="White" FontSize="13" FontWeight="Medium"
+                                           TextTrimming="CharacterEllipsis"/>
+                                <TextBlock Foreground="#B0BEC5" FontSize="11" Margin="0,2,0,0"
+                                           TextTrimming="CharacterEllipsis">
+                                    <Run Text="{Binding Pack, Mode=OneWay}"/>
+                                    <Run Text="·"/>
+                                    <Run Text="{Binding Status, Mode=OneWay}"/>
+                                </TextBlock>
+                                <TextBlock Text="{Binding Updated}" Foreground="#78909C" FontSize="10" Margin="0,2,0,0"/>
+                            </StackPanel>
+                            <Button Grid.Column="2" Content="✕" 
+                                    Style="{StaticResource SubtleButton}" 
+                                    Foreground="#78909C" FontSize="10" Padding="4,2"
+                                    VerticalAlignment="Top" Margin="0,2,0,0"
+                                    ToolTip="Delete this session"
+                                    Command="{Binding DataContext.DeleteSessionCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                    CommandParameter="{Binding}"/>
+                        </Grid>
+                    </Border>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+            <ListBox.ItemContainerStyle>
+                <Style TargetType="ListBoxItem">
+                    <Setter Property="Padding" Value="0"/>
+                    <Setter Property="Margin" Value="0"/>
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="ListBoxItem">
+                                <ContentPresenter/>
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
+                </Style>
+            </ListBox.ItemContainerStyle>
+        </ListBox>
+
+        <!-- New Session Button -->
+        <Button Grid.Row="3" Content="+ New Session" 
+                Style="{StaticResource PrimaryButton}" Margin="12,8"
+                Command="{Binding StartCreateSessionCommand}"
+                Visibility="{Binding IsCreatingSession, Converter={StaticResource BoolVis}, ConverterParameter=Invert}"/>
+    </Grid>
+</UserControl>

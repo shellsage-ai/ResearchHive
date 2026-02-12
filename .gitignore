@@ -1,0 +1,33 @@
+# Build outputs
+bin/
+obj/
+out/
+
+# IDE
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# NuGet
+packages/
+*.nupkg
+
+# OS files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
+
+# Test results
+TestResults/
+
+# Session data (user-specific runtime data)
+Sessions/
+
+# Exports (generated at runtime)
+Exports/
+
+# Publish output
+publish/
