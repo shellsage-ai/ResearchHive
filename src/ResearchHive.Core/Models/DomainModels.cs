@@ -298,6 +298,10 @@ public class RepoFactSheet
         sb.AppendLine("- Do NOT claim a gap for any capability listed under PROVEN.");
         sb.AppendLine("- Do NOT claim a strength for any capability listed under ABSENT.");
         sb.AppendLine("- Strengths and gaps MUST be consistent with this fact sheet.");
+        sb.AppendLine("- Do NOT embellish or add details beyond what this fact sheet states.");
+        sb.AppendLine("  Example: if the fact sheet says 'Circuit breaker' do NOT add 'with Polly' unless Polly is listed.");
+        sb.AppendLine("  Example: if 'Authentication / auth system' is NOT listed under PROVEN, do NOT claim it.");
+        sb.AppendLine("- For each strength, cite the SPECIFIC class/service name from the code (not from this fact sheet).");
         sb.AppendLine("══════════════════════════════════════════════");
         return sb.ToString();
     }

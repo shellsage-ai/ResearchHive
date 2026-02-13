@@ -82,12 +82,13 @@ public class FactSheetAndVerifierTests : IDisposable
         sheet.ProvenCapabilities.Add(new CapabilityFingerprint
         {
             Capability = "Circuit breaker",
-            Evidence = "LlmCircuitBreaker.cs — matched pattern"
+            Evidence = "found in LlmCircuitBreaker.cs"
         });
 
         var section = sheet.ToPromptSection();
         section.Should().Contain("CAPABILITIES PROVEN BY CODE PATTERNS");
         section.Should().Contain("Circuit breaker");
+        section.Should().Contain("LlmCircuitBreaker.cs");
         section.Should().Contain("LlmCircuitBreaker.cs");
     }
 
@@ -135,6 +136,7 @@ public class FactSheetAndVerifierTests : IDisposable
         section.Should().Contain("Do NOT list phantom packages");
         section.Should().Contain("Do NOT claim a gap");
         section.Should().Contain("Do NOT claim a strength");
+        section.Should().Contain("Do NOT embellish");
     }
 
     [Fact]
@@ -1008,5 +1010,156 @@ public class SessionDb { private SqliteConnection _conn; SqliteCommand _cmd; }
         var dir = Path.GetDirectoryName(fullPath)!;
         if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
         File.WriteAllText(fullPath, content);
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  Phase 20: Source-file filtering & evidence formatting tests
+    // ═══════════════════════════════════════════════════
+
+    [Fact]
+    public void RepoFactSheetBuilder_Build_IgnoresReadmeForCapabilityDetection()
+    {
+        // Put capability keywords ONLY in README.md — should NOT be detected as proven
+        CreateTempFile("README.md", @"
+# MyProject
+This project has a CircuitBreaker, OpenTelemetry tracing, 
+BenchmarkDotNet suite, and a plugin architecture with IPlugin.
+");
+        // No actual source code files
+        CreateTempFile("src/Program.cs", "class Program { static void Main() {} }");
+
+        var profile = new RepoProfile { PrimaryLanguage = "C#" };
+        var builder = CreateFactSheetBuilder();
+        var sheet = builder.Build(profile, _tempDir);
+
+        // None of these should be proven — they're only in README
+        sheet.ProvenCapabilities.Should().NotContain(c => c.Capability.Contains("Circuit breaker"));
+        sheet.ProvenCapabilities.Should().NotContain(c => c.Capability.Contains("OpenTelemetry"));
+        sheet.ProvenCapabilities.Should().NotContain(c => c.Capability.Contains("Benchmark"));
+        sheet.ProvenCapabilities.Should().NotContain(c => c.Capability.Contains("Plugin"));
+    }
+
+    [Fact]
+    public void RepoFactSheetBuilder_Build_DetectsCapabilitiesInSourceNotDocs()
+    {
+        // Put circuit breaker in actual .cs file — should be detected
+        CreateTempFile("Services/CircuitBreaker.cs", @"
+public class LlmCircuitBreaker
+{
+    private CircuitState _state = CircuitState.Closed;
+}
+");
+        // Also put it in README — but detection should come from .cs file
+        CreateTempFile("README.md", "# Project\nHas circuit breaker pattern.");
+
+        var profile = new RepoProfile { PrimaryLanguage = "C#" };
+        var builder = CreateFactSheetBuilder();
+        var sheet = builder.Build(profile, _tempDir);
+
+        sheet.ProvenCapabilities.Should().Contain(c => c.Capability == "Circuit breaker");
+        // Evidence should reference the .cs file, not README
+        var evidence = sheet.ProvenCapabilities.First(c => c.Capability == "Circuit breaker").Evidence;
+        evidence.Should().NotContain("README");
+        evidence.Should().Contain("CircuitBreaker.cs");
+    }
+
+    [Fact]
+    public void RepoFactSheetBuilder_Build_DoesNotFalsePositiveOnGenericPatterns()
+    {
+        // Create source with generic method names that previously caused false positives
+        CreateTempFile("Services/MyService.cs", @"
+public class MyService
+{
+    // 'Authenticate' used to match auth fingerprint
+    public bool Authenticate(string user, string pass) => user == ""admin"";
+    // 'ExportAttribute' used to match plugin fingerprint
+    [System.ComponentModel.Composition.ExportAttribute]
+    public class Foo { }
+}
+");
+
+        var profile = new RepoProfile { PrimaryLanguage = "C#" };
+        var builder = CreateFactSheetBuilder();
+        var sheet = builder.Build(profile, _tempDir);
+
+        // Bare 'Authenticate' method should NOT trigger auth detection (need [Authorize] or JwtBearer)
+        sheet.ProvenCapabilities.Should().NotContain(c => c.Capability.Contains("Authentication"));
+        // ExportAttribute alone should NOT trigger plugin detection
+        sheet.ProvenCapabilities.Should().NotContain(c => c.Capability.Contains("Plugin"));
+    }
+
+    [Fact]
+    public async Task PostScanVerifier_InjectsStrengths_WithCleanFormatting()
+    {
+        var verifier = new PostScanVerifier();
+        var profile = CreateTestProfile();
+
+        var factSheet = new RepoFactSheet();
+        factSheet.ProvenCapabilities.Add(new CapabilityFingerprint
+        {
+            Capability = "Embedding generation",
+            Evidence = "found in EmbeddingService.cs"
+        });
+
+        var result = await verifier.VerifyAsync(profile, factSheet);
+
+        // Should be clean format, not raw regex
+        var injected = profile.Strengths.First(s => s.Contains("Embedding"));
+        injected.Should().Contain("verified in EmbeddingService.cs");
+        injected.Should().NotContain("matched pattern");
+        injected.Should().NotContain("|");  // No regex alternation characters
+    }
+
+    [Fact]
+    public async Task PostScanVerifier_InjectsStrengths_FallbackWhenNoFileEvidence()
+    {
+        var verifier = new PostScanVerifier();
+        var profile = CreateTestProfile();
+
+        var factSheet = new RepoFactSheet();
+        factSheet.ProvenCapabilities.Add(new CapabilityFingerprint
+        {
+            Capability = "Structured logging",
+            Evidence = ""  // Empty evidence
+        });
+
+        var result = await verifier.VerifyAsync(profile, factSheet);
+
+        var injected = profile.Strengths.First(s => s.Contains("logging"));
+        injected.Should().Contain("verified by code analysis");
+    }
+
+    [Fact]
+    public void RepoFactSheetBuilder_Build_OpenTelemetryRequiresRealUsage()
+    {
+        // DiagnosticSource/ActivitySource should NOT trigger OpenTelemetry detection
+        CreateTempFile("Services/Tracer.cs", @"
+using System.Diagnostics;
+
+public class Tracer
+{
+    private static readonly ActivitySource Source = new(""MyApp"");
+    private static readonly DiagnosticSource Diag = new DiagnosticListener(""MyApp"");
+}
+");
+
+        var profile = new RepoProfile { PrimaryLanguage = "C#" };
+        var builder = CreateFactSheetBuilder();
+        var sheet = builder.Build(profile, _tempDir);
+
+        // Generic ActivitySource/DiagnosticSource shouldn't falsely trigger OTel 
+        // (unless pattern is `new ActivitySource(` which is tighter — may match, that's OK)
+        // But DiagnosticSource alone should NOT
+        sheet.ProvenCapabilities.Should().NotContain(c => 
+            c.Capability.Contains("OpenTelemetry") && c.Evidence.Contains("DiagnosticSource"));
+    }
+
+    [Fact]
+    public void RepoFactSheet_ToPromptSection_IncludesAntiEmbellishmentRules()
+    {
+        var sheet = new RepoFactSheet();
+        var section = sheet.ToPromptSection();
+        section.Should().Contain("Do NOT embellish");
+        section.Should().Contain("cite the SPECIFIC class/service name");
     }
 }

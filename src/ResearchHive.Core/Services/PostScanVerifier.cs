@@ -255,11 +255,33 @@ public class PostScanVerifier
 
             if (!alreadyMentioned)
             {
-                var strength = $"{proven.Capability} ({proven.Evidence})";
+                // Format cleanly: "Capability (verified in FileName.cs)" — no raw regex patterns
+                var cleanEvidence = FormatEvidenceForDisplay(proven.Evidence);
+                var strength = string.IsNullOrEmpty(cleanEvidence)
+                    ? $"{proven.Capability} (verified by code analysis)"
+                    : $"{proven.Capability} (verified in {cleanEvidence})";
                 profile.Strengths.Add(strength);
                 result.StrengthsAdded.Add($"INJECTED: {strength}");
             }
         }
+    }
+
+    /// <summary>Extract a clean file reference from evidence text, stripping regex patterns.</summary>
+    private static string FormatEvidenceForDisplay(string evidence)
+    {
+        if (string.IsNullOrEmpty(evidence)) return "";
+        // Evidence format: "found in FileName.cs" or "FileName.cs — ..." 
+        // Extract just the file name, discard pattern details
+        var dashIdx = evidence.IndexOf(" — ", StringComparison.Ordinal);
+        if (dashIdx >= 0)
+            return evidence[..dashIdx].Trim();
+        // New format: "found in FileName.cs"
+        if (evidence.StartsWith("found in ", StringComparison.OrdinalIgnoreCase))
+            return evidence[9..].Trim();
+        // If it's just a filename, return it
+        if (evidence.Contains('.') && !evidence.Contains(' '))
+            return evidence;
+        return "";
     }
 
     /// <summary>Add confirmed-absent items as gaps if the LLM missed them.</summary>

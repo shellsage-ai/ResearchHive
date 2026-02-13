@@ -205,13 +205,33 @@ public class RepoFactSheetBuilder
     /// Scan all source files for patterns that prove specific capabilities exist 
     /// (or confirm they're absent). This catches things the LLM otherwise hallucinates about.
     /// </summary>
+    /// <summary>File extensions considered non-source (docs, config, manifests) — excluded from capability fingerprinting.</summary>
+    private static readonly HashSet<string> NonSourceExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".md", ".txt", ".yml", ".yaml", ".json", ".xml", ".csproj", ".fsproj",
+        ".vbproj", ".sln", ".props", ".targets", ".config", ".editorconfig",
+        ".gitignore", ".dockerignore", ".env", ".toml", ".ini", ".cfg",
+        ".html", ".htm", ".css", ".svg", ".png", ".jpg", ".ico",
+    };
+
+    /// <summary>Filter fileContents to source-code-only files (exclude docs, config, manifests).</summary>
+    private static Dictionary<string, string> GetSourceCodeOnly(Dictionary<string, string> fileContents)
+    {
+        return fileContents
+            .Where(kv => !NonSourceExtensions.Contains(Path.GetExtension(kv.Key)))
+            .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
+    }
+
     private static void DetectCapabilities(
         Dictionary<string, string> fileContents,
         string primaryLanguage,
         RepoFactSheet sheet)
     {
         var fingerprints = GetCapabilityFingerprints(primaryLanguage);
-        var allText = string.Join("\n", fileContents.Values);
+
+        // CRITICAL: Only scan actual source code files, not README/docs/config
+        var sourceOnly = GetSourceCodeOnly(fileContents);
+        var allText = string.Join("\n", sourceOnly.Values);
 
         foreach (var (capability, patterns, absenceLabel) in fingerprints)
         {
@@ -225,9 +245,9 @@ public class RepoFactSheetBuilder
                     var match = Regex.Match(allText, pattern, RegexOptions.IgnoreCase | RegexOptions.Multiline, TimeSpan.FromSeconds(2));
                     if (match.Success)
                     {
-                        // Find which file contains this match
-                        var file = FindFileWithRegex(fileContents, pattern);
-                        evidence = $"{file ?? "source"} — matched pattern: {TruncatePattern(pattern)}";
+                        // Find which source file contains this match
+                        var file = FindFileWithRegex(sourceOnly, pattern);
+                        evidence = $"found in {file ?? "source code"}";
                         found = true;
                         break;
                     }
@@ -657,55 +677,55 @@ public class RepoFactSheetBuilder
         {
             // ── Resilience & error handling ──
             ("Circuit breaker",
-                new[] { @"CircuitBreaker|CircuitState|CircuitBreakerAsync", @"class\s+\w*CircuitBreaker" },
+                new[] { @"class\s+\w*CircuitBreaker", @"CircuitState\.Open|CircuitState\.Closed|CircuitBreakerAsync" },
                 "No circuit breaker implementation found"),
 
             ("Retry logic with backoff",
-                new[] { @"BackoffDelay|RetryCount|exponential.*backoff|backoff.*jitter", @"RetryAsync|\.Retry\(" },
+                new[] { @"BackoffDelay|exponential.*backoff|backoff.*jitter", @"RetryAsync.*delay|RetryCount.*backoff" },
                 "No retry/backoff logic found"),
 
             ("Rate limiting / courtesy policy",
-                new[] { @"CourtesyPolicy|RateLimi|429.*retry|503.*retry" },
+                new[] { @"class\s+\w*(CourtesyPolicy|RateLimiter)", @"RateLimit.*\(|429.*retry.*after|503.*retry" },
                 null),  // Not always expected
 
             // ── Search & retrieval ──
             ("RAG / vector search",
-                new[] { @"RetrievalService|HybridSearch|SemanticSearch|ReciprocalRank|BM25" },
+                new[] { @"class\s+\w*(RetrievalService|HybridSearch|SemanticSearch)", @"ReciprocalRank|BM25" },
                 "No RAG/vector search implementation found"),
 
             ("Embedding generation",
-                new[] { @"EmbeddingService|GenerateEmbedding|GetEmbeddingBatch|embedding.*vector" },
+                new[] { @"class\s+\w*EmbeddingService", @"GenerateEmbedding\w*\s*\(", @"GetEmbeddingBatch\s*\(" },
                 "No embedding generation found"),
 
             ("Full-text search indexing",
-                new[] { @"FTS5|MATCH\s|CreateIndex|IndexService|SearchIndex" },
+                new[] { @"FTS5|fts5", @"MATCH\s+'" },
                 null),
 
             // ── Security ──
             ("DPAPI / encrypted key storage",
-                new[] { @"ProtectedData\.Protect|ProtectedData\.Unprotect|SecureKeyStore|DataProtectionScope" },
+                new[] { @"ProtectedData\.Protect|ProtectedData\.Unprotect", @"DataProtectionScope\." },
                 null),
 
             ("Authentication / auth system",
-                new[] { @"Authenticate|IAuthService|JwtBearer|UseAuthentication|OAuth" },
+                new[] { @"\[Authorize\]", @"JwtBearer|UseAuthentication|IAuthService|AddAuthentication" },
                 null),
 
             // ── Testing quality ──
             ("Integration tests (real DB/HTTP)",
-                new[] { @"WebApplicationFactory|IClassFixture|TestServer|CreateClient\(\)|InMemoryDatabase" },
+                new[] { @"WebApplicationFactory|TestServer\.Create|CreateClient\(\)", @"class\s+\w+.*IClassFixture<.*WebApplication" },
                 null),
 
             // ── Infrastructure ──
             ("OpenTelemetry / distributed tracing",
-                new[] { @"OpenTelemetry|ActivitySource|DiagnosticSource|AddOpenTelemetry" },
+                new[] { @"using\s+OpenTelemetry|AddOpenTelemetry\(", @"new\s+ActivitySource\(" },
                 "No OpenTelemetry/distributed tracing found"),
 
-            ("Benchmark suite",
-                new[] { @"\[Benchmark\]|BenchmarkRunner|BenchmarkDotNet" },
+            ("Benchmark suite (BenchmarkDotNet)",
+                new[] { @"\[Benchmark\]", @"BenchmarkRunner\.Run|BenchmarkDotNet" },
                 "No benchmark suite (BenchmarkDotNet) found"),
 
             ("Plugin / extensibility system",
-                new[] { @"IPlugin|PluginLoader|LoadPlugin|AssemblyLoadContext.*plugin|MEF|ExportAttribute" },
+                new[] { @"class\s+\w*(PluginLoader|PluginManager)", @"interface\s+IPlugin", @"AssemblyLoadContext.*plugin" },
                 null), // Not always expected
 
             // ── CI/CD (redundant with file checks but catches inline scripts) ──
@@ -715,17 +735,17 @@ public class RepoFactSheetBuilder
 
             // ── Documentation ──
             ("API documentation generation",
-                new[] { @"swagger|OpenApi|Swashbuckle|<GenerateDocumentationFile>" },
+                new[] { @"Swashbuckle|AddSwaggerGen|UseSwagger", @"<GenerateDocumentationFile>true" },
                 null),
 
             // ── Citation / verification ──
             ("Citation verification",
-                new[] { @"CitationVerif|VerifyReport|VerifyCitation|GroundingScore" },
+                new[] { @"class\s+\w*(CitationVerif|GroundingCheck)", @"VerifyCitation\s*\(|VerifyReport\s*\(" },
                 null),
 
             // ── Logging ──
-            ("Structured logging framework",
-                new[] { @"ILogger<|Serilog|NLog|Log\.(Information|Warning|Error)" },
+            ("Structured logging",
+                new[] { @"ILogger<\w+>", @"LogInformation\(|LogWarning\(|LogError\(" },
                 null),
         };
 
