@@ -25,6 +25,9 @@ public class RepoIntelligenceJobRunner
     private readonly CodeBookGenerator? _codeBookGenerator;
     private readonly IRetrievalService? _retrievalService;
     private readonly ILogger<RepoIntelligenceJobRunner>? _logger;
+    private readonly RepoFactSheetBuilder? _factSheetBuilder;
+    private readonly PostScanVerifier? _postScanVerifier;
+    private readonly RepoCloneService? _cloneService;
 
     // Optional Hive Mind integration — set via property injection
     public GlobalMemoryService? GlobalMemory { get; set; }
@@ -37,7 +40,10 @@ public class RepoIntelligenceJobRunner
         RepoIndexService? repoIndexService = null,
         CodeBookGenerator? codeBookGenerator = null,
         IRetrievalService? retrievalService = null,
-        ILogger<RepoIntelligenceJobRunner>? logger = null)
+        ILogger<RepoIntelligenceJobRunner>? logger = null,
+        RepoFactSheetBuilder? factSheetBuilder = null,
+        PostScanVerifier? postScanVerifier = null,
+        RepoCloneService? cloneService = null)
     {
         _sessionManager = sessionManager;
         _scanner = scanner;
@@ -47,6 +53,9 @@ public class RepoIntelligenceJobRunner
         _codeBookGenerator = codeBookGenerator;
         _retrievalService = retrievalService;
         _logger = logger;
+        _factSheetBuilder = factSheetBuilder;
+        _postScanVerifier = postScanVerifier;
+        _cloneService = cloneService;
     }
 
     /// <summary>Scan a single repo: metadata → clone+index → RAG-grounded analysis → gap verification → complements.</summary>
@@ -106,6 +115,29 @@ public class RepoIntelligenceJobRunner
 
             phaseSw.Stop();
             telemetry.Phases.Add(new PhaseTimingRecord { Phase = "Clone + Index", DurationMs = phaseSw.ElapsedMilliseconds });
+
+            // ── Phase 2.5: Deterministic Fact Sheet (zero-LLM ground truth) ──
+            phaseSw = Stopwatch.StartNew();
+            if (_factSheetBuilder != null)
+            {
+                try
+                {
+                    AddReplay(job, "factsheet", "Building Fact Sheet", "Deterministic code analysis: package usage, capability fingerprinting, diagnostics...");
+                    var clonePath = _cloneService?.GetClonePath(repoUrl);
+                    profile.FactSheet = _factSheetBuilder.Build(profile, clonePath);
+                    AddReplay(job, "factsheet_done", "Fact Sheet Built",
+                        $"{profile.FactSheet.ActivePackages.Count} active packages, {profile.FactSheet.PhantomPackages.Count} phantom, " +
+                        $"{profile.FactSheet.ProvenCapabilities.Count} capabilities proven, {profile.FactSheet.ConfirmedAbsent.Count} absent, " +
+                        $"{profile.FactSheet.TestMethodCount} test methods, AppType={profile.FactSheet.AppType}");
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogWarning(ex, "Fact sheet generation failed — proceeding without ground truth");
+                    AddReplay(job, "factsheet_warn", "Fact Sheet Skipped", $"Could not build: {ex.Message}");
+                }
+            }
+            phaseSw.Stop();
+            telemetry.Phases.Add(new PhaseTimingRecord { Phase = "Deterministic Fact Sheet", DurationMs = phaseSw.ElapsedMilliseconds });
 
             // ── Phases 3-5: Analysis pipeline (agentic for Codex, consolidated for cloud, separate for local) ──
             // Codex 5.3 (agentic): single call with web search — analysis + complements in one shot
@@ -274,6 +306,34 @@ public class RepoIntelligenceJobRunner
             {
                 AddReplay(job, "complements_done", "Complements Found (Agentic)",
                     $"Found {profile.ComplementSuggestions.Count} complementary projects via Codex web search");
+            }
+
+            // ── Phase 6.5: Post-scan verification (fact-check LLM output against ground truth) ──
+            if (_postScanVerifier != null && profile.FactSheet != null)
+            {
+                phaseSw = Stopwatch.StartNew();
+                AddReplay(job, "verify", "Verifying Against Ground Truth",
+                    "Fact-checking LLM strengths/gaps/complements against deterministic fact sheet...");
+                try
+                {
+                    var verification = await _postScanVerifier.VerifyAsync(profile, profile.FactSheet, ct);
+                    if (verification.TotalCorrections > 0)
+                    {
+                        AddReplay(job, "verified", "Ground Truth Verification Complete", verification.Summary);
+                        _logger?.LogInformation("PostScanVerifier corrections: {Summary}", verification.Summary);
+                    }
+                    else
+                    {
+                        AddReplay(job, "verified", "Verification Passed", "All LLM claims consistent with ground truth");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogWarning(ex, "Post-scan verification failed — results unverified");
+                    AddReplay(job, "verify_warn", "Verification Skipped", ex.Message);
+                }
+                phaseSw.Stop();
+                telemetry.Phases.Add(new PhaseTimingRecord { Phase = "Post-Scan Verification", DurationMs = phaseSw.ElapsedMilliseconds });
             }
 
             // ── Phase 7: Save + report ──

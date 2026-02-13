@@ -37,6 +37,13 @@ public class RepoCloneService
             _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", settings.GitHubPat);
     }
 
+    /// <summary>Get the local clone directory for a given repo URL (deterministic, no I/O).</summary>
+    public string GetClonePath(string repoUrl)
+    {
+        var (owner, name) = RepoScannerService.ParseRepoUrl(repoUrl);
+        return Path.Combine(_settings.RepoClonePath, $"{owner}_{name}");
+    }
+
     /// <summary>
     /// Clone or update a repo. Returns the local clone path.
     /// </summary>

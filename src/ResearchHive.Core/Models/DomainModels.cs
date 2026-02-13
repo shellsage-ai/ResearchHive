@@ -183,6 +183,142 @@ public class RepoProfile
 
     /// <summary>Pipeline telemetry: LLM call count, phase durations, total time.</summary>
     public ScanTelemetry? Telemetry { get; set; }
+
+    /// <summary>Deterministic fact sheet built from code analysis before LLM runs. Null until Phase 2.5.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public RepoFactSheet? FactSheet { get; set; }
+}
+
+// ─── Deterministic Fact Sheet (zero-LLM ground truth) ───
+
+/// <summary>
+/// Deterministic, code-analysis-derived ground truth about a repository.
+/// Built from manifest parsing, grep patterns, file tree walking, and import cross-referencing.
+/// Injected into LLM prompts so the model summarizes proven facts instead of guessing.
+/// </summary>
+public class RepoFactSheet
+{
+    /// <summary>Packages that are both in the manifest AND actively used in source code (import/using found).</summary>
+    public List<PackageEvidence> ActivePackages { get; set; } = new();
+
+    /// <summary>Packages in the manifest but with no matching import/using in any source file.</summary>
+    public List<PackageEvidence> PhantomPackages { get; set; } = new();
+
+    /// <summary>Capabilities proven to exist by regex/grep patterns in source code.</summary>
+    public List<CapabilityFingerprint> ProvenCapabilities { get; set; } = new();
+
+    /// <summary>Capabilities confirmed ABSENT after scanning the full codebase.</summary>
+    public List<CapabilityFingerprint> ConfirmedAbsent { get; set; } = new();
+
+    /// <summary>Diagnostic files/directories that exist (e.g., .github/workflows, Dockerfile).</summary>
+    public List<string> DiagnosticFilesPresent { get; set; } = new();
+
+    /// <summary>Diagnostic files/directories confirmed missing.</summary>
+    public List<string> DiagnosticFilesMissing { get; set; } = new();
+
+    /// <summary>Exact test count ([Fact] + [Theory] attributes, or equivalent for other ecosystems).</summary>
+    public int TestMethodCount { get; set; }
+
+    /// <summary>Number of test files found.</summary>
+    public int TestFileCount { get; set; }
+
+    /// <summary>Total source files scanned for analysis.</summary>
+    public int TotalSourceFiles { get; set; }
+
+    /// <summary>App type determined from project structure (e.g., "WPF desktop", "ASP.NET Core web API").</summary>
+    public string AppType { get; set; } = string.Empty;
+
+    /// <summary>Database technology determined from code patterns (e.g., "Raw SQLite via Microsoft.Data.Sqlite").</summary>
+    public string DatabaseTechnology { get; set; } = string.Empty;
+
+    /// <summary>Test framework determined from packages (e.g., "xUnit", "NUnit", "Jest").</summary>
+    public string TestFramework { get; set; } = string.Empty;
+
+    /// <summary>Primary language ecosystem for complement validation.</summary>
+    public string Ecosystem { get; set; } = string.Empty;
+
+    /// <summary>Render the fact sheet as a structured prompt section for LLM injection.</summary>
+    public string ToPromptSection()
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("══════════════════════════════════════════════");
+        sb.AppendLine("  VERIFIED GROUND TRUTH — DO NOT CONTRADICT  ");
+        sb.AppendLine("══════════════════════════════════════════════");
+        sb.AppendLine();
+
+        if (ActivePackages.Count > 0)
+        {
+            sb.AppendLine("PACKAGES (installed AND actively used in code):");
+            foreach (var p in ActivePackages)
+                sb.AppendLine($"  ✓ {p.PackageName} {p.Version} — {p.Evidence}");
+            sb.AppendLine();
+        }
+
+        if (PhantomPackages.Count > 0)
+        {
+            sb.AppendLine("PACKAGES (installed but UNUSED — no matching imports found in source):");
+            foreach (var p in PhantomPackages)
+                sb.AppendLine($"  ⚠ {p.PackageName} {p.Version} — zero usage detected");
+            sb.AppendLine();
+        }
+
+        if (ProvenCapabilities.Count > 0)
+        {
+            sb.AppendLine("CAPABILITIES PROVEN BY CODE PATTERNS:");
+            foreach (var c in ProvenCapabilities)
+                sb.AppendLine($"  ✓ {c.Capability}: {c.Evidence}");
+            sb.AppendLine();
+        }
+
+        if (ConfirmedAbsent.Count > 0)
+        {
+            sb.AppendLine("CONFIRMED ABSENT (scanned full codebase, not found):");
+            foreach (var c in ConfirmedAbsent)
+                sb.AppendLine($"  ✗ {c.Capability}: {c.Evidence}");
+            sb.AppendLine();
+        }
+
+        if (DiagnosticFilesPresent.Count > 0)
+            sb.AppendLine($"FILES/DIRS PRESENT: {string.Join(", ", DiagnosticFilesPresent)}");
+        if (DiagnosticFilesMissing.Count > 0)
+            sb.AppendLine($"FILES/DIRS MISSING: {string.Join(", ", DiagnosticFilesMissing)}");
+
+        if (!string.IsNullOrEmpty(AppType))
+            sb.AppendLine($"APP TYPE: {AppType}");
+        if (!string.IsNullOrEmpty(DatabaseTechnology))
+            sb.AppendLine($"DATABASE: {DatabaseTechnology}");
+        if (!string.IsNullOrEmpty(TestFramework))
+            sb.AppendLine($"TEST FRAMEWORK: {TestFramework} ({TestMethodCount} test methods in {TestFileCount} files)");
+        if (!string.IsNullOrEmpty(Ecosystem))
+            sb.AppendLine($"ECOSYSTEM: {Ecosystem}");
+
+        sb.AppendLine();
+        sb.AppendLine("RULES FOR THE LLM:");
+        sb.AppendLine("- Do NOT list phantom packages as active frameworks.");
+        sb.AppendLine("- Do NOT claim a gap for any capability listed under PROVEN.");
+        sb.AppendLine("- Do NOT claim a strength for any capability listed under ABSENT.");
+        sb.AppendLine("- Strengths and gaps MUST be consistent with this fact sheet.");
+        sb.AppendLine("══════════════════════════════════════════════");
+        return sb.ToString();
+    }
+}
+
+/// <summary>Evidence that a package is installed and (optionally) used.</summary>
+public class PackageEvidence
+{
+    public string PackageName { get; set; } = string.Empty;
+    public string Version { get; set; } = string.Empty;
+    /// <summary>How usage was detected (e.g., "using UglyToad.PdfPig found in PdfIngestionService.cs").</summary>
+    public string Evidence { get; set; } = string.Empty;
+}
+
+/// <summary>A capability fingerprint detected (or confirmed absent) via code pattern scanning.</summary>
+public class CapabilityFingerprint
+{
+    /// <summary>Human-readable name (e.g., "Circuit breaker", "RAG/vector search").</summary>
+    public string Capability { get; set; } = string.Empty;
+    /// <summary>Evidence string (e.g., "LlmCircuitBreaker.cs — Closed/Open/HalfOpen state machine").</summary>
+    public string Evidence { get; set; } = string.Empty;
 }
 
 /// <summary>

@@ -245,6 +245,12 @@ public class RepoScannerService
             sb.AppendLine(content);
             sb.AppendLine();
         }
+        var factSection = profile.FactSheet?.ToPromptSection();
+        if (!string.IsNullOrEmpty(factSection))
+        {
+            sb.AppendLine(factSection);
+            sb.AppendLine();
+        }
         AppendFormatInstructions(sb);
         return sb.ToString();
     }
@@ -266,6 +272,12 @@ public class RepoScannerService
         sb.AppendLine($"- Dependencies ({profile.Dependencies.Count}): {string.Join(", ", profile.Dependencies.Select(d => d.Name))}");
         sb.AppendLine($"- Indexed: {profile.IndexedFileCount} files, {profile.IndexedChunkCount} chunks");
         sb.AppendLine();
+        var factSection = profile.FactSheet?.ToPromptSection();
+        if (!string.IsNullOrEmpty(factSection))
+        {
+            sb.AppendLine(factSection);
+            sb.AppendLine();
+        }
 
         if (!string.IsNullOrEmpty(codeBook))
         {
@@ -638,6 +650,12 @@ public class RepoScannerService
         sb.AppendLine($"- Dependencies ({profile.Dependencies.Count}): {string.Join(", ", profile.Dependencies.Select(d => d.Name))}");
         sb.AppendLine($"- Indexed: {profile.IndexedFileCount} files, {profile.IndexedChunkCount} chunks");
         sb.AppendLine();
+        var factSection = profile.FactSheet?.ToPromptSection();
+        if (!string.IsNullOrEmpty(factSection))
+        {
+            sb.AppendLine(factSection);
+            sb.AppendLine();
+        }
 
         sb.AppendLine("## Source Code Excerpts:");
         sb.AppendLine();
@@ -764,6 +782,12 @@ public class RepoScannerService
         sb.AppendLine($"- Dependencies ({profile.Dependencies.Count}): {string.Join(", ", profile.Dependencies.Select(d => d.Name))}");
         sb.AppendLine($"- Indexed: {profile.IndexedFileCount} files, {profile.IndexedChunkCount} chunks");
         sb.AppendLine();
+        var factSection2 = profile.FactSheet?.ToPromptSection();
+        if (!string.IsNullOrEmpty(factSection2))
+        {
+            sb.AppendLine(factSection2);
+            sb.AppendLine();
+        }
 
         sb.AppendLine("## Source Code Excerpts:");
         sb.AppendLine();

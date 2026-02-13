@@ -81,6 +81,10 @@ public static class ServiceRegistration
                 sp.GetRequiredService<IRetrievalService>(),
                 sp.GetRequiredService<ILlmService>()));
 
+        // Deterministic fact sheet builder + post-scan verifier (zero-LLM ground truth)
+        services.AddSingleton<RepoFactSheetBuilder>();
+        services.AddSingleton<PostScanVerifier>();
+
         // Global memory (Hive Mind)
         services.AddSingleton<GlobalDb>(sp => new GlobalDb(settings.GlobalDbPath));
         services.AddSingleton<GlobalMemoryService>();
@@ -96,7 +100,10 @@ public static class ServiceRegistration
                 sp.GetRequiredService<RepoIndexService>(),
                 sp.GetRequiredService<CodeBookGenerator>(),
                 sp.GetRequiredService<IRetrievalService>(),
-                sp.GetService<ILogger<RepoIntelligenceJobRunner>>());
+                sp.GetService<ILogger<RepoIntelligenceJobRunner>>(),
+                sp.GetRequiredService<RepoFactSheetBuilder>(),
+                sp.GetRequiredService<PostScanVerifier>(),
+                sp.GetRequiredService<RepoCloneService>());
             runner.GlobalMemory = sp.GetRequiredService<GlobalMemoryService>();
             return runner;
         });
