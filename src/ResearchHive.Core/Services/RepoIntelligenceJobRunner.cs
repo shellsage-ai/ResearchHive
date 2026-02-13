@@ -375,6 +375,35 @@ public class RepoIntelligenceJobRunner
                 telemetry.Phases.Add(new PhaseTimingRecord { Phase = "Post-Scan Verification", DurationMs = phaseSw.ElapsedMilliseconds });
             }
 
+            // ── Phase 6.6: LLM self-validation — ask model to cross-check strength descriptions against fact sheet ──
+            if (profile.FactSheet != null && profile.Strengths.Count > 0)
+            {
+                phaseSw = Stopwatch.StartNew();
+                AddReplay(job, "self_validate", "Self-Validating Descriptions",
+                    "Asking LLM to cross-check strength descriptions against code evidence...");
+                try
+                {
+                    var corrections = await SelfValidateStrengthsAsync(profile, ct);
+                    if (corrections > 0)
+                    {
+                        AddReplay(job, "self_validated", "Self-Validation Complete",
+                            $"Corrected {corrections} overstated strength descriptions");
+                        _logger?.LogInformation("Self-validation corrected {Count} strength descriptions", corrections);
+                    }
+                    else
+                    {
+                        AddReplay(job, "self_validated", "Self-Validation Passed", "All strength descriptions are factually accurate");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogWarning(ex, "Self-validation failed — descriptions unverified");
+                    AddReplay(job, "self_validate_warn", "Self-Validation Skipped", ex.Message);
+                }
+                phaseSw.Stop();
+                telemetry.Phases.Add(new PhaseTimingRecord { Phase = "Self-Validation", DurationMs = phaseSw.ElapsedMilliseconds });
+            }
+
             // ── Phase 7: Save + report ──
             totalSw.Stop();
             telemetry.TotalDurationMs = totalSw.ElapsedMilliseconds;
@@ -1129,5 +1158,101 @@ Provide a thorough, detailed answer.";
             Order = job.ReplayEntries.Count + 1,
             Title = title, Description = description, EntryType = type
         });
+    }
+
+    // ─────────────── Self-Validation: LLM cross-checks strengths against fact sheet ───────────────
+
+    /// <summary>
+    /// Ask the LLM to compare each strength description against the fact-sheet evidence.
+    /// Returns the number of corrections applied.
+    /// </summary>
+    private async Task<int> SelfValidateStrengthsAsync(RepoProfile profile, CancellationToken ct)
+    {
+        var factSheet = profile.FactSheet;
+        if (factSheet == null) return 0;
+
+        // Build a compact evidence summary from the fact sheet
+        var evidence = new StringBuilder();
+        evidence.AppendLine("## Proven Capabilities (from deterministic code analysis):");
+        foreach (var p in factSheet.ProvenCapabilities)
+            evidence.AppendLine($"- {p.Capability}: {p.Evidence}");
+        if (factSheet.ConfirmedAbsent.Count > 0)
+        {
+            evidence.AppendLine("## Confirmed ABSENT (do NOT claim these exist):");
+            foreach (var a in factSheet.ConfirmedAbsent)
+                evidence.AppendLine($"- {a.Capability}");
+        }
+
+        // List current strengths for review
+        var strengthsList = new StringBuilder();
+        strengthsList.AppendLine("## Current Strength Descriptions:");
+        int idx = 1;
+        foreach (var s in profile.Strengths)
+            strengthsList.AppendLine($"{idx++}. {s}");
+        foreach (var s in profile.InfrastructureStrengths)
+            strengthsList.AppendLine($"{idx++}. {s}");
+
+        var prompt = $@"You are a fact-checker. Compare each strength description below against the evidence from code analysis.
+For any strength whose description overstates, understates, or misrepresents the actual capability, provide a corrected 1-sentence description.
+
+{evidence}
+
+{strengthsList}
+
+RULES:
+- A method that calculates delays is NOT 'retry logic' — it's 'backoff delay calculation'.
+- Sequential execution across multiple search indexes is NOT 'parallel retrieval' — it's 'multi-lane sequential search'.
+- DI-based ILogger<T> injection is NOT 'structured logging' — it's 'ILogger DI registration'.
+- Only correct descriptions that are factually wrong or inflated. Minor wording differences are fine.
+- Reference the actual class/file name from the evidence when possible.
+
+Output ONLY corrections using this EXACT format (one per line):
+ORIGINAL: <exact original text> → CORRECTED: <factually accurate replacement>
+
+If all descriptions are accurate, respond with exactly: ALL_ACCURATE";
+
+        var response = await _llmService.GenerateAsync(prompt,
+            "You are a precise fact-checker. Only flag genuinely incorrect or inflated descriptions. Be strict but fair.",
+            maxTokens: 1000, tier: ModelTier.Mini, ct: ct);
+
+        if (string.IsNullOrWhiteSpace(response) || response.Contains("ALL_ACCURATE"))
+            return 0;
+
+        // Parse corrections
+        int corrections = 0;
+        var lines = response.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        foreach (var line in lines)
+        {
+            var match = System.Text.RegularExpressions.Regex.Match(line, @"ORIGINAL:\s*(.+?)\s*→\s*CORRECTED:\s*(.+)");
+            if (!match.Success) continue;
+
+            var originalText = match.Groups[1].Value.Trim();
+            var correctedText = match.Groups[2].Value.Trim();
+
+            // Apply to strengths list
+            for (int i = 0; i < profile.Strengths.Count; i++)
+            {
+                if (profile.Strengths[i].Contains(originalText, StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger?.LogInformation("Self-validation: \"{Original}\" → \"{Corrected}\"", profile.Strengths[i], correctedText);
+                    profile.Strengths[i] = correctedText;
+                    corrections++;
+                    break;
+                }
+            }
+            // Apply to infrastructure strengths
+            for (int i = 0; i < profile.InfrastructureStrengths.Count; i++)
+            {
+                if (profile.InfrastructureStrengths[i].Contains(originalText, StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger?.LogInformation("Self-validation (infra): \"{Original}\" → \"{Corrected}\"", profile.InfrastructureStrengths[i], correctedText);
+                    profile.InfrastructureStrengths[i] = correctedText;
+                    corrections++;
+                    break;
+                }
+            }
+        }
+
+        return corrections;
     }
 }

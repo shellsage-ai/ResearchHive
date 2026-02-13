@@ -88,6 +88,12 @@ public static class ServiceRegistration
                 sp.GetService<ILogger<PostScanVerifier>>(),
                 sp.GetRequiredService<ILlmService>()));
 
+        // Fusion post-verifier (validates fusion output against input profiles)
+        services.AddSingleton<FusionPostVerifier>(sp =>
+            new FusionPostVerifier(
+                sp.GetService<ILogger<FusionPostVerifier>>(),
+                sp.GetRequiredService<ILlmService>()));
+
         // Global memory (Hive Mind)
         services.AddSingleton<GlobalDb>(sp => new GlobalDb(settings.GlobalDbPath));
         services.AddSingleton<GlobalMemoryService>();
@@ -111,7 +117,11 @@ public static class ServiceRegistration
             return runner;
         });
 
-        services.AddSingleton<ProjectFusionEngine>();
+        services.AddSingleton<ProjectFusionEngine>(sp =>
+            new ProjectFusionEngine(
+                sp.GetRequiredService<SessionManager>(),
+                sp.GetRequiredService<LlmService>(),
+                sp.GetRequiredService<FusionPostVerifier>()));
         services.AddSingleton<ExportService>();
         services.AddSingleton<InboxWatcher>();
         services.AddSingleton<CrossSessionSearchService>();

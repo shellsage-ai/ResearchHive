@@ -72,6 +72,9 @@ public class PostScanVerifier
         // 6. Inject fact-sheet-derived gaps the LLM may have missed
         InjectConfirmedGaps(profile, factSheet, result);
 
+        // 7. Ground strength descriptions — fix inflated/inaccurate wording
+        GroundStrengthDescriptions(profile, factSheet, result);
+
         _logger?.LogInformation(
             "PostScanVerifier: {GapsRemoved} gaps removed, {StrengthsRemoved} strengths removed, " +
             "{ComplementsRemoved} complements removed, {StrengthsAdded} strengths added, {GapsAdded} gaps added",
@@ -978,6 +981,126 @@ public class PostScanVerifier
             .Distinct()
             .ToList();
     }
+
+    // ─────────────── Strength Description Grounding ───────────────
+
+    /// <summary>
+    /// Common overstatement patterns: if a strength description matches a pattern, replace with
+    /// a grounded version derived from the fact sheet evidence.
+    /// </summary>
+    private static readonly (string pattern, string[] inflatedTerms)[] OverstatementPatterns = new[]
+    {
+        ("parallel.*retrieval|parallel.*rag|parallel.*search", new[] { "parallel" }),
+        ("retry.*logic|retry.*orchestrat", new[] { "retry" }),
+        ("structured.*logging", new[] { "structured logging" }),
+        ("comprehensive.*security|robust.*security", new[] { "comprehensive", "robust" }),
+        ("advanced.*caching|powerful.*caching", new[] { "advanced", "powerful" }),
+    };
+
+    /// <summary>
+    /// Deterministically ground strength descriptions to match what the code actually does.
+    /// - Replaces inflated verbs/adjectives with precise descriptions from fact sheet evidence.
+    /// - Re-phrases strengths that overstate the scope of a single class.
+    /// </summary>
+    internal static void GroundStrengthDescriptions(RepoProfile profile, RepoFactSheet factSheet, VerificationResult result)
+    {
+        GroundList(profile.Strengths, factSheet, result);
+        GroundList(profile.InfrastructureStrengths, factSheet, result);
+    }
+
+    private static void GroundList(List<string> strengths, RepoFactSheet factSheet, VerificationResult result)
+    {
+        for (int i = 0; i < strengths.Count; i++)
+        {
+            var original = strengths[i];
+            var lower = original.ToLowerInvariant();
+
+            // ── Check against overstatement patterns ──
+            foreach (var (pattern, inflatedTerms) in OverstatementPatterns)
+            {
+                if (!Regex.IsMatch(lower, pattern)) continue;
+
+                // Try to find a matching fact-sheet capability for a grounded replacement
+                var matchingCapability = FindMatchingCapability(lower, factSheet);
+                if (matchingCapability != null)
+                {
+                    var cleanEvidence = FormatEvidenceForDisplay(matchingCapability.Value.evidence);
+                    var grounded = string.IsNullOrEmpty(cleanEvidence)
+                        ? $"{matchingCapability.Value.capability} (verified by code analysis)"
+                        : $"{matchingCapability.Value.capability} (verified in {cleanEvidence})";
+                    if (!grounded.Equals(original, StringComparison.OrdinalIgnoreCase))
+                    {
+                        strengths[i] = grounded;
+                        result.StrengthsGrounded.Add($"GROUNDED: \"{original}\" → \"{grounded}\"");
+                    }
+                }
+                break;
+            }
+
+            // ── Generic inflation detection: replace vague adjectives with factual ones ──
+            if (strengths[i] == original) // not already grounded
+            {
+                var deflated = DeflateDescription(original);
+                if (deflated != original)
+                {
+                    strengths[i] = deflated;
+                    result.StrengthsGrounded.Add($"DEFLATED: \"{original}\" → \"{deflated}\"");
+                }
+            }
+        }
+    }
+
+    /// <summary>Find a fact-sheet ProvenCapability that matches the strength text.</summary>
+    private static (string capability, string evidence)? FindMatchingCapability(string strengthLower, RepoFactSheet factSheet)
+    {
+        foreach (var proven in factSheet.ProvenCapabilities)
+        {
+            var keywords = ExtractKeywords(proven.Capability.ToLowerInvariant());
+            if (keywords.Count >= 2 && keywords.Count(kw => strengthLower.Contains(kw)) >= 2)
+                return (proven.Capability, proven.Evidence);
+            if (keywords.Count == 1 && keywords.All(kw => strengthLower.Contains(kw)))
+                return (proven.Capability, proven.Evidence);
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Replace vague inflating adjectives with neutral or precise alternatives.
+    /// Does not change meaning, just removes marketing-speak.
+    /// </summary>
+    internal static string DeflateDescription(string strength)
+    {
+        var result = strength;
+        // Order matters: longer patterns first to avoid partial matches
+        var replacements = new (string pattern, string replacement)[]
+        {
+            (@"\brobust\s+", ""),
+            (@"\bcomprehensive\s+", ""),
+            (@"\bpowerful\s+", ""),
+            (@"\badvanced\s+", ""),
+            (@"\bsophisticated\s+", ""),
+            (@"\bseamless\s+", ""),
+            (@"\bhighly\s+scalable\b", "scalable"),
+            (@"\bleverages\b", "uses"),
+            (@"\butilizes\b", "uses"),
+            (@"\bfacilitates\b", "provides"),
+            (@"\benables\b", "provides"),
+        };
+
+        foreach (var (pattern, replacement) in replacements)
+        {
+            result = Regex.Replace(result, pattern, replacement, RegexOptions.IgnoreCase);
+        }
+
+        // Clean up double spaces
+        result = Regex.Replace(result, @"\s{2,}", " ").Trim();
+
+        // Capitalize first char if it was lowered
+        if (result.Length > 0 && char.IsLower(result[0]) && (strength.Length == 0 || char.IsUpper(strength[0])))
+            result = char.ToUpper(result[0]) + result[1..];
+
+        return result;
+    }
 }
 
 /// <summary>Summary of all corrections made by the post-scan verifier.</summary>
@@ -990,12 +1113,14 @@ public class VerificationResult
     public List<string> ComplementsBackfilled { get; set; } = new();
     public List<string> StrengthsAdded { get; set; } = new();
     public List<string> GapsAdded { get; set; } = new();
+    public List<string> StrengthsGrounded { get; set; } = new();
     public List<string> IdentityWarnings { get; set; } = new();
     public string? DiversityWarning { get; set; }
 
     public int TotalCorrections =>
         GapsRemoved.Count + StrengthsRemoved.Count + FrameworksRemoved.Count +
-        ComplementsRemoved.Count + StrengthsAdded.Count + GapsAdded.Count + IdentityWarnings.Count;
+        ComplementsRemoved.Count + StrengthsAdded.Count + GapsAdded.Count +
+        StrengthsGrounded.Count + IdentityWarnings.Count;
 
     public string Summary
     {
@@ -1009,6 +1134,7 @@ public class VerificationResult
             if (ComplementsBackfilled.Count > 0) parts.Add($"{ComplementsBackfilled.Count} complements backfilled");
             if (StrengthsAdded.Count > 0) parts.Add($"{StrengthsAdded.Count} proven strengths injected");
             if (GapsAdded.Count > 0) parts.Add($"{GapsAdded.Count} confirmed gaps injected");
+            if (StrengthsGrounded.Count > 0) parts.Add($"{StrengthsGrounded.Count} strength descriptions grounded");
             if (IdentityWarnings.Count > 0) parts.Add($"{IdentityWarnings.Count} identity issues detected");
             if (!string.IsNullOrEmpty(DiversityWarning)) parts.Add(DiversityWarning);
             return parts.Count > 0 ? string.Join(" | ", parts) : "No corrections needed";

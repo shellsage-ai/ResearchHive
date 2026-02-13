@@ -854,6 +854,19 @@ public class RepoScannerService
         sb.AppendLine("- Focus on: missing tests, missing docs, missing config, missing security features, missing monitoring, missing error handling patterns, etc.");
         sb.AppendLine("- Do NOT list the analysis tool, scanning model, or LLM used to analyze this repo as a 'strength' of the repo itself. Strengths must be capabilities of THIS project's own code.");
         sb.AppendLine("- Gaps and strengths must be about THIS project — not about capabilities of unrelated tools or projects.");
+        sb.AppendLine();
+        sb.AppendLine("STRENGTH DESCRIPTION PRECISION:");
+        sb.AppendLine("- Each strength must be ONE factual sentence describing what the code DOES (not what it ENABLES or COULD DO).");
+        sb.AppendLine("- Use precise verbs: 'implements', 'provides', 'uses', 'stores', 'calculates'. AVOID vague inflators: 'robust', 'comprehensive', 'leverages', 'powerful'.");
+        sb.AppendLine("- If a class does ONE thing (e.g., calculates backoff delays), describe that ONE thing. Do NOT inflate to a broader capability (e.g., 'retry orchestration').");
+        sb.AppendLine("- Describe what the code DOES, not what the feature ENABLES.");
+        sb.AppendLine("  GOOD: 'CourtesyPolicy.cs calculates exponential backoff delays per domain and tracks failure counts'");
+        sb.AppendLine("  BAD: 'Retry logic with backoff' (inflated — it calculates delays, it doesn't orchestrate retries).");
+        sb.AppendLine("  GOOD: 'RetrievalService.cs runs BM25 + semantic + heuristic search lanes sequentially and fuses results via RRF'");
+        sb.AppendLine("  BAD: 'Parallel RAG retrieval and hybrid search' (wrong — lanes are sequential, not parallel).");
+        sb.AppendLine("  GOOD: 'ServiceRegistration.cs injects ILogger<T> via Microsoft.Extensions.DependencyInjection'");
+        sb.AppendLine("  BAD: 'Structured logging' (inflated — it's DI-based logger injection, not a structured logging framework).");
+        sb.AppendLine("- Always reference the actual class/file name that implements the strength.");
     }
 
     public static void ParseAnalysis(string analysis, RepoProfile profile)

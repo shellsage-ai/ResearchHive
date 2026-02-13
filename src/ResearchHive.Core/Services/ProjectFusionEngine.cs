@@ -13,11 +13,13 @@ public class ProjectFusionEngine
 {
     private readonly SessionManager _sessionManager;
     private readonly LlmService _llmService;
+    private readonly FusionPostVerifier? _fusionVerifier;
 
-    public ProjectFusionEngine(SessionManager sessionManager, LlmService llmService)
+    public ProjectFusionEngine(SessionManager sessionManager, LlmService llmService, FusionPostVerifier? fusionVerifier = null)
     {
         _sessionManager = sessionManager;
         _llmService = llmService;
+        _fusionVerifier = fusionVerifier;
     }
 
     // ─────────────── Section names ───────────────
@@ -67,6 +69,7 @@ public class ProjectFusionEngine
             var inputBlocks = new List<string>();
             var inputTitles = new List<string>();
             var inputUrls = new List<string>();
+            var inputProfiles = new List<RepoProfile>();
 
             foreach (var input in request.Inputs)
             {
@@ -79,6 +82,7 @@ public class ProjectFusionEngine
                         inputBlocks.Add(FormatProfileForLlm(profile));
                         inputTitles.Add($"{profile.Owner}/{profile.Name}");
                         inputUrls.Add(profile.RepoUrl);
+                        inputProfiles.Add(profile);
                     }
                 }
                 else if (input.Type == FusionInputType.FusionArtifact)
@@ -168,15 +172,23 @@ public class ProjectFusionEngine
             var contextStr = compactContext.ToString();
 
             // Expand sections in parallel batches of 4
+            // After batch 1 (PROJECT_IDENTITIES, UNIFIED_VISION, ARCHITECTURE, TECH_STACK),
+            // inject a consistency context into subsequent batches so later sections
+            // don't contradict decisions made in earlier ones.
             var sectionResults = new Dictionary<string, string>();
+            string priorSectionContext = "";
             for (int batch = 0; batch < AllSections.Length; batch += 4)
             {
+                // After the first batch, build a consistency summary from completed sections
+                if (batch > 0)
+                    priorSectionContext = BuildConsistencyContext(sectionResults);
+
                 var tasks = new List<Task<(string name, string content)>>();
                 for (int j = batch; j < Math.Min(batch + 4, AllSections.Length); j++)
                 {
                     var sectionName = AllSections[j];
                     tasks.Add(ExpandSectionAsync(sectionName, request.Goal, outlineResponse, contextStr,
-                        goalInstruction, systemPrompt, identityStr, ct));
+                        goalInstruction, systemPrompt, identityStr, priorSectionContext, ct));
                 }
 
                 var results = await Task.WhenAll(tasks);
@@ -185,6 +197,29 @@ public class ProjectFusionEngine
             }
 
             AddReplay(job, "sections", "All Sections Expanded", $"Expanded {sectionResults.Count} sections");
+
+            // 3b. Post-verify fusion sections against input profiles
+            if (_fusionVerifier != null && inputProfiles.Count > 0)
+            {
+                AddReplay(job, "fuse_verify", "Verifying Fusion Output",
+                    "Fact-checking fusion sections against input profile data...");
+                try
+                {
+                    var fusionVerification = await _fusionVerifier.VerifyAsync(sectionResults, inputProfiles, ct);
+                    if (fusionVerification.TotalCorrections > 0)
+                    {
+                        AddReplay(job, "fuse_verified", "Fusion Verification Complete", fusionVerification.Summary);
+                    }
+                    else
+                    {
+                        AddReplay(job, "fuse_verified", "Fusion Verification Passed", "All fusion claims consistent with input data");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    AddReplay(job, "fuse_verify_warn", "Fusion Verification Skipped", ex.Message);
+                }
+            }
 
             // 4. Build artifact from expanded sections
             job.State = JobState.Evaluating;
@@ -466,16 +501,26 @@ DECISION: <decision> | FROM: <project name(s)>");
     /// <summary>Expand a single fusion section from the outline, with truncation retry.</summary>
     private async Task<(string name, string content)> ExpandSectionAsync(
         string sectionName, ProjectFusionGoal goal, string outline, string inputContext,
-        string goalInstruction, string systemPrompt, string identityReminder, CancellationToken ct)
+        string goalInstruction, string systemPrompt, string identityReminder,
+        string priorSectionContext, CancellationToken ct)
     {
         var sectionGuidance = GetSectionGuidance(sectionName, goal);
+
+        var consistencyBlock = string.IsNullOrWhiteSpace(priorSectionContext)
+            ? ""
+            : $@"
+
+PRIOR SECTION DECISIONS (you MUST stay consistent with these):
+{priorSectionContext}
+Do NOT contradict the technology attributions or feature ownership listed above.
+";
 
         var prompt = $@"You are expanding ONE section of a project fusion document.
 
 {identityReminder}
 
 Goal: {goalInstruction}
-
+{consistencyBlock}
 Here is the outline of all sections (for context):
 {outline}
 
@@ -503,6 +548,53 @@ RULES:
         return (sectionName, response.Text);
     }
 
+    /// <summary>
+    /// Build a compact consistency context from already-expanded sections so that
+    /// later batches don't contradict decisions made in earlier ones.
+    /// </summary>
+    private static string BuildConsistencyContext(Dictionary<string, string> sectionResults)
+    {
+        var sb = new StringBuilder();
+
+        // Extract identity cards if available
+        if (sectionResults.TryGetValue("PROJECT_IDENTITIES", out var identities))
+        {
+            sb.AppendLine("PROJECT IDENTITIES (canonical):");
+            // Keep it compact — take first ~600 chars or so
+            sb.AppendLine(identities.Length > 800 ? identities[..800] + "..." : identities);
+            sb.AppendLine();
+        }
+
+        // Extract tech stack attributions
+        if (sectionResults.TryGetValue("TECH_STACK", out var techStack))
+        {
+            sb.AppendLine("TECH STACK (established attributions — do not reassign):");
+            // Extract table rows — lines containing '|'
+            foreach (var line in techStack.Split('\n'))
+            {
+                if (line.Contains('|') && !line.TrimStart().StartsWith("|-"))
+                    sb.AppendLine(line.Trim());
+            }
+            sb.AppendLine();
+        }
+
+        // Extract feature attributions
+        if (sectionResults.TryGetValue("FEATURE_MATRIX", out var features))
+        {
+            sb.AppendLine("FEATURE ATTRIBUTIONS (established — do not reassign):");
+            foreach (var line in features.Split('\n'))
+            {
+                var trimmed = line.Trim();
+                if (trimmed.StartsWith("FEATURE:", StringComparison.OrdinalIgnoreCase) ||
+                    trimmed.Contains("| SOURCE:", StringComparison.OrdinalIgnoreCase))
+                    sb.AppendLine(trimmed);
+            }
+            sb.AppendLine();
+        }
+
+        return sb.ToString();
+    }
+
     /// <summary>Returns section-specific writing guidance that varies by goal.</summary>
     private static string GetSectionGuidance(string sectionName, ProjectFusionGoal goal) => sectionName switch
     {
@@ -510,16 +602,16 @@ RULES:
             "For EACH input project, write a concise identity card with: what it is (one sentence), source URL/path, primary language/framework, 3-5 key capabilities (from input data only), and maturity indicators (stars, tests, etc.).",
 
         "UNIFIED_VISION" when goal == ProjectFusionGoal.Compare =>
-            "Write a comparison overview: what each project is designed for, key differences, when you'd choose one over the other. Do NOT propose merging them.",
+            "Write a comparison overview: what each project is designed for, key differences, when you'd choose one over the other. Do NOT propose merging them. When describing capabilities, explicitly state which project provides each one — never describe a capability without naming its source project.",
 
         "UNIFIED_VISION" =>
-            "Write a 2-3 paragraph vision: what this combined project IS, what problem it solves, how the inputs complement each other, and the unique value proposition.",
+            "Write a 2-3 paragraph vision: what this combined project IS, what problem it solves, how the inputs complement each other, and the unique value proposition. When describing capabilities, explicitly state which input project provides each one. Never describe a capability without naming its source project. Do NOT generalize or invent capabilities not present in the input data.",
 
         "ARCHITECTURE" when goal == ProjectFusionGoal.Compare =>
-            "Use a markdown comparison TABLE contrasting architectures (| Aspect | Project A | Project B |). Then discuss key differences and trade-offs.",
+            "Use a markdown comparison TABLE contrasting architectures (| Aspect | Project A | Project B |). Then discuss key differences and trade-offs. Every component/service you mention MUST trace to a real class or service from the input data. Do NOT invent components.",
 
         "ARCHITECTURE" =>
-            "Describe the proposed architecture: layers, components, data flow. Reference which input project each decision draws from. Include integration points.",
+            "Describe the proposed architecture: layers, components, data flow. Reference which input project each decision draws from. Include integration points. Every component, service, or layer you mention MUST trace to a real class or service from one of the input projects. Do NOT invent components or attribute one project's classes to another.",
 
         "TECH_STACK" =>
             "Use a markdown TABLE (| Technology | Purpose | Source |). CRITICAL: ONLY list technologies from the input dependencies/frameworks/languages. Do NOT invent technologies.",
