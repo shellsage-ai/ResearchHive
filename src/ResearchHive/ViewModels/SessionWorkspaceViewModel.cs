@@ -61,7 +61,7 @@ public partial class SessionWorkspaceViewModel : ObservableObject
 
     // Research
     [ObservableProperty] private string _researchPrompt = "";
-    [ObservableProperty] private int _targetSources = 5;
+    [ObservableProperty] private int _targetSources = 8;
     [ObservableProperty] private bool _isResearchRunning;
     [ObservableProperty] private bool _isStreamlinedCodex;
     [ObservableProperty] private bool _showStreamlinedToggle;

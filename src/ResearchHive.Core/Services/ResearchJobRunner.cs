@@ -65,7 +65,7 @@ public class ResearchJobRunner
     }
 
     public async Task<ResearchJob> RunAsync(string sessionId, string prompt, JobType jobType = JobType.Research,
-        int targetSources = 5, CancellationToken ct = default)
+        int targetSources = 8, CancellationToken ct = default)
     {
         var db = _sessionManager.GetSessionDb(sessionId);
         var session = _sessionManager.GetSession(sessionId)!;
@@ -166,10 +166,18 @@ public class ResearchJobRunner
             AddStep(db, job, "Planning", "Generating research plan and queries", JobState.Planning);
             EmitProgress("Generating research plan and search queries...");
 
-            var planPrompt = $@"Generate 5 diverse web search queries that would find high-quality sources to answer this research question. Cover different angles and sub-topics.
+            var planPrompt = $@"Generate 5 expert-level web search queries to thoroughly research this question. Each query MUST target a DIFFERENT angle:
+
+1. COMPARATIVE/ARCHITECTURAL — technical comparison, architecture, taxonomy, or classification query
+2. QUANTITATIVE/BENCHMARK — performance data, benchmarks, statistics, or measurable metrics
+3. DECISION FRAMEWORK — selection criteria, trade-offs, when-to-use, or best-practices query
+4. CASE STUDY/REAL-WORLD — production deployments, real-world usage, industry adoption, or lessons learned
+5. EXPERT/ACADEMIC — academic papers, expert analysis, or authoritative deep-dive query
 
 Research question: {prompt}
 Domain: {session.Pack}
+
+IMPORTANT: Queries must be specific and expert-level (not intro-level). Include technical terms, specific technologies, or named concepts from the question. Avoid generic/beginner queries like ""what is X"" or ""X overview"".
 
 Return ONLY numbered queries, no explanation:
 1. [query]
@@ -219,12 +227,12 @@ Return ONLY numbered queries, no explanation:
                     job.SearchQueries.Add(sq);
             }
 
-            // Extra iterations add an LLM coverage-eval call each but yield diminishing
-            // evidence: iteration 0 already runs multi-lane search + deep search drill-down.
-            // Iterations 1-2 just re-search with slightly refined queries (no deep search),
-            // costing 10-30s each on Ollama for marginal gain. Cap at 1 for all providers.
-            if (job.MaxIterations > 1)
-                job.MaxIterations = 1;
+            // Iteration 0 runs multi-lane search + deep search drill-down.
+            // Iteration 1 re-searches with gap-focused queries to fill coverage holes
+            // — typically adds 3-6 high-value sources that substantially improve reports.
+            // Cap at 2 to balance depth vs latency (each extra iteration adds 10-30s).
+            if (job.MaxIterations > 2)
+                job.MaxIterations = 2;
 
             // Iterative loop
             for (int iteration = 0; iteration < job.MaxIterations && !token.IsCancellationRequested; iteration++)
@@ -392,10 +400,12 @@ Return ONLY numbered queries, no explanation:
                     $"Gaps: {string.Join(", ", coverage.Gaps)}");
                 EmitProgress($"Coverage: {coverage.Score:P0} ({job.AcquiredSourceIds.Count} sources, {coverage.AnsweredSubQuestions.Count}/{job.SubQuestions.Count} sub-Qs answered)", coverage.Score);
 
-                // Exit when quality is sufficient, OR when we've hit max sources AND have some coverage
-                if (coverage.Score >= 0.7)
+                // Exit when quality is sufficient: high coverage AND all sub-questions answered
+                if (coverage.Score >= 0.85 && coverage.UnansweredSubQuestions.Count == 0)
                     break;
-                if (job.AcquiredSourceIds.Count >= targetSources && coverage.Score >= 0.4)
+                // Acceptable exit when we've hit target sources with reasonable coverage and no major gaps
+                if (job.AcquiredSourceIds.Count >= targetSources && coverage.Score >= 0.6
+                    && coverage.UnansweredSubQuestions.Count == 0)
                     break;
 
                 // Pivot mechanism: if coverage is very low after first iteration,
@@ -585,7 +595,7 @@ Return ONLY numbered queries, no explanation:
             var preGrounding = ComputeGroundingScore(ExtractClaims(draftResponse));
 
             SufficiencyResult sufficiency;
-            if (preGrounding >= 0.6)
+            if (preGrounding >= 0.6 && !_settings.SectionalReports)
             {
                 // Good grounding means well-cited draft — skip the ~15-30s sufficiency LLM call
                 sufficiency = new SufficiencyResult { Sufficient = true, Score = preGrounding, MissingTopics = new(), WeakClaims = new() };
@@ -2438,19 +2448,28 @@ INSTRUCTIONS:
 - Include specific data points, statistics, comparisons, and concrete examples.
 - If something is unsubstantiated, explicitly label it as hypothesis.
 
+FORMATTING (Markdown — must use these for readability):
+- Use **bold** to highlight key terms, important findings, and critical takeaways on first mention.
+- Use tables (| Header | Header |) to compare options, technologies, or approaches side-by-side.
+- Use > blockquotes for single-sentence key takeaways at the start of major sections.
+- Use bullet lists for enumerations of 3+ items; numbered lists for ranked or sequential items.
+- Use `code formatting` for technical terms, API names, commands, or file paths.
+
 REQUIRED SECTIONS (use these exact headings):
 
 ## Key Findings
-A bulleted list of 5-8 major findings, each with inline citation(s). Be specific and concrete.
+A bulleted list of 5-8 major findings, each with inline citation(s). **Bold** the key term or concept in each bullet. Be specific and concrete.
 
 ## Most Supported View
+> Start with a one-sentence blockquote summarizing the primary conclusion.
+
 The primary, evidence-weighted analysis. This should be 3-5 paragraphs covering the major themes. Go in depth — explain WHY the evidence supports this view, not just WHAT the evidence says.
 
 ## Detailed Analysis
 Topic-by-topic deep dive organized around the sub-questions. For each topic:
 - State the finding with data
 - Cite the specific evidence
-- Compare sources where they agree or disagree
+- Compare sources where they agree or disagree — use a table if comparing 3+ options
 - Note the strength of the evidence
 
 ## Credible Alternatives / Broader Views
@@ -2534,6 +2553,13 @@ Write ONLY the content for this section. Do NOT include the heading (it will be 
 Every substantive claim MUST reference a citation label [N].
 Target length: approximately {section.TargetTokens / 3} to {section.TargetTokens / 2} words.
 
+FORMATTING (use Markdown for readability):
+- **Bold** key terms, important findings, and critical concepts on first mention.
+- Use tables (| Col | Col |) when comparing 3+ options, technologies, or approaches.
+- Use > blockquotes for critical single-sentence takeaways.
+- Use `code formatting` for technical terms, API names, or commands.
+- Use bullet/numbered lists for enumerations; avoid long unbroken paragraphs.
+
 EVIDENCE:
 {sectionEvidence}";
 
@@ -2588,6 +2614,7 @@ SECTION INSTRUCTIONS:
 Write ONLY the content for this section. Do NOT include the heading (it will be added automatically).
 Every substantive claim MUST reference a citation label [N].
 Target length: approximately {limitationsSection.TargetTokens / 3} to {limitationsSection.TargetTokens / 2} words.
+**Bold** any critical caveats or warnings. Use bullet lists for enumerated limitations.
 
 REPORT WRITTEN SO FAR (assess the evidence actually cited here, not just pre-gathered DB):
 {report}
@@ -2687,15 +2714,22 @@ EVIDENCE:
         if (sectionResults.Count < 3)
             return BuildEvidenceContext(allResults.Take(15).ToList(), citations.Take(15).ToList(), sourceUrlMap);
 
-        // Map section results to their citation labels
+        // Map section results to their citation labels — use master labels to avoid collisions
         var citationMap = citations.ToDictionary(c => c.ChunkId, c => c);
+        // Also build a SourceId → Citation lookup for chunks from the same source but different offsets
+        var sourceCitationMap = citations.GroupBy(c => c.SourceId)
+            .ToDictionary(g => g.Key, g => g.First());
         var sectionCitations = new List<Citation>();
         foreach (var sr in sectionResults)
         {
             if (citationMap.TryGetValue(sr.Chunk.Id, out var cit))
                 sectionCitations.Add(cit);
+            else if (sourceCitationMap.TryGetValue(sr.SourceId, out var sourceCit))
+                // Different chunk from a known source — reuse the source's master label
+                sectionCitations.Add(new Citation { Label = sourceCit.Label, Excerpt = sr.Chunk.Text, SourceId = sr.SourceId, ChunkId = sr.Chunk.Id });
             else
-                sectionCitations.Add(new Citation { Label = $"[{sectionCitations.Count + 1}]", Excerpt = sr.Chunk.Text });
+                // Truly new source — offset label beyond master list to prevent collisions
+                sectionCitations.Add(new Citation { Label = $"[{citations.Count + sectionCitations.Count + 1}]", Excerpt = sr.Chunk.Text, SourceId = sr.SourceId, ChunkId = sr.Chunk.Id });
         }
 
         return BuildEvidenceContext(sectionResults, sectionCitations, sourceUrlMap);
@@ -2813,6 +2847,8 @@ Keep all [N] citation references intact. Do not invent new citations.";
 3. 3-4 most important findings with their citation numbers [N]
 4. Primary conclusion
 5. Notable limitations or gaps
+
+**Bold** the most critical findings and conclusions. Use bullet points for the key findings list.
 
 Research Report:
 {truncatedReport}

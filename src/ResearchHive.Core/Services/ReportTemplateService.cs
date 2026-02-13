@@ -18,25 +18,31 @@ public class ReportTemplateService
         {
             new("Key Findings",
                 "Write 5-8 major findings as a bulleted list. Each bullet must include an inline citation [N]. " +
+                "**Bold** the key term or concept in each bullet point. " +
                 "Be specific with data points, numbers, and concrete examples. No filler.",
                 500),
 
             new("Most Supported View",
-                "Write the primary, evidence-weighted analysis in 3-5 paragraphs. " +
+                "Start with a > blockquote containing a single-sentence key takeaway. " +
+                "Then write the primary, evidence-weighted analysis in 3-5 paragraphs. " +
                 "Explain WHY the evidence supports this view, not just WHAT the evidence says. " +
-                "Include specific data, statistics, and source comparisons. Cite every claim.",
+                "Include specific data, statistics, and source comparisons. Cite every claim. " +
+                "**Bold** critical conclusions and important terms on first mention.",
                 800),
 
             new("Detailed Analysis",
                 "Write a topic-by-topic deep dive organized around the sub-questions. For each topic: " +
                 "state the finding with data, cite the specific evidence, compare sources where they agree " +
-                "or disagree, and note the strength of the evidence. Be thorough and detailed.",
+                "or disagree, and note the strength of the evidence. Be thorough and detailed. " +
+                "Use a comparison table (| Feature | Option A | Option B |) when comparing 3+ items. " +
+                "**Bold** key terms. Use `code formatting` for technical names and commands.",
                 1200),
 
             new("Credible Alternatives / Broader Views",
                 "Present alternative interpretations and competing viewpoints with citations. " +
                 "Explain why the most-supported view is favored over these alternatives. " +
-                "Include any minority positions that have credible evidence.",
+                "Include any minority positions that have credible evidence. " +
+                "**Bold** the name of each alternative approach or viewpoint.",
                 600),
         };
 
