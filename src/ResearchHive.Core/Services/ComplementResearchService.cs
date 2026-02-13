@@ -50,21 +50,27 @@ public class ComplementResearchService
 
         // Build search queries — use gaps if available, plus general improvement queries
         var searchTopics = new List<string>();
-        foreach (var gap in profile.Gaps.Take(8))
+        foreach (var gap in profile.Gaps.Take(6))
             searchTopics.Add(gap);
+
+        // Inject DOMAIN-AWARE topics derived from what the project actually does.
+        // Proven capabilities reveal the project's domain — suggest tools that extend it.
+        var domainTopics = InferDomainSearchTopics(profile);
+        foreach (var dt in domainTopics)
+        {
+            if (searchTopics.Count >= MinimumComplements + 4) break;
+            if (!searchTopics.Any(t => t.Contains(dt.Split(' ')[0], StringComparison.OrdinalIgnoreCase)))
+                searchTopics.Add(dt);
+        }
 
         // Ensure category diversity — even if gaps exist, always inject underrepresented categories
         // so complements span security, CI/CD, observability, docs, etc.
         var diverseCategories = new[]
         {
-            "testing and quality assurance",
             "performance monitoring and observability",
             "security scanning and vulnerability detection",
-            "documentation generation",
             "CI/CD and deployment automation",
             "code analysis and linting",
-            "dependency management",
-            "containerization and deployment",
             "developer experience tooling"
         };
 
@@ -141,6 +147,68 @@ public class ComplementResearchService
             complements = ParseComplements(response);
 
         return complements;
+    }
+
+    /// <summary>
+    /// Infer domain-specific search topics from the project's proven capabilities,
+    /// strengths, app type, and frameworks. This ensures complement suggestions are
+    /// relevant to what the project DOES, not just what tech stack it uses.
+    /// </summary>
+    internal static List<string> InferDomainSearchTopics(RepoProfile profile)
+    {
+        var topics = new List<string>();
+        var strengthsText = string.Join(" ", profile.Strengths).ToLowerInvariant();
+        var capabilitiesText = profile.FactSheet != null
+            ? string.Join(" ", profile.FactSheet.ProvenCapabilities.Select(c => c.Capability)).ToLowerInvariant()
+            : strengthsText;
+
+        // AI / LLM domain
+        if (capabilitiesText.Contains("cloud ai") || capabilitiesText.Contains("llm") ||
+            capabilitiesText.Contains("embedding") || strengthsText.Contains("ai provider"))
+        {
+            topics.Add("AI agent orchestration framework");
+            topics.Add("local LLM inference runtime");
+            topics.Add("prompt engineering and evaluation toolkit");
+        }
+
+        // RAG / vector search domain
+        if (capabilitiesText.Contains("rag") || capabilitiesText.Contains("vector") ||
+            capabilitiesText.Contains("embedding"))
+        {
+            topics.Add("vector database client library");
+            topics.Add("document chunking and text splitting");
+        }
+
+        // Research / web scraping domain
+        if (capabilitiesText.Contains("citation") || capabilitiesText.Contains("search") ||
+            strengthsText.Contains("browser") || strengthsText.Contains("scraping"))
+        {
+            topics.Add("HTML parsing and web scraping library");
+            topics.Add("structured data extraction from web pages");
+        }
+
+        // WPF / desktop UI domain
+        if (profile.FactSheet?.AppType?.Contains("WPF", StringComparison.OrdinalIgnoreCase) == true ||
+            profile.Frameworks.Any(f => f.Contains("WPF", StringComparison.OrdinalIgnoreCase)))
+        {
+            topics.Add("WPF data visualization charting library");
+            topics.Add("WPF UI component toolkit");
+        }
+
+        // Circuit breaker / resilience domain
+        if (capabilitiesText.Contains("circuit breaker") || capabilitiesText.Contains("retry") ||
+            capabilitiesText.Contains("rate limit"))
+        {
+            topics.Add("advanced fault tolerance and resilience patterns");
+        }
+
+        // Structured logging domain
+        if (capabilitiesText.Contains("logging") || capabilitiesText.Contains("structured log"))
+        {
+            topics.Add("log aggregation and analysis dashboard");
+        }
+
+        return topics;
     }
 
     /// <summary>

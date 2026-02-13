@@ -41,6 +41,9 @@ public class PostScanVerifier
         // 1. Prune hallucinated gaps (capability actually exists)
         PruneHallucinatedGaps(profile, factSheet, result);
 
+        // 1b. Prune gaps that are inappropriate for the app type (e.g., auth for desktop, Dockerfile for WPF)
+        PruneAppTypeInappropriateGaps(profile, factSheet, result);
+
         // 2. Prune hallucinated strengths (capability confirmed absent)
         PruneHallucinatedStrengths(profile, factSheet, result);
 
@@ -85,6 +88,70 @@ public class PostScanVerifier
                     result.GapsRemoved.Add($"HALLUCINATED: \"{gap}\" — contradicts proven capability: {proven.Capability} ({proven.Evidence})");
                     break;
                 }
+            }
+        }
+
+        foreach (var gap in toRemove)
+            profile.Gaps.Remove(gap);
+    }
+
+    /// <summary>
+    /// Prune gaps that are inappropriate for the app type.
+    /// Desktop apps don't need auth/authorization, Dockerfile, middleware, API gateway.
+    /// Also rejects gaps contradicting the database technology choice.
+    /// </summary>
+    private static void PruneAppTypeInappropriateGaps(RepoProfile profile, RepoFactSheet factSheet, VerificationResult result)
+    {
+        if (string.IsNullOrEmpty(factSheet.AppType)) return;
+
+        var appTypeLower = factSheet.AppType.ToLowerInvariant();
+        var isDesktop = appTypeLower.Contains("wpf") || appTypeLower.Contains("winforms") ||
+                        appTypeLower.Contains("desktop") || appTypeLower.Contains("maui") ||
+                        appTypeLower.Contains("avalonia");
+        var isConsole = appTypeLower.Contains("console");
+        var dbTech = factSheet.DatabaseTechnology.ToLowerInvariant();
+
+        var toRemove = new List<string>();
+
+        foreach (var gap in profile.Gaps)
+        {
+            var gapLower = gap.ToLowerInvariant();
+
+            // Desktop apps: auth/authorization is inapplicable (they use OS-level security, DPAPI, etc.)
+            if (isDesktop && (gapLower.Contains("authentication") || gapLower.Contains("authorization") ||
+                             gapLower.Contains("auth mechanism") || gapLower.Contains("oauth") ||
+                             gapLower.Contains("jwt") || gapLower.Contains("identity provider")))
+            {
+                toRemove.Add(gap);
+                result.GapsRemoved.Add($"WRONG-APPTYPE: \"{gap}\" — {factSheet.AppType} does not need web-style auth");
+                continue;
+            }
+
+            // Desktop/console apps: Dockerfile/containerization is not applicable
+            if ((isDesktop || isConsole) && (gapLower.Contains("dockerfile") || gapLower.Contains("container") ||
+                                             gapLower.Contains("docker") || gapLower.Contains("kubernetes")))
+            {
+                toRemove.Add(gap);
+                result.GapsRemoved.Add($"WRONG-APPTYPE: \"{gap}\" — {factSheet.AppType} is not containerized");
+                continue;
+            }
+
+            // Desktop apps: middleware/API gateway gaps are inapplicable
+            if (isDesktop && (gapLower.Contains("middleware") || gapLower.Contains("api gateway") ||
+                             gapLower.Contains("load balancer") || gapLower.Contains("reverse proxy")))
+            {
+                toRemove.Add(gap);
+                result.GapsRemoved.Add($"WRONG-APPTYPE: \"{gap}\" — {factSheet.AppType} has no web server layer");
+                continue;
+            }
+
+            // Database technology contradiction: if using raw SQLite, "no ORM" is a design choice, not a gap
+            if (dbTech.Contains("raw sqlite") && (gapLower.Contains("entity framework") ||
+                gapLower.Contains("orm") || gapLower.Contains("ef core")))
+            {
+                toRemove.Add(gap);
+                result.GapsRemoved.Add($"WRONG-DB: \"{gap}\" — project deliberately uses {factSheet.DatabaseTechnology}");
+                continue;
             }
         }
 
@@ -188,6 +255,36 @@ public class PostScanVerifier
                 continue;
             }
 
+            // ── Already-installed check: reject complements that match an active dependency ──
+            var compNameLower = comp.Name.ToLowerInvariant();
+            var compUrlLower = comp.Url.ToLowerInvariant();
+            bool alreadyInstalled = false;
+            foreach (var pkg in factSheet.ActivePackages)
+            {
+                var pkgLower = pkg.PackageName.ToLowerInvariant();
+                // Name match ("xunit" ≈ "xunit/xunit") or URL contains package name
+                if (compNameLower.Contains(pkgLower) || pkgLower.Contains(compNameLower) ||
+                    compUrlLower.Contains(pkgLower))
+                {
+                    toRemove.Add((comp, $"ALREADY-INSTALLED: \"{comp.Name}\" — {pkg.PackageName} {pkg.Version} is already an active dependency", "HARD"));
+                    alreadyInstalled = true;
+                    break;
+                }
+            }
+            if (alreadyInstalled) continue;
+
+            // ── Database technology contradiction: reject if complement conflicts with DB choice ──
+            if (!string.IsNullOrEmpty(factSheet.DatabaseTechnology))
+            {
+                var compText = (comp.Purpose + " " + comp.WhatItAdds + " " + comp.Name).ToLowerInvariant();
+                if (factSheet.DatabaseTechnology.Contains("Raw SQLite", StringComparison.OrdinalIgnoreCase) &&
+                    (compText.Contains("entity framework") || compText.Contains("ef core") || compText.Contains("efcore")))
+                {
+                    toRemove.Add((comp, $"WRONG-DB: \"{comp.Name}\" — project uses {factSheet.DatabaseTechnology}, not EF Core", "HARD"));
+                    continue;
+                }
+            }
+
             // ── Redundancy check: does this complement overlap with a proven capability? ──
             var compLower = (comp.Purpose + " " + comp.WhatItAdds + " " + comp.Name).ToLowerInvariant();
             bool redundant = false;
@@ -207,7 +304,6 @@ public class PostScanVerifier
             if (!string.IsNullOrEmpty(factSheet.TestFramework))
             {
                 var testFrameworks = new[] { "xunit", "nunit", "mstest", "jest", "mocha", "pytest" };
-                var compNameLower = comp.Name.ToLowerInvariant();
                 bool isTestFramework = testFrameworks.Any(tf => compNameLower.Contains(tf));
                 bool isAlreadyUsedFramework = compNameLower.Contains(factSheet.TestFramework.ToLowerInvariant());
 

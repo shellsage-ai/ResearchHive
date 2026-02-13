@@ -1171,8 +1171,24 @@ public class RepoScannerService
         sb.AppendLine($"Analyze the GitHub repo **{profile.Owner}/{profile.Name}** ({profile.PrimaryLanguage}).");
         sb.AppendLine($"Purpose: {profile.Description}");
         sb.AppendLine();
+
+        // Inject domain context so the LLM understands what the project DOES
+        if (profile.FactSheet != null)
+        {
+            sb.AppendLine("PROJECT CONTEXT (what this project actually is):");
+            if (!string.IsNullOrEmpty(profile.FactSheet.AppType))
+                sb.AppendLine($"  App Type: {profile.FactSheet.AppType}");
+            if (!string.IsNullOrEmpty(profile.FactSheet.DatabaseTechnology))
+                sb.AppendLine($"  Database: {profile.FactSheet.DatabaseTechnology}");
+            if (profile.FactSheet.ProvenCapabilities.Count > 0)
+                sb.AppendLine($"  Key Capabilities: {string.Join(", ", profile.FactSheet.ProvenCapabilities.Select(c => c.Capability))}");
+            if (profile.FactSheet.ActivePackages.Count > 0)
+                sb.AppendLine($"  Active Packages: {string.Join(", ", profile.FactSheet.ActivePackages.Select(p => p.PackageName).Take(15))}");
+            sb.AppendLine();
+        }
+
         sb.AppendLine("Below are potential complementary projects found via web search.");
-        sb.AppendLine("Select the BEST complementary projects that fill different gaps/needs.");
+        sb.AppendLine("Select the BEST complementary projects that EXTEND the project's capabilities in its domain.");
         sb.AppendLine("IMPORTANT: Use ONLY projects from the URLs provided. Do NOT invent project names.");
         sb.AppendLine("Ensure DIVERSITY — pick projects from different categories (Testing, Security, DevOps, etc.).");
         sb.AppendLine();
@@ -1209,6 +1225,10 @@ public class RepoScannerService
         sb.AppendLine("- Pick the BEST option per topic. If multiple topics yield the same project, pick alternatives.");
         sb.AppendLine("- Ensure category diversity — do NOT suggest multiple projects in the same category.");
         sb.AppendLine("- Derive project names from URL paths (github.com/owner/repo → repo).");
+        sb.AppendLine("- Do NOT suggest packages the project already uses (check Active Packages above).");
+        sb.AppendLine("- Do NOT suggest basic documentation repos (e.g., dotnet/docs) — suggest TOOLS, not reference material.");
+        sb.AppendLine("- Do NOT suggest technologies the project explicitly chose NOT to use (check Database above).");
+        sb.AppendLine("- Prefer projects that extend the project's DOMAIN capabilities over generic infrastructure.");
         sb.AppendLine("- Return ONLY valid JSON, no additional text.");
 
         return sb.ToString();

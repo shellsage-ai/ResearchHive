@@ -1584,4 +1584,378 @@ public class AiProviderRouter
         result.DiversityWarning.Should().NotBeNull("all complements are in the 'testing' category");
         result.DiversityWarning.Should().Contain("testing");
     }
+
+    // ═══════════════════════════════════════════════════
+    //  Phase 22: App-type gap pruning, active-package
+    //            complement rejection, domain-aware search
+    // ═══════════════════════════════════════════════════
+
+    // ── Fix 1: PruneAppTypeInappropriateGaps ──
+
+    [Fact]
+    public async Task PostScanVerifier_PrunesAuthGaps_WhenAppIsDesktop()
+    {
+        var verifier = new PostScanVerifier();
+        var profile = CreateTestProfile();
+        profile.Gaps.Add("Missing security features, such as authentication and authorization mechanisms");
+        profile.Gaps.Add("No JWT or OAuth support");
+        profile.Gaps.Add("No CI/CD pipeline"); // Should NOT be pruned — valid for any app type
+
+        var factSheet = new RepoFactSheet
+        {
+            AppType = "WPF desktop application",
+            Ecosystem = ".NET/C#"
+        };
+
+        var result = await verifier.VerifyAsync(profile, factSheet);
+
+        profile.Gaps.Should().NotContain(g => g.Contains("authentication", StringComparison.OrdinalIgnoreCase),
+            "desktop apps don't need web-style authentication");
+        profile.Gaps.Should().NotContain(g => g.Contains("JWT", StringComparison.OrdinalIgnoreCase),
+            "JWT is for web APIs, not desktop apps");
+        profile.Gaps.Should().Contain(g => g.Contains("CI/CD"),
+            "CI/CD is valid for any app type");
+        result.GapsRemoved.Should().Contain(s => s.Contains("WRONG-APPTYPE"));
+    }
+
+    [Fact]
+    public async Task PostScanVerifier_PrunesDockerGaps_WhenAppIsDesktop()
+    {
+        var verifier = new PostScanVerifier();
+        var profile = CreateTestProfile();
+        profile.Gaps.Add("No Dockerfile found");
+        profile.Gaps.Add("No containerization support");
+
+        var factSheet = new RepoFactSheet
+        {
+            AppType = "WPF desktop application",
+            Ecosystem = ".NET/C#"
+        };
+
+        var result = await verifier.VerifyAsync(profile, factSheet);
+
+        profile.Gaps.Should().NotContain(g => g.Contains("Dockerfile", StringComparison.OrdinalIgnoreCase));
+        profile.Gaps.Should().NotContain(g => g.Contains("container", StringComparison.OrdinalIgnoreCase));
+        result.GapsRemoved.Should().Contain(s => s.Contains("WRONG-APPTYPE"));
+    }
+
+    [Fact]
+    public async Task PostScanVerifier_PrunesMiddlewareGaps_WhenAppIsDesktop()
+    {
+        var verifier = new PostScanVerifier();
+        var profile = CreateTestProfile();
+        profile.Gaps.Add("No middleware pipeline configured");
+        profile.Gaps.Add("No API gateway integration");
+
+        var factSheet = new RepoFactSheet
+        {
+            AppType = "WPF desktop application",
+            Ecosystem = ".NET/C#"
+        };
+
+        var result = await verifier.VerifyAsync(profile, factSheet);
+
+        profile.Gaps.Should().BeEmpty("desktop apps have no web server layer");
+    }
+
+    [Fact]
+    public async Task PostScanVerifier_PrunesOrmGaps_WhenUsingRawSqlite()
+    {
+        var verifier = new PostScanVerifier();
+        var profile = CreateTestProfile();
+        profile.Gaps.Add("No ORM for data access");
+        profile.Gaps.Add("No Entity Framework Core integration");
+
+        var factSheet = new RepoFactSheet
+        {
+            AppType = "WPF desktop application",
+            DatabaseTechnology = "Raw SQLite via Microsoft.Data.Sqlite (NOT EF Core)",
+            Ecosystem = ".NET/C#"
+        };
+
+        var result = await verifier.VerifyAsync(profile, factSheet);
+
+        profile.Gaps.Should().NotContain(g => g.Contains("ORM", StringComparison.OrdinalIgnoreCase));
+        profile.Gaps.Should().NotContain(g => g.Contains("Entity Framework", StringComparison.OrdinalIgnoreCase));
+        result.GapsRemoved.Should().Contain(s => s.Contains("WRONG-DB"));
+    }
+
+    [Fact]
+    public async Task PostScanVerifier_KeepsAuthGaps_WhenAppIsWebApi()
+    {
+        var verifier = new PostScanVerifier();
+        var profile = CreateTestProfile();
+        profile.Gaps.Add("Missing authentication and authorization mechanisms");
+
+        var factSheet = new RepoFactSheet
+        {
+            AppType = "ASP.NET Core web API",
+            Ecosystem = ".NET/C#"
+        };
+
+        var result = await verifier.VerifyAsync(profile, factSheet);
+
+        profile.Gaps.Should().Contain(g => g.Contains("authentication"),
+            "web APIs DO need authentication — should not be pruned");
+    }
+
+    // ── Fix 2: Already-installed complement rejection ──
+
+    [Fact]
+    public async Task PostScanVerifier_RejectsComplementsThatMatchActivePackages()
+    {
+        var verifier = new PostScanVerifier();
+        var profile = CreateTestProfile();
+        profile.ComplementSuggestions.Add(new ComplementProject
+        {
+            Name = "xunit",
+            Url = "https://github.com/xunit/xunit",
+            Purpose = "Unit testing library for .NET",
+            WhatItAdds = "Testing framework",
+            Category = "Testing"
+        });
+        // Add enough non-rejected complements to stay above floor
+        profile.ComplementSuggestions.Add(new ComplementProject
+        {
+            Name = "Serilog", Url = "https://github.com/serilog/serilog",
+            Purpose = "Structured logging", WhatItAdds = "Log enrichment", Category = "Logging"
+        });
+        profile.ComplementSuggestions.Add(new ComplementProject
+        {
+            Name = "Snyk", Url = "https://github.com/snyk/cli",
+            Purpose = "Security scanning", WhatItAdds = "Vulnerability detection", Category = "Security"
+        });
+        profile.ComplementSuggestions.Add(new ComplementProject
+        {
+            Name = "Coverlet", Url = "https://github.com/coverlet-coverage/coverlet",
+            Purpose = "Code coverage", WhatItAdds = "Coverage reports", Category = "Testing"
+        });
+
+        var factSheet = new RepoFactSheet { Ecosystem = ".NET/C#" };
+        factSheet.ActivePackages.Add(new PackageEvidence
+        {
+            PackageName = "xunit",
+            Version = "2.5.3",
+            Evidence = "using Xunit in tests"
+        });
+
+        var result = await verifier.VerifyAsync(profile, factSheet);
+
+        profile.ComplementSuggestions.Should().NotContain(c => c.Name == "xunit",
+            "xunit is already an active dependency");
+        result.ComplementsRemoved.Should().Contain(s => s.Contains("ALREADY-INSTALLED"));
+    }
+
+    [Fact]
+    public async Task PostScanVerifier_RejectsEFCoreComplement_WhenUsingRawSqlite()
+    {
+        var verifier = new PostScanVerifier();
+        var profile = CreateTestProfile();
+        profile.ComplementSuggestions.Add(new ComplementProject
+        {
+            Name = "EFCore",
+            Url = "https://github.com/dotnet/EFCore",
+            Purpose = "Entity Framework Core ORM",
+            WhatItAdds = "Robust ORM for data access",
+            Category = "DataAccess"
+        });
+        profile.ComplementSuggestions.Add(new ComplementProject
+        {
+            Name = "Serilog", Url = "https://github.com/serilog/serilog",
+            Purpose = "Structured logging", WhatItAdds = "Log output", Category = "Logging"
+        });
+        profile.ComplementSuggestions.Add(new ComplementProject
+        {
+            Name = "BenchmarkDotNet", Url = "https://github.com/dotnet/BenchmarkDotNet",
+            Purpose = "Benchmarking", WhatItAdds = "Performance tests", Category = "Performance"
+        });
+        profile.ComplementSuggestions.Add(new ComplementProject
+        {
+            Name = "Snyk", Url = "https://github.com/snyk/cli",
+            Purpose = "Security scanning", WhatItAdds = "Vulnerability detection", Category = "Security"
+        });
+
+        var factSheet = new RepoFactSheet
+        {
+            Ecosystem = ".NET/C#",
+            DatabaseTechnology = "Raw SQLite via Microsoft.Data.Sqlite (NOT EF Core)"
+        };
+
+        var result = await verifier.VerifyAsync(profile, factSheet);
+
+        profile.ComplementSuggestions.Should().NotContain(c => c.Name == "EFCore",
+            "project deliberately uses raw SQLite instead of EF Core");
+        result.ComplementsRemoved.Should().Contain(s => s.Contains("WRONG-DB"));
+    }
+
+    [Fact]
+    public async Task PostScanVerifier_RejectsDocsRepoComplement_ViaUrlPackageMatch()
+    {
+        var verifier = new PostScanVerifier();
+        var profile = CreateTestProfile();
+        // "dotnet/docs" — the URL path contains "docs" but the key test is:
+        // the complement name might partially match a package like "dotnet"
+        // This tests that URL-based matching doesn't false-positive on partial .NET names
+        profile.ComplementSuggestions.Add(new ComplementProject
+        {
+            Name = "docs",
+            Url = "https://github.com/dotnet/docs",
+            Purpose = "Documentation for .NET",
+            WhatItAdds = "Reference documentation",
+            Category = "Documentation"
+        });
+        profile.ComplementSuggestions.Add(new ComplementProject
+        {
+            Name = "Serilog", Url = "https://github.com/serilog/serilog",
+            Purpose = "Logging", WhatItAdds = "Log output", Category = "Logging"
+        });
+        profile.ComplementSuggestions.Add(new ComplementProject
+        {
+            Name = "Snyk", Url = "https://github.com/snyk/cli",
+            Purpose = "Security scanning", WhatItAdds = "Vulnerability detection", Category = "Security"
+        });
+        profile.ComplementSuggestions.Add(new ComplementProject
+        {
+            Name = "BenchmarkDotNet", Url = "https://github.com/dotnet/BenchmarkDotNet",
+            Purpose = "Benchmarking", WhatItAdds = "Performance tests", Category = "Performance"
+        });
+
+        var factSheet = new RepoFactSheet { Ecosystem = ".NET/C#" };
+
+        var result = await verifier.VerifyAsync(profile, factSheet);
+
+        // "docs" should survive — it's not an active package name, it's a documentation repo
+        // The ALREADY-INSTALLED check compares against ActivePackages, and "docs" is not a package
+        // The real protection against boring doc repos is in the LLM prompt rules (Fix 3)
+        // This test verifies ALREADY-INSTALLED doesn't over-match on short names
+        profile.ComplementSuggestions.Should().Contain(c => c.Name == "docs",
+            "ALREADY-INSTALLED should only reject when actual package names match");
+    }
+
+    // ── Fix 3: Domain-aware search topics ──
+
+    [Fact]
+    public void InferDomainSearchTopics_DetectsAiDomain()
+    {
+        var profile = new RepoProfile
+        {
+            PrimaryLanguage = "C#",
+            FactSheet = new RepoFactSheet()
+        };
+        profile.FactSheet.ProvenCapabilities.Add(new CapabilityFingerprint
+            { Capability = "Multiple cloud AI providers", Evidence = "found in AppSettings.cs" });
+        profile.FactSheet.ProvenCapabilities.Add(new CapabilityFingerprint
+            { Capability = "Embedding generation", Evidence = "found in EmbeddingService.cs" });
+
+        var topics = ComplementResearchService.InferDomainSearchTopics(profile);
+
+        topics.Should().Contain(t => t.Contains("AI agent", StringComparison.OrdinalIgnoreCase),
+            "cloud AI + embedding = AI domain");
+        topics.Should().Contain(t => t.Contains("vector database", StringComparison.OrdinalIgnoreCase),
+            "embedding generation implies vector search domain");
+    }
+
+    [Fact]
+    public void InferDomainSearchTopics_DetectsWpfDomain()
+    {
+        var profile = new RepoProfile
+        {
+            PrimaryLanguage = "C#",
+            Frameworks = new List<string> { "WPF + MVVM" },
+            FactSheet = new RepoFactSheet { AppType = "WPF desktop application" }
+        };
+
+        var topics = ComplementResearchService.InferDomainSearchTopics(profile);
+
+        topics.Should().Contain(t => t.Contains("WPF", StringComparison.OrdinalIgnoreCase),
+            "WPF apps should get WPF-specific complement suggestions");
+    }
+
+    [Fact]
+    public void InferDomainSearchTopics_DetectsRagDomain()
+    {
+        var profile = new RepoProfile
+        {
+            PrimaryLanguage = "C#",
+            FactSheet = new RepoFactSheet()
+        };
+        profile.FactSheet.ProvenCapabilities.Add(new CapabilityFingerprint
+            { Capability = "RAG / vector search", Evidence = "found in RetrievalService.cs" });
+
+        var topics = ComplementResearchService.InferDomainSearchTopics(profile);
+
+        topics.Should().Contain(t => t.Contains("vector database", StringComparison.OrdinalIgnoreCase));
+        topics.Should().Contain(t => t.Contains("chunking", StringComparison.OrdinalIgnoreCase) ||
+                                     t.Contains("splitting", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void InferDomainSearchTopics_DetectsCitationResearchDomain()
+    {
+        var profile = new RepoProfile
+        {
+            PrimaryLanguage = "C#",
+            FactSheet = new RepoFactSheet()
+        };
+        profile.FactSheet.ProvenCapabilities.Add(new CapabilityFingerprint
+            { Capability = "Citation verification", Evidence = "found in CitationVerifier.cs" });
+
+        var topics = ComplementResearchService.InferDomainSearchTopics(profile);
+
+        topics.Should().Contain(t => t.Contains("HTML parsing", StringComparison.OrdinalIgnoreCase) ||
+                                     t.Contains("web scraping", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void InferDomainSearchTopics_ReturnsEmpty_WhenNoCapabilities()
+    {
+        var profile = new RepoProfile
+        {
+            PrimaryLanguage = "C#",
+            FactSheet = new RepoFactSheet()
+        };
+
+        var topics = ComplementResearchService.InferDomainSearchTopics(profile);
+
+        topics.Should().BeEmpty("no capabilities = no domain signals to infer from");
+    }
+
+    // ── Complement prompt includes project context ──
+
+    [Fact]
+    public void BuildJsonComplementPrompt_IncludesProjectContext()
+    {
+        var profile = new RepoProfile
+        {
+            Owner = "test",
+            Name = "my-app",
+            PrimaryLanguage = "C#",
+            Description = "An AI research tool",
+            FactSheet = new RepoFactSheet
+            {
+                AppType = "WPF desktop application",
+                DatabaseTechnology = "Raw SQLite",
+            }
+        };
+        profile.FactSheet.ProvenCapabilities.Add(new CapabilityFingerprint
+            { Capability = "Circuit breaker", Evidence = "LlmCircuitBreaker.cs" });
+        profile.FactSheet.ActivePackages.Add(new PackageEvidence
+            { PackageName = "xunit", Version = "2.5", Evidence = "test usage" });
+
+        var enriched = new List<(string topic, List<(string url, string description)> entries)>
+        {
+            ("AI tools", new List<(string, string)> { ("https://github.com/test/lib", "desc") })
+        };
+
+        var prompt = RepoScannerService.BuildJsonComplementPrompt(profile, enriched, 5);
+
+        prompt.Should().Contain("PROJECT CONTEXT");
+        prompt.Should().Contain("WPF desktop application");
+        prompt.Should().Contain("Raw SQLite");
+        prompt.Should().Contain("Circuit breaker");
+        prompt.Should().Contain("xunit");
+        prompt.Should().Contain("Do NOT suggest packages the project already uses");
+        prompt.Should().Contain("Do NOT suggest basic documentation repos");
+        prompt.Should().Contain("technologies the project explicitly chose NOT to use");
+    }
 }
