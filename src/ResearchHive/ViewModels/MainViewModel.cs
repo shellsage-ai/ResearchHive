@@ -73,6 +73,7 @@ public partial class MainViewModel : ObservableObject
         if (_activeSessionId == sessionId)
         {
             _activeSessionId = null;
+            Sidebar.SelectedSession = null;
             CurrentView = _factory.CreateWelcome();
             StatusText = "Session deleted";
         }
@@ -91,6 +92,7 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void ShowSettings()
     {
+        Sidebar.SelectedSession = null;  // Clear so re-clicking the same session works on return
         CurrentView = _factory.CreateSettings();
         StatusText = "Settings";
     }
@@ -98,6 +100,7 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void ShowHome()
     {
+        Sidebar.SelectedSession = null;  // Clear so re-clicking the same session works on return
         CurrentView = _factory.CreateWelcome();
         StatusText = "Ready";
     }
