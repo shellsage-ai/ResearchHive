@@ -12,12 +12,14 @@ public class IndexService
     private readonly SessionManager _sessionManager;
     private readonly EmbeddingService _embeddingService;
     private readonly AppSettings _settings;
+    private readonly PdfIngestionService _pdfService;
 
-    public IndexService(SessionManager sessionManager, EmbeddingService embeddingService, AppSettings settings)
+    public IndexService(SessionManager sessionManager, EmbeddingService embeddingService, AppSettings settings, PdfIngestionService pdfService)
     {
         _sessionManager = sessionManager;
         _embeddingService = embeddingService;
         _settings = settings;
+        _pdfService = pdfService;
     }
 
     public async Task IndexSnapshotAsync(string sessionId, Snapshot snapshot, CancellationToken ct = default)
@@ -42,7 +44,8 @@ public class IndexService
         }
         else if (artifact.ContentType == "application/pdf")
         {
-            text = ExtractPdfText(artifact.StorePath);
+            var pdfResult = await _pdfService.ExtractTextAsync(artifact.StorePath, ct);
+            text = pdfResult.FullText;
         }
         else return;
 
@@ -130,52 +133,4 @@ public class IndexService
         return chunks;
     }
 
-    private static string ExtractPdfText(string pdfPath)
-    {
-        try
-        {
-            // Simple PDF text extraction: read raw bytes and extract text strings
-            var bytes = File.ReadAllBytes(pdfPath);
-            var sb = new System.Text.StringBuilder();
-            var text = System.Text.Encoding.UTF8.GetString(bytes);
-            
-            // Extract text between BT/ET markers (basic PDF text extraction)
-            int pos = 0;
-            while ((pos = text.IndexOf("BT", pos, StringComparison.Ordinal)) >= 0)
-            {
-                var end = text.IndexOf("ET", pos, StringComparison.Ordinal);
-                if (end < 0) break;
-                var block = text.Substring(pos, end - pos);
-                // Find Tj and TJ operators for text
-                foreach (var line in block.Split('\n'))
-                {
-                    var trimmed = line.Trim();
-                    if (trimmed.EndsWith("Tj") || trimmed.EndsWith("TJ"))
-                    {
-                        var start = trimmed.IndexOf('(');
-                        var close = trimmed.LastIndexOf(')');
-                        if (start >= 0 && close > start)
-                            sb.Append(trimmed[(start + 1)..close]).Append(' ');
-                    }
-                }
-                sb.AppendLine();
-                pos = end + 2;
-            }
-            
-            var result = sb.ToString().Trim();
-            // Fallback: if extraction got nothing, try reading as plain text
-            if (string.IsNullOrWhiteSpace(result))
-            {
-                // Try Latin1 encoding
-                result = System.Text.Encoding.Latin1.GetString(bytes);
-                // Remove non-printable chars
-                result = new string(result.Where(c => !char.IsControl(c) || c == '\n' || c == '\r').ToArray());
-            }
-            return result;
-        }
-        catch
-        {
-            return "";
-        }
-    }
 }

@@ -27,6 +27,9 @@ public partial class App : Application
         // Register dialog service
         services.AddSingleton<IDialogService, DialogService>();
 
+        // Register notification service (Windows toast)
+        services.AddSingleton<NotificationService>();
+
         // Register ViewModelFactory and ViewModels
         services.AddSingleton<ViewModelFactory>();
         services.AddTransient<MainViewModel>(sp =>
@@ -44,6 +47,7 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        NotificationService.Cleanup();
         _serviceProvider?.Dispose();
         base.OnExit(e);
     }

@@ -133,8 +133,47 @@ public class SessionDb : IDisposable
             CREATE INDEX IF NOT EXISTS idx_idea_cards_job ON idea_cards(job_id);
             CREATE INDEX IF NOT EXISTS idx_material_candidates_job ON material_candidates(job_id);
             CREATE INDEX IF NOT EXISTS idx_fusion_results_job ON fusion_results(job_id);
+
+            -- Repo Intelligence tables
+            CREATE TABLE IF NOT EXISTS repo_profiles (
+                id TEXT PRIMARY KEY, session_id TEXT, repo_url TEXT, owner TEXT, name TEXT,
+                description TEXT, primary_language TEXT, languages TEXT, frameworks TEXT,
+                dependencies TEXT, stars INTEGER, forks INTEGER, open_issues INTEGER,
+                topics TEXT, last_commit_utc TEXT, readme_content TEXT,
+                strengths TEXT, gaps TEXT, complement_suggestions TEXT,
+                top_level_entries TEXT DEFAULT '[]', created_utc TEXT,
+                code_book TEXT DEFAULT '', tree_sha TEXT DEFAULT '',
+                indexed_file_count INTEGER DEFAULT 0, indexed_chunk_count INTEGER DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS project_fusions (
+                id TEXT PRIMARY KEY, session_id TEXT, job_id TEXT, title TEXT,
+                input_summary TEXT, inputs TEXT, goal TEXT,
+                unified_vision TEXT, architecture_proposal TEXT, tech_stack_decisions TEXT,
+                feature_matrix TEXT, gaps_closed TEXT, new_gaps TEXT,
+                ip_notes TEXT, provenance_map TEXT, created_utc TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_repo_profiles_session ON repo_profiles(session_id);
+            CREATE INDEX IF NOT EXISTS idx_project_fusions_session ON project_fusions(session_id);
         ";
         cmd.ExecuteNonQuery();
+
+        // Schema migration: add columns that may be missing in older databases
+        MigrateAddColumn("repo_profiles", "top_level_entries", "TEXT DEFAULT '[]'");
+        MigrateAddColumn("repo_profiles", "code_book", "TEXT DEFAULT ''");
+        MigrateAddColumn("repo_profiles", "tree_sha", "TEXT DEFAULT ''");
+        MigrateAddColumn("repo_profiles", "indexed_file_count", "INTEGER DEFAULT 0");
+        MigrateAddColumn("repo_profiles", "indexed_chunk_count", "INTEGER DEFAULT 0");
+    }
+
+    private void MigrateAddColumn(string table, string column, string typeDef)
+    {
+        try
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {typeDef}";
+            cmd.ExecuteNonQuery();
+        }
+        catch { /* column already exists — ignore */ }
     }
 
     // ---- Artifact CRUD ----
@@ -1234,5 +1273,183 @@ public class SessionDb : IDisposable
 
         // Clear the SQLite connection pool so the file is fully released
         SqliteConnection.ClearPool(new SqliteConnection(connString));
+    }
+
+    // ---- Repo Profile CRUD ----
+    public void SaveRepoProfile(RepoProfile rp)
+    {
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = @"INSERT OR REPLACE INTO repo_profiles 
+            (id,session_id,repo_url,owner,name,description,primary_language,languages,frameworks,
+             dependencies,stars,forks,open_issues,topics,last_commit_utc,readme_content,
+             strengths,gaps,complement_suggestions,top_level_entries,created_utc,
+             code_book,tree_sha,indexed_file_count,indexed_chunk_count)
+            VALUES ($id,$sid,$url,$own,$nm,$desc,$pl,$langs,$fw,$deps,$stars,$forks,$oi,$topics,$lcu,$readme,$str,$gaps,$cs,$tle,$utc,
+                    $cb,$tsha,$ifc,$icc)";
+        cmd.Parameters.AddWithValue("$id", rp.Id);
+        cmd.Parameters.AddWithValue("$sid", rp.SessionId);
+        cmd.Parameters.AddWithValue("$url", rp.RepoUrl);
+        cmd.Parameters.AddWithValue("$own", rp.Owner);
+        cmd.Parameters.AddWithValue("$nm", rp.Name);
+        cmd.Parameters.AddWithValue("$desc", rp.Description);
+        cmd.Parameters.AddWithValue("$pl", rp.PrimaryLanguage);
+        cmd.Parameters.AddWithValue("$langs", JsonSerializer.Serialize(rp.Languages));
+        cmd.Parameters.AddWithValue("$fw", JsonSerializer.Serialize(rp.Frameworks));
+        cmd.Parameters.AddWithValue("$deps", JsonSerializer.Serialize(rp.Dependencies));
+        cmd.Parameters.AddWithValue("$stars", rp.Stars);
+        cmd.Parameters.AddWithValue("$forks", rp.Forks);
+        cmd.Parameters.AddWithValue("$oi", rp.OpenIssues);
+        cmd.Parameters.AddWithValue("$topics", JsonSerializer.Serialize(rp.Topics));
+        cmd.Parameters.AddWithValue("$lcu", rp.LastCommitUtc?.ToString("O") ?? (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("$readme", rp.ReadmeContent);
+        cmd.Parameters.AddWithValue("$str", JsonSerializer.Serialize(rp.Strengths));
+        cmd.Parameters.AddWithValue("$gaps", JsonSerializer.Serialize(rp.Gaps));
+        cmd.Parameters.AddWithValue("$cs", JsonSerializer.Serialize(rp.ComplementSuggestions));
+        cmd.Parameters.AddWithValue("$tle", JsonSerializer.Serialize(rp.TopLevelEntries));
+        cmd.Parameters.AddWithValue("$utc", rp.CreatedUtc.ToString("O"));
+        cmd.Parameters.AddWithValue("$cb", (object?)rp.CodeBook ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$tsha", (object?)rp.TreeSha ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$ifc", rp.IndexedFileCount);
+        cmd.Parameters.AddWithValue("$icc", rp.IndexedChunkCount);
+        cmd.ExecuteNonQuery();
+    }
+
+    public List<RepoProfile> GetRepoProfiles()
+    {
+        var list = new List<RepoProfile>();
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = "SELECT * FROM repo_profiles ORDER BY created_utc DESC";
+        using var r = cmd.ExecuteReader();
+        while (r.Read())
+        {
+            list.Add(new RepoProfile
+            {
+                Id = r.GetString(0), SessionId = r.GetString(1), RepoUrl = r.GetString(2),
+                Owner = r.GetString(3), Name = r.GetString(4), Description = r.GetString(5),
+                PrimaryLanguage = r.GetString(6),
+                Languages = JsonSerializer.Deserialize<List<string>>(r.GetString(7)) ?? new(),
+                Frameworks = JsonSerializer.Deserialize<List<string>>(r.GetString(8)) ?? new(),
+                Dependencies = JsonSerializer.Deserialize<List<RepoDependency>>(r.GetString(9)) ?? new(),
+                Stars = r.GetInt32(10), Forks = r.GetInt32(11), OpenIssues = r.GetInt32(12),
+                Topics = JsonSerializer.Deserialize<List<string>>(r.GetString(13)) ?? new(),
+                LastCommitUtc = r.IsDBNull(14) ? null : DateTime.Parse(r.GetString(14)),
+                ReadmeContent = r.GetString(15),
+                Strengths = JsonSerializer.Deserialize<List<string>>(r.GetString(16)) ?? new(),
+                Gaps = JsonSerializer.Deserialize<List<string>>(r.GetString(17)) ?? new(),
+                ComplementSuggestions = JsonSerializer.Deserialize<List<ComplementProject>>(r.GetString(18)) ?? new(),
+                TopLevelEntries = TryDeserializeColumn<List<RepoEntry>>(r, r.GetOrdinal("top_level_entries")) ?? new(),
+                CreatedUtc = DateTime.Parse(r.GetString(r.GetOrdinal("created_utc"))),
+                CodeBook = SafeGetString(r, "code_book") ?? "",
+                TreeSha = SafeGetString(r, "tree_sha") ?? "",
+                IndexedFileCount = SafeGetInt(r, "indexed_file_count"),
+                IndexedChunkCount = SafeGetInt(r, "indexed_chunk_count")
+            });
+        }
+        return list;
+    }
+
+    public void DeleteRepoProfile(string id)
+    {
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = "DELETE FROM repo_profiles WHERE id = $id";
+        cmd.Parameters.AddWithValue("$id", id);
+        cmd.ExecuteNonQuery();
+    }
+
+    // ---- Project Fusion CRUD ----
+    public void SaveProjectFusion(ProjectFusionArtifact pf)
+    {
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = @"INSERT OR REPLACE INTO project_fusions 
+            (id,session_id,job_id,title,input_summary,inputs,goal,unified_vision,
+             architecture_proposal,tech_stack_decisions,feature_matrix,gaps_closed,
+             new_gaps,ip_notes,provenance_map,created_utc)
+            VALUES ($id,$sid,$jid,$t,$is,$inp,$g,$uv,$ap,$ts,$fm,$gc,$ng,$ip,$pm,$utc)";
+        cmd.Parameters.AddWithValue("$id", pf.Id);
+        cmd.Parameters.AddWithValue("$sid", pf.SessionId);
+        cmd.Parameters.AddWithValue("$jid", pf.JobId);
+        cmd.Parameters.AddWithValue("$t", pf.Title);
+        cmd.Parameters.AddWithValue("$is", pf.InputSummary);
+        cmd.Parameters.AddWithValue("$inp", JsonSerializer.Serialize(pf.Inputs));
+        cmd.Parameters.AddWithValue("$g", pf.Goal.ToString());
+        cmd.Parameters.AddWithValue("$uv", pf.UnifiedVision);
+        cmd.Parameters.AddWithValue("$ap", pf.ArchitectureProposal);
+        cmd.Parameters.AddWithValue("$ts", pf.TechStackDecisions);
+        cmd.Parameters.AddWithValue("$fm", JsonSerializer.Serialize(pf.FeatureMatrix));
+        cmd.Parameters.AddWithValue("$gc", JsonSerializer.Serialize(pf.GapsClosed));
+        cmd.Parameters.AddWithValue("$ng", JsonSerializer.Serialize(pf.NewGaps));
+        cmd.Parameters.AddWithValue("$ip", pf.IpNotes != null ? JsonSerializer.Serialize(pf.IpNotes) : DBNull.Value);
+        cmd.Parameters.AddWithValue("$pm", JsonSerializer.Serialize(pf.ProvenanceMap));
+        cmd.Parameters.AddWithValue("$utc", pf.CreatedUtc.ToString("O"));
+        cmd.ExecuteNonQuery();
+    }
+
+    public List<ProjectFusionArtifact> GetProjectFusions()
+    {
+        var list = new List<ProjectFusionArtifact>();
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = "SELECT * FROM project_fusions ORDER BY created_utc DESC";
+        using var r = cmd.ExecuteReader();
+        while (r.Read())
+        {
+            list.Add(new ProjectFusionArtifact
+            {
+                Id = r.GetString(0), SessionId = r.GetString(1), JobId = r.GetString(2),
+                Title = r.GetString(3), InputSummary = r.GetString(4),
+                Inputs = JsonSerializer.Deserialize<List<ProjectFusionInput>>(r.GetString(5)) ?? new(),
+                Goal = Enum.TryParse<ProjectFusionGoal>(r.GetString(6), out var g) ? g : ProjectFusionGoal.Merge,
+                UnifiedVision = r.GetString(7), ArchitectureProposal = r.GetString(8),
+                TechStackDecisions = r.GetString(9),
+                FeatureMatrix = JsonSerializer.Deserialize<Dictionary<string, string>>(r.GetString(10)) ?? new(),
+                GapsClosed = JsonSerializer.Deserialize<List<string>>(r.GetString(11)) ?? new(),
+                NewGaps = JsonSerializer.Deserialize<List<string>>(r.GetString(12)) ?? new(),
+                IpNotes = r.IsDBNull(13) ? null : JsonSerializer.Deserialize<IpAssessment>(r.GetString(13)),
+                ProvenanceMap = JsonSerializer.Deserialize<Dictionary<string, string>>(r.GetString(14)) ?? new(),
+                CreatedUtc = DateTime.Parse(r.GetString(15))
+            });
+        }
+        return list;
+    }
+
+    public void DeleteProjectFusion(string id)
+    {
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = "DELETE FROM project_fusions WHERE id = $id";
+        cmd.Parameters.AddWithValue("$id", id);
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>Safely read a JSON column that may not exist in older DB schemas.</summary>
+    private static T? TryDeserializeColumn<T>(Microsoft.Data.Sqlite.SqliteDataReader r, int ordinal)
+    {
+        try
+        {
+            if (ordinal >= r.FieldCount || r.IsDBNull(ordinal)) return default;
+            var json = r.GetString(ordinal);
+            return JsonSerializer.Deserialize<T>(json);
+        }
+        catch { return default; }
+    }
+
+    /// <summary>Safely read a string column that may not exist in older DB schemas.</summary>
+    private static string? SafeGetString(Microsoft.Data.Sqlite.SqliteDataReader r, string columnName)
+    {
+        try
+        {
+            var ordinal = r.GetOrdinal(columnName);
+            return r.IsDBNull(ordinal) ? null : r.GetString(ordinal);
+        }
+        catch { return null; }
+    }
+
+    /// <summary>Safely read an int column that may not exist in older DB schemas.</summary>
+    private static int SafeGetInt(Microsoft.Data.Sqlite.SqliteDataReader r, string columnName)
+    {
+        try
+        {
+            var ordinal = r.GetOrdinal(columnName);
+            return r.IsDBNull(ordinal) ? 0 : r.GetInt32(ordinal);
+        }
+        catch { return 0; }
     }
 }

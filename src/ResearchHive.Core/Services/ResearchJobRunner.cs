@@ -25,6 +25,13 @@ public class ResearchJobRunner
     private readonly GoogleSearchService _googleSearch;
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _activeCts = new();
 
+    /// <summary>Per-engine search health tracking — updated during SearchMultiLaneAsync.</summary>
+    private readonly ConcurrentDictionary<string, SearchEngineHealthEntry> _engineHealth = new();
+
+    // Optional Hive Mind integration — set after construction via property injection
+    // to avoid breaking existing constructor signatures and DI registrations.
+    public GlobalMemoryService? GlobalMemory { get; set; }
+
     // Cached prompt embedding for IsContentRelevantAsync — avoids re-embedding the same prompt
     // for every snapshot check (~200-500ms per embedding call on local Ollama)
     private float[]? _cachedPromptEmbedding;
@@ -105,6 +112,7 @@ public class ResearchJobRunner
                 GroundingScore = job.GroundingScore,
                 BrowserPoolAvailable = poolStats.Total,
                 BrowserPoolTotal = poolStats.Max,
+                SearchEngineHealth = _engineHealth.Values.ToList(),
             });
         }
 
@@ -792,6 +800,9 @@ Return ONLY numbered queries, no explanation:
             db.SaveJob(job); // Single final save with all data
             EmitProgress("Research complete! All reports generated.");
 
+            // Fire-and-forget: extract strategy + auto-promote to Hive Mind
+            _ = TryExtractStrategyAsync(sessionId, job, session2.Pack.ToString());
+
             return job;
         }
         catch (OperationCanceledException)
@@ -1139,6 +1150,9 @@ REQUIRED SECTIONS (use these exact headings):
         db.SaveJob(job);
         emitProgress("Research complete! (Streamlined Codex mode — single synthesis call)", job.GroundingScore);
 
+        // Fire-and-forget: extract strategy + auto-promote to Hive Mind
+        _ = TryExtractStrategyAsync(sessionId, job, session2.Pack.ToString());
+
         return job;
     }
 
@@ -1269,6 +1283,7 @@ REQUIRED SECTIONS (use these exact headings):
                 GroundingScore = job.GroundingScore,
                 BrowserPoolAvailable = poolStats.Total,
                 BrowserPoolTotal = poolStats.Max,
+                SearchEngineHealth = _engineHealth.Values.ToList(),
             });
         }
 
@@ -1636,7 +1651,8 @@ IMPORTANT: In the Sources section, EVERY source must include its full URL. Use t
             {
                 JobId = job.Id, State = job.State, StepDescription = desc,
                 SourcesFound = job.AcquiredSourceIds.Count,
-                TargetSources = additionalSources
+                TargetSources = additionalSources,
+                SearchEngineHealth = _engineHealth.Values.ToList(),
             });
 
         try
@@ -1968,6 +1984,11 @@ IMPORTANT: In the Sources section, EVERY source must include its full URL. Use t
         var targetUrlCount = Math.Min(60, Math.Max(40, queries.Count * 8)); // B4: dynamic cap
         var timeRange = _settings.SearchTimeRange;
 
+        // Initialize engine health tracking for this search round
+        foreach (var engine in BrowserSearchService.SearchEngines)
+            _engineHealth.GetOrAdd(engine.Name, _ => new SearchEngineHealthEntry { EngineName = engine.Name });
+        _engineHealth.GetOrAdd("google", _ => new SearchEngineHealthEntry { EngineName = "google" });
+
         // Fire ALL queries concurrently — the browser context pool limits actual parallelism
         var queryTasks = queries.Select(async query =>
         {
@@ -1979,22 +2000,32 @@ IMPORTANT: In the Sources section, EVERY source must include its full URL. Use t
                 .Select(async engine =>
                 {
                     if (allUrls.Count >= targetUrlCount) return; // B4: early exit
+                    var health = _engineHealth.GetOrAdd(engine.Name, _ => new SearchEngineHealthEntry { EngineName = engine.Name });
+                    health.QueriesAttempted++;
                     try
                     {
                         var resultUrls = await _browserSearch.SearchAsync(query, engine.Name, engine.UrlTemplate, timeRange, ct);
                         if (resultUrls.Count == 0)
                         {
                             engineFailures.AddOrUpdate(engine.Name, 1, (_, c) => c + 1);
+                            health.ConsecutiveFailures++;
                         }
                         else
                         {
+                            health.QueriesSucceeded++;
+                            health.TotalResultsFound += resultUrls.Count;
+                            health.ConsecutiveFailures = 0;
                             foreach (var u in resultUrls) allUrls.TryAdd(u, 0);
                         }
                     }
                     catch
                     {
                         engineFailures.AddOrUpdate(engine.Name, 1, (_, c) => c + 1);
+                        health.ConsecutiveFailures++;
                     }
+                    // Mark as skipped if too many failures
+                    if (engineFailures.TryGetValue(engine.Name, out var fc) && fc >= 2)
+                        health.IsSkipped = true;
                 })
                 .ToList();
 
@@ -2005,18 +2036,31 @@ IMPORTANT: In the Sources section, EVERY source must include its full URL. Use t
                 && _googleSearch.SessionSearchCount < GoogleSearchService.MaxQueriesPerSession
                 && (!engineFailures.TryGetValue("google", out var gf) || gf < 2))
             {
+                var gHealth = _engineHealth.GetOrAdd("google", _ => new SearchEngineHealthEntry { EngineName = "google" });
+                gHealth.QueriesAttempted++;
                 try
                 {
                     var googleUrls = await _googleSearch.SearchAsync(query, timeRange, ct);
                     if (googleUrls.Count == 0)
+                    {
                         engineFailures.AddOrUpdate("google", 1, (_, c) => c + 1);
+                        gHealth.ConsecutiveFailures++;
+                    }
                     else
+                    {
+                        gHealth.QueriesSucceeded++;
+                        gHealth.TotalResultsFound += googleUrls.Count;
+                        gHealth.ConsecutiveFailures = 0;
                         foreach (var u in googleUrls) allUrls.TryAdd(u, 0);
+                    }
                 }
                 catch
                 {
                     engineFailures.AddOrUpdate("google", 1, (_, c) => c + 1);
+                    gHealth.ConsecutiveFailures++;
                 }
+                if (engineFailures.TryGetValue("google", out var gfc) && gfc >= 2)
+                    gHealth.IsSkipped = true;
             }
         }).ToList();
 
@@ -3159,6 +3203,20 @@ Respond in EXACTLY this JSON format (no markdown, no code fences):
             EntryType = type,
             LinkedSourceId = linkedSourceId
         });
+    }
+
+    /// <summary>
+    /// Fire-and-forget: extract a strategy from a completed job and promote key chunks
+    /// to the Hive Mind. Swallows all exceptions — never fails the job.
+    /// </summary>
+    private async Task TryExtractStrategyAsync(string sessionId, ResearchJob job, string? domainPack)
+    {
+        if (GlobalMemory == null) return;
+        try
+        {
+            await GlobalMemory.ExtractAndSaveStrategyAsync(sessionId, job, domainPack);
+        }
+        catch { /* best effort */ }
     }
 }
 

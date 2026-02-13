@@ -27,6 +27,13 @@ public class RetrievalService
     }
 
     public async Task<List<RetrievalResult>> HybridSearchAsync(string sessionId, string query, int topK = 0, CancellationToken ct = default)
+        => await HybridSearchAsync(sessionId, query, sourceTypeFilter: null, topK, ct);
+
+    /// <summary>
+    /// Hybrid search with optional source-type filter (e.g. "repo_code", "repo_doc").
+    /// When a filter is set, only chunks matching one of the supplied source types are returned.
+    /// </summary>
+    public async Task<List<RetrievalResult>> HybridSearchAsync(string sessionId, string query, IReadOnlyList<string>? sourceTypeFilter, int topK = 0, CancellationToken ct = default)
     {
         if (topK <= 0) topK = _settings.DefaultTopK;
         var db = _sessionManager.GetSessionDb(sessionId);
@@ -40,6 +47,8 @@ public class RetrievalService
             var maxBm25 = ftsHits.Count > 0 ? ftsHits.Max(h => h.bm25Score) : 1f;
             if (maxBm25 <= 0) maxBm25 = 1f;
             bm25Results = ftsHits.Select(h => (h.chunk, h.bm25Score / maxBm25)).ToList();
+            if (sourceTypeFilter != null)
+                bm25Results = bm25Results.Where(r => sourceTypeFilter.Contains(r.chunk.SourceType)).ToList();
         }
         catch
         {
@@ -49,6 +58,8 @@ public class RetrievalService
                 var ftsChunks = db.SearchChunksFts(query, topK * 2);
                 for (int i = 0; i < ftsChunks.Count; i++)
                     bm25Results.Add((ftsChunks[i], 1.0f - (i / (float)(ftsChunks.Count + 1))));
+                if (sourceTypeFilter != null)
+                    bm25Results = bm25Results.Where(r => sourceTypeFilter.Contains(r.Item1.SourceType)).ToList();
             }
             catch { /* Both failed — continue with semantic only */ }
         }
@@ -85,6 +96,7 @@ public class RetrievalService
 
             semanticResults = candidates
                 .Where(c => c.Embedding != null)
+                .Where(c => sourceTypeFilter == null || sourceTypeFilter.Contains(c.SourceType))
                 .Select(c => (chunk: c, score: EmbeddingService.CosineSimilarity(queryEmbedding, c.Embedding)))
                 .OrderByDescending(x => x.score)
                 .Take(topK * 3)

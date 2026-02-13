@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Input;
 using ResearchHive.ViewModels;
 
@@ -94,5 +95,20 @@ public partial class SessionWorkspaceView : UserControl
             vm.ShowLiveProgress = false;
             vm.IsResearchComplete = false;
         }
+    }
+
+    /// <summary>Handle Hyperlink clicks to open URLs in the default browser.</summary>
+    private void Hyperlink_RequestNavigate(object sender, System.Windows.Navigation.RequestNavigateEventArgs e)
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = e.Uri.AbsoluteUri,
+                UseShellExecute = true
+            });
+        }
+        catch { /* best effort */ }
+        e.Handled = true;
     }
 }

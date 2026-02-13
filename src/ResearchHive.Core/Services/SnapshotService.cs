@@ -19,13 +19,18 @@ public partial class SnapshotService
     private readonly CourtesyPolicy _courtesy;
     private readonly AppSettings _settings;
     private readonly HttpClient _httpClient;
+    private readonly ArtifactStore _artifactStore;
+    private readonly IndexService _indexService;
     private readonly List<RequestLog> _requestLogs = new();
 
-    public SnapshotService(SessionManager sessionManager, CourtesyPolicy courtesy, AppSettings settings)
+    public SnapshotService(SessionManager sessionManager, CourtesyPolicy courtesy, AppSettings settings,
+        ArtifactStore artifactStore, IndexService indexService)
     {
         _sessionManager = sessionManager;
         _courtesy = courtesy;
         _settings = settings;
+        _artifactStore = artifactStore;
+        _indexService = indexService;
 
         var handler = new HttpClientHandler
         {
@@ -132,6 +137,14 @@ public partial class SnapshotService
 
             _courtesy.RecordSuccess(url);
 
+            // PDF auto-detection: if the response is a PDF, ingest as artifact instead of HTML snapshot
+            var contentType = response.Content.Headers.ContentType?.MediaType ?? "";
+            if (contentType.Equals("application/pdf", StringComparison.OrdinalIgnoreCase) ||
+                url.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+            {
+                return await IngestPdfResponseAsync(sessionId, url, canonical, session.WorkspacePath, response, db, ct);
+            }
+
             var html = await response.Content.ReadAsStringAsync(ct);
             var contentHash = ArtifactStore.ComputeHash(Encoding.UTF8.GetBytes(html));
 
@@ -198,6 +211,63 @@ public partial class SnapshotService
         {
             _courtesy.ReleaseSlot(url);
         }
+    }
+
+    /// <summary>
+    /// When CaptureUrlAsync detects a PDF response, download and ingest as an artifact,
+    /// then return a snapshot referencing the extracted text.
+    /// </summary>
+    private async Task<Snapshot> IngestPdfResponseAsync(string sessionId, string url, string canonical,
+        string workspacePath, HttpResponseMessage response, Data.SessionDb db, CancellationToken ct)
+    {
+        var bundlePath = Path.Combine(workspacePath, "Snapshots", Guid.NewGuid().ToString("N")[..12]);
+        Directory.CreateDirectory(bundlePath);
+        var pdfPath = Path.Combine(bundlePath, "document.pdf");
+
+        var bytes = await response.Content.ReadAsByteArrayAsync(ct);
+        await File.WriteAllBytesAsync(pdfPath, bytes, ct);
+
+        // Ingest as artifact (gets content-addressed storage + indexing)
+        try
+        {
+            var artifact = _artifactStore.IngestFile(sessionId, pdfPath);
+            await _indexService.IndexArtifactAsync(sessionId, artifact, ct);
+            db.Log("INFO", "Snapshot", $"Auto-ingested PDF from URL: {url}", new() { { "artifact_id", artifact.Id } });
+        }
+        catch (Exception ex)
+        {
+            db.Log("WARN", "Snapshot", $"PDF ingest failed for {url}: {ex.Message}");
+        }
+
+        // Return a snapshot so the research pipeline can track it
+        var snapshot = new Snapshot
+        {
+            SessionId = sessionId,
+            Url = url,
+            CanonicalUrl = canonical,
+            Title = $"[PDF] {Path.GetFileName(new Uri(url).AbsolutePath)}",
+            HttpStatus = (int)response.StatusCode,
+            ContentHash = ArtifactStore.ComputeHash(bytes),
+            CapturedUtc = DateTime.UtcNow,
+            BundlePath = bundlePath,
+            TextPath = Path.Combine(bundlePath, "page.txt"),
+        };
+
+        // Write extracted text to the snapshot bundle for display
+        try
+        {
+            var pdfService = new PdfIngestionService(new OcrService(_sessionManager));
+            var pdfResult = await pdfService.ExtractTextAsync(pdfPath, ct);
+            await File.WriteAllTextAsync(snapshot.TextPath, pdfResult.FullText, ct);
+        }
+        catch
+        {
+            await File.WriteAllTextAsync(snapshot.TextPath, $"[PDF from {url} — text extraction failed]", ct);
+        }
+
+        db.SaveSnapshot(snapshot);
+        _courtesy.CacheUrl(canonical, snapshot.Id);
+        return snapshot;
     }
 
     private async Task<Snapshot> RetryCapture(string sessionId, string url, string canonical,

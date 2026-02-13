@@ -11,7 +11,8 @@ public enum DomainPack
     Math,
     MakerMaterials,
     ChemistrySafe,
-    ProgrammingResearchIP
+    ProgrammingResearchIP,
+    RepoIntelligence
 }
 
 public static class EnumDisplayNames
@@ -24,6 +25,7 @@ public static class EnumDisplayNames
         DomainPack.MakerMaterials => "Maker / Materials",
         DomainPack.ChemistrySafe => "Chemistry (Safe)",
         DomainPack.ProgrammingResearchIP => "Programming Research & IP",
+        DomainPack.RepoIntelligence => "Repo Intelligence & Fusion",
         _ => pack.ToString()
     };
 

@@ -203,4 +203,37 @@
         <Setter Property="Background" Value="White"/>
     </Style>
 
+    <!-- Selectable read-only text — looks like TextBlock but allows select/copy -->
+    <Style x:Key="SelectableText" TargetType="TextBox">
+        <Setter Property="IsReadOnly" Value="True"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Padding" Value="0"/>
+        <Setter Property="TextWrapping" Value="Wrap"/>
+        <Setter Property="IsTabStop" Value="False"/>
+        <Setter Property="Cursor" Value="IBeam"/>
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="TextBox">
+                    <ScrollViewer x:Name="PART_ContentHost" 
+                                  HorizontalScrollBarVisibility="Disabled" 
+                                  VerticalScrollBarVisibility="Disabled"
+                                  Padding="0" Margin="0" Background="Transparent"/>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Small clipboard copy button -->
+    <Style x:Key="CopyButton" TargetType="Button" BasedOn="{StaticResource SubtleButton}">
+        <Setter Property="Content" Value="📋"/>
+        <Setter Property="FontSize" Value="11"/>
+        <Setter Property="Padding" Value="4,2"/>
+        <Setter Property="ToolTip" Value="Copy to clipboard"/>
+        <Setter Property="VerticalAlignment" Value="Top"/>
+        <Setter Property="Margin" Value="4,0,0,0"/>
+    </Style>
+
 </ResourceDictionary>

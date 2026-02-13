@@ -1,4 +1,5 @@
 using ResearchHive.Core.Configuration;
+using ResearchHive.Core.Models;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
@@ -56,6 +57,32 @@ public class LlmService
     /// <param name="maxTokens">Optional token limit for Ollama (num_predict) and cloud (max_tokens). Defaults to 4000 for cloud, unbounded for local.</param>
     public async Task<string> GenerateAsync(string prompt, string? systemPrompt = null, int? maxTokens = null, CancellationToken ct = default)
     {
+        var response = await GenerateWithMetadataAsync(prompt, systemPrompt, maxTokens, ct);
+        return response.Text;
+    }
+
+    /// <summary>
+    /// Text generation with truncation metadata. Returns <see cref="LlmResponse"/> containing
+    /// the text, whether it was truncated, and the raw finish_reason from the provider.
+    /// Automatically retries once with doubled token budget if truncation is detected and
+    /// maxTokens was not explicitly set by the caller.
+    /// </summary>
+    public async Task<LlmResponse> GenerateWithMetadataAsync(string prompt, string? systemPrompt = null, int? maxTokens = null, CancellationToken ct = default)
+    {
+        var result = await RouteGenerationAsync(prompt, systemPrompt, maxTokens, ct);
+        
+        // Auto-retry on truncation when caller didn't set an explicit limit
+        if (result.WasTruncated && !maxTokens.HasValue)
+        {
+            var retryTokens = Math.Min(8000, (maxTokens ?? 4000) * 2);
+            result = await RouteGenerationAsync(prompt, systemPrompt, retryTokens, ct);
+        }
+
+        return result;
+    }
+
+    private async Task<LlmResponse> RouteGenerationAsync(string prompt, string? systemPrompt, int? maxTokens, CancellationToken ct)
+    {
         var routing = _settings.Routing;
 
         // Periodic retry: if Ollama was unavailable, re-check every 60s
@@ -65,42 +92,44 @@ public class LlmService
             _lastOllamaRetryTime = DateTime.UtcNow;
         }
 
+        LlmResponse unavailable(string msg) => new(msg, false, "error");
+
         // Route based on strategy
         switch (routing)
         {
             case RoutingStrategy.LocalOnly:
             {
-                var localResult = await TryOllama(prompt, systemPrompt, maxTokens, ct);
+                var localResult = await TryOllamaWithMetadata(prompt, systemPrompt, maxTokens, ct);
                 if (localResult != null) return localResult;
-                return "[LLM_UNAVAILABLE] Ollama is not running or did not respond. " +
-                       "Start Ollama with a model loaded, or switch to a cloud provider in Settings.";
+                return unavailable("[LLM_UNAVAILABLE] Ollama is not running or did not respond. " +
+                       "Start Ollama with a model loaded, or switch to a cloud provider in Settings.");
             }
 
             case RoutingStrategy.CloudOnly:
             {
-                var cloudResult = await TryCloud(prompt, systemPrompt, maxTokens, ct);
+                var cloudResult = await TryCloudWithMetadata(prompt, systemPrompt, maxTokens, ct);
                 if (cloudResult != null) return cloudResult;
-                return "[LLM_UNAVAILABLE] Cloud AI returned no response. Check your provider settings, authentication, and connectivity. " +
-                       $"Provider: {_settings.PaidProvider}, Auth: {_settings.ChatGptPlusAuth}";
+                return unavailable("[LLM_UNAVAILABLE] Cloud AI returned no response. Check your provider settings, authentication, and connectivity. " +
+                       $"Provider: {_settings.PaidProvider}, Auth: {_settings.ChatGptPlusAuth}");
             }
 
             case RoutingStrategy.CloudPrimary:
             {
-                var cpResult = await TryCloud(prompt, systemPrompt, maxTokens, ct)
-                    ?? await TryOllama(prompt, systemPrompt, maxTokens, ct);
+                var cpResult = await TryCloudWithMetadata(prompt, systemPrompt, maxTokens, ct)
+                    ?? await TryOllamaWithMetadata(prompt, systemPrompt, maxTokens, ct);
                 if (cpResult != null) return cpResult;
-                return "[LLM_UNAVAILABLE] Neither cloud provider nor Ollama responded. " +
-                       $"Cloud: {_settings.PaidProvider}, Auth: {_settings.ChatGptPlusAuth}. Check both connections.";
+                return unavailable("[LLM_UNAVAILABLE] Neither cloud provider nor Ollama responded. " +
+                       $"Cloud: {_settings.PaidProvider}, Auth: {_settings.ChatGptPlusAuth}. Check both connections.");
             }
 
             case RoutingStrategy.LocalWithCloudFallback:
             default:
             {
-                var lcResult = await TryOllama(prompt, systemPrompt, maxTokens, ct)
-                    ?? await TryCloud(prompt, systemPrompt, maxTokens, ct);
+                var lcResult = await TryOllamaWithMetadata(prompt, systemPrompt, maxTokens, ct)
+                    ?? await TryCloudWithMetadata(prompt, systemPrompt, maxTokens, ct);
                 if (lcResult != null) return lcResult;
-                return "[LLM_UNAVAILABLE] Neither Ollama nor cloud provider responded. " +
-                       "Start Ollama or configure a cloud provider in Settings.";
+                return unavailable("[LLM_UNAVAILABLE] Neither Ollama nor cloud provider responded. " +
+                       "Start Ollama or configure a cloud provider in Settings.");
             }
         }
     }
@@ -364,6 +393,73 @@ public class LlmService
 
     #region Routing helpers
 
+    private async Task<LlmResponse?> TryOllamaWithMetadata(string prompt, string? systemPrompt, int? maxTokens, CancellationToken ct)
+    {
+        if (!_ollamaAvailable) return null;
+
+        for (int attempt = 0; attempt < 2; attempt++)
+        {
+            try
+            {
+                var result = await CallOllamaWithMetadataAsync(prompt, systemPrompt, maxTokens, ct);
+                if (result != null) return result;
+                break;
+            }
+            catch when (attempt == 0)
+            {
+                await Task.Delay(800, ct);
+            }
+            catch
+            {
+                _ollamaAvailable = false;
+                _lastOllamaRetryTime = DateTime.UtcNow;
+            }
+        }
+        return null;
+    }
+
+    private async Task<LlmResponse?> TryCloudWithMetadata(string prompt, string? systemPrompt, int? maxTokens, CancellationToken ct)
+    {
+        var provider = ResolveActiveCloudProvider();
+        if (provider == PaidProviderType.None) return null;
+
+        // ChatGPT Plus via Codex CLI — no API key needed, uses OAuth (only in CodexOAuth mode)
+        if (provider == PaidProviderType.ChatGptPlus
+            && _settings.ChatGptPlusAuth == ChatGptPlusAuthMode.CodexOAuth)
+        {
+            if (_codexCli == null || !_codexCli.IsAvailable || !_codexCli.IsAuthenticated) return null;
+            try
+            {
+                var fullPrompt = systemPrompt != null ? $"{systemPrompt}\n\n{prompt}" : prompt;
+                var result = await _codexCli.GenerateAsync(fullPrompt, maxTokens, ct);
+                RaiseCodexActivity();
+                if (result != null) return new LlmResponse(result, false, "stop");
+                await Task.Delay(1500, ct);
+                result = await _codexCli.GenerateAsync(fullPrompt, maxTokens, ct);
+                RaiseCodexActivity();
+                return result != null ? new LlmResponse(result, false, "stop") : null;
+            }
+            catch
+            {
+                RaiseCodexActivity();
+                return null;
+            }
+        }
+
+        var apiKey = ResolveApiKey();
+        if (string.IsNullOrEmpty(apiKey)) return null;
+
+        try
+        {
+            return await CallCloudWithMetadataAsync(provider, apiKey, prompt, systemPrompt, maxTokens, ct);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Legacy string-returning helpers used by tool calling path.</summary>
     private async Task<string?> TryOllama(string prompt, string? systemPrompt, int? maxTokens, CancellationToken ct)
     {
         if (!_ollamaAvailable) return null;
@@ -378,7 +474,7 @@ public class LlmService
             }
             catch when (attempt == 0)
             {
-                await Task.Delay(800, ct); // Reduced from 1500ms
+                await Task.Delay(800, ct);
             }
             catch
             {
@@ -424,7 +520,7 @@ public class LlmService
 
         try
         {
-            return await CallCloudProviderAsync(provider, apiKey, prompt, systemPrompt, ct);
+            return await CallCloudProviderAsync(provider, apiKey, prompt, systemPrompt, maxTokens, ct);
         }
         catch
         {
@@ -482,7 +578,8 @@ public class LlmService
     {
         var options = new Dictionary<string, object>
         {
-            ["temperature"] = 0.3
+            ["temperature"] = 0.3,
+            ["num_ctx"] = _settings.LocalContextSize
         };
         if (maxTokens.HasValue)
             options["num_predict"] = maxTokens.Value;
@@ -510,9 +607,52 @@ public class LlmService
         return doc.RootElement.TryGetProperty("response", out var resp) ? resp.GetString() : null;
     }
 
-    private async Task<string> CallCloudProviderAsync(
+    /// <summary>Ollama call with truncation detection via done_reason.</summary>
+    private async Task<LlmResponse?> CallOllamaWithMetadataAsync(string prompt, string? systemPrompt, int? maxTokens, CancellationToken ct)
+    {
+        var options = new Dictionary<string, object>
+        {
+            ["temperature"] = 0.3,
+            ["num_ctx"] = _settings.LocalContextSize
+        };
+        if (maxTokens.HasValue)
+            options["num_predict"] = maxTokens.Value;
+
+        var request = new
+        {
+            model = _settings.SynthesisModel,
+            prompt = prompt,
+            system = systemPrompt ?? "You are a research assistant. Provide thorough, evidence-based answers with clear citations.",
+            stream = false,
+            options
+        };
+
+        var response = await _httpClient.PostAsJsonAsync(
+            $"{_settings.OllamaBaseUrl}/api/generate", request, ct);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            _ollamaAvailable = false;
+            return null;
+        }
+
+        var json = await response.Content.ReadAsStringAsync(ct);
+        using var doc = JsonDocument.Parse(json);
+
+        var text = doc.RootElement.TryGetProperty("response", out var resp) ? resp.GetString() : null;
+        if (text == null) return null;
+
+        // Ollama returns done_reason: "stop" (complete) or "length" (truncated)
+        var doneReason = doc.RootElement.TryGetProperty("done_reason", out var dr) ? dr.GetString() : "stop";
+        var wasTruncated = string.Equals(doneReason, "length", StringComparison.OrdinalIgnoreCase);
+
+        return new LlmResponse(text, wasTruncated, doneReason);
+    }
+
+    /// <summary>Cloud provider call with truncation detection via finish_reason / stop_reason.</summary>
+    private async Task<LlmResponse> CallCloudWithMetadataAsync(
         PaidProviderType provider, string apiKey,
-        string prompt, string? systemPrompt, CancellationToken ct)
+        string prompt, string? systemPrompt, int? maxTokens, CancellationToken ct)
     {
         switch (provider)
         {
@@ -523,7 +663,94 @@ public class LlmService
                 var anthropicReq = new
                 {
                     model,
-                    max_tokens = 4000,
+                    max_tokens = maxTokens ?? 4000,
+                    system = systemPrompt ?? "You are a research assistant.",
+                    messages = new[] { new { role = "user", content = prompt } }
+                };
+                using var req = new HttpRequestMessage(HttpMethod.Post, url);
+                req.Headers.Add("x-api-key", apiKey);
+                req.Headers.Add("anthropic-version", "2023-06-01");
+                req.Content = new StringContent(
+                    JsonSerializer.Serialize(anthropicReq), Encoding.UTF8, "application/json");
+                var resp = await _httpClient.SendAsync(req, ct);
+                var json = await resp.Content.ReadAsStringAsync(ct);
+                using var doc = JsonDocument.Parse(json);
+                var text = doc.RootElement.GetProperty("content")[0].GetProperty("text").GetString() ?? "";
+                // Anthropic: stop_reason = "end_turn" (complete) or "max_tokens" (truncated)
+                var stopReason = doc.RootElement.TryGetProperty("stop_reason", out var sr) ? sr.GetString() : "end_turn";
+                var truncated = string.Equals(stopReason, "max_tokens", StringComparison.OrdinalIgnoreCase);
+                return new LlmResponse(text, truncated, stopReason);
+            }
+
+            case PaidProviderType.GoogleGemini:
+            {
+                var model = _settings.PaidProviderModel ?? "gemini-pro";
+                var url = (_settings.PaidProviderEndpoint ?? "https://generativelanguage.googleapis.com/v1beta")
+                    + $"/models/{model}:generateContent";
+                var geminiReq = new
+                {
+                    contents = new[] { new { parts = new[] { new { text = (systemPrompt != null ? systemPrompt + "\n\n" : "") + prompt } } } },
+                    generationConfig = new { maxOutputTokens = maxTokens ?? 4096 }
+                };
+                using var req = new HttpRequestMessage(HttpMethod.Post, url);
+                req.Headers.Add("x-goog-api-key", apiKey);
+                req.Content = new StringContent(
+                    JsonSerializer.Serialize(geminiReq), Encoding.UTF8, "application/json");
+                var resp = await _httpClient.SendAsync(req, ct);
+                var json = await resp.Content.ReadAsStringAsync(ct);
+                using var doc = JsonDocument.Parse(json);
+                var text = doc.RootElement.GetProperty("candidates")[0]
+                    .GetProperty("content").GetProperty("parts")[0]
+                    .GetProperty("text").GetString() ?? "";
+                // Gemini: finishReason = "STOP" (complete) or "MAX_TOKENS" (truncated)
+                var finishReason = doc.RootElement.GetProperty("candidates")[0]
+                    .TryGetProperty("finishReason", out var fr) ? fr.GetString() : "STOP";
+                var truncated = string.Equals(finishReason, "MAX_TOKENS", StringComparison.OrdinalIgnoreCase);
+                return new LlmResponse(text, truncated, finishReason);
+            }
+
+            // OpenAI, MistralAI, OpenRouter, AzureOpenAI, GitHubModels — all OpenAI-compatible
+            default:
+            {
+                var (url, headers, modelName) = BuildCloudEndpoint(provider, apiKey);
+                var messages = new List<object>();
+                if (systemPrompt != null)
+                    messages.Add(new { role = "system", content = systemPrompt });
+                messages.Add(new { role = "user", content = prompt });
+                var chatReq = new { model = modelName, messages, temperature = 0.3, max_tokens = maxTokens ?? 4000 };
+                using var req = new HttpRequestMessage(HttpMethod.Post, url);
+                foreach (var (key, val) in headers)
+                    req.Headers.TryAddWithoutValidation(key, val);
+                req.Content = new StringContent(
+                    JsonSerializer.Serialize(chatReq), Encoding.UTF8, "application/json");
+                var resp = await _httpClient.SendAsync(req, ct);
+                var json = await resp.Content.ReadAsStringAsync(ct);
+                using var doc = JsonDocument.Parse(json);
+                var text = doc.RootElement.GetProperty("choices")[0]
+                    .GetProperty("message").GetProperty("content").GetString() ?? "";
+                // OpenAI-compat: finish_reason = "stop" (complete) or "length" (truncated)
+                var finishReason = doc.RootElement.GetProperty("choices")[0]
+                    .TryGetProperty("finish_reason", out var fr) ? fr.GetString() : "stop";
+                var truncated = string.Equals(finishReason, "length", StringComparison.OrdinalIgnoreCase);
+                return new LlmResponse(text, truncated, finishReason);
+            }
+        }
+    }
+
+    private async Task<string> CallCloudProviderAsync(
+        PaidProviderType provider, string apiKey,
+        string prompt, string? systemPrompt, int? maxTokens, CancellationToken ct)
+    {
+        switch (provider)
+        {
+            case PaidProviderType.Anthropic:
+            {
+                var url = (_settings.PaidProviderEndpoint ?? "https://api.anthropic.com/v1") + "/messages";
+                var model = _settings.PaidProviderModel ?? "claude-sonnet-4-20250514";
+                var anthropicReq = new
+                {
+                    model,
+                    max_tokens = maxTokens ?? 4000,
                     system = systemPrompt ?? "You are a research assistant.",
                     messages = new[] { new { role = "user", content = prompt } }
                 };
@@ -545,7 +772,8 @@ public class LlmService
                     + $"/models/{model}:generateContent";
                 var geminiReq = new
                 {
-                    contents = new[] { new { parts = new[] { new { text = (systemPrompt != null ? systemPrompt + "\n\n" : "") + prompt } } } }
+                    contents = new[] { new { parts = new[] { new { text = (systemPrompt != null ? systemPrompt + "\n\n" : "") + prompt } } } },
+                    generationConfig = new { maxOutputTokens = maxTokens ?? 4096 }
                 };
                 using var req = new HttpRequestMessage(HttpMethod.Post, url);
                 req.Headers.Add("x-goog-api-key", apiKey);
@@ -567,7 +795,7 @@ public class LlmService
                 if (systemPrompt != null)
                     messages.Add(new { role = "system", content = systemPrompt });
                 messages.Add(new { role = "user", content = prompt });
-                var chatReq = new { model = modelName, messages, temperature = 0.3, max_tokens = 4000 };
+                var chatReq = new { model = modelName, messages, temperature = 0.3, max_tokens = maxTokens ?? 4000 };
                 using var req = new HttpRequestMessage(HttpMethod.Post, url);
                 foreach (var (key, val) in headers)
                     req.Headers.TryAddWithoutValidation(key, val);

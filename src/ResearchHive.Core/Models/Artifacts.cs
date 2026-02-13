@@ -75,6 +75,29 @@ public enum CitationType
     File
 }
 
+/// <summary>
+/// Wraps an LLM response with metadata about truncation and finish reason.
+/// Used by GenerateWithMetadataAsync for callers that need truncation awareness.
+/// </summary>
+public record LlmResponse(string Text, bool WasTruncated, string? FinishReason);
+
+/// <summary>
+/// A chunk stored in the global memory database with cross-session metadata.
+/// </summary>
+public class GlobalChunk
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N")[..12];
+    public string SessionId { get; set; } = string.Empty;
+    public string JobId { get; set; } = string.Empty;
+    public string SourceType { get; set; } = string.Empty;
+    public string RepoUrl { get; set; } = string.Empty;
+    public string DomainPack { get; set; } = string.Empty;
+    public string Text { get; set; } = string.Empty;
+    public float[]? Embedding { get; set; }
+    public List<string> Tags { get; set; } = new();
+    public DateTime PromotedUtc { get; set; } = DateTime.UtcNow;
+}
+
 public class Citation
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N")[..12];

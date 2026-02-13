@@ -109,6 +109,11 @@ public class AppSettings
     public string SearchTimeRange { get; set; } = "any";
 
     /// <summary>
+    /// When true, Windows toast notifications are shown when long-running jobs complete.
+    /// </summary>
+    public bool NotificationsEnabled { get; set; } = true;
+
+    /// <summary>
     /// When true, reports are generated section-by-section from a template rather than
     /// in a single LLM call. Produces longer, more detailed reports especially from local models.
     /// </summary>
@@ -136,6 +141,26 @@ public class AppSettings
     public int DefaultTopK { get; set; } = 10;
     public float SemanticWeight { get; set; } = 0.5f;
     public float KeywordWeight { get; set; } = 0.5f;
+
+    // LLM context window
+    /// <summary>Context window size sent to Ollama via num_ctx. Increase if using a model with larger context.</summary>
+    public int LocalContextSize { get; set; } = 16384;
+
+    // Repo RAG settings
+    /// <summary>Chunk size (words) for code/doc files during repo indexing.</summary>
+    public int RepoChunkSize { get; set; } = 800;
+    /// <summary>Overlap (words) between code/doc chunks.</summary>
+    public int RepoChunkOverlap { get; set; } = 100;
+    /// <summary>Maximum number of files to index per repository.</summary>
+    public int RepoMaxFiles { get; set; } = 200;
+    /// <summary>Skip files larger than this (bytes). Default 150 KB.</summary>
+    public int RepoMaxFileSizeBytes { get; set; } = 150_000;
+
+    // Hive Mind / Global memory
+    /// <summary>Path to the global memory database shared across all sessions.</summary>
+    public string GlobalDbPath => Path.Combine(DataRootPath, "global.db");
+    /// <summary>Path for shallow repo clones used by Repo RAG.</summary>
+    public string RepoClonePath => Path.Combine(DataRootPath, "repos");
 
     /// <summary>
     /// Known model lists per provider for dropdown population.

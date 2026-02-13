@@ -132,6 +132,15 @@ $output | ConvertTo-Json -Depth 5
         });
     }
 
+    /// <summary>
+    /// OCR an image file and return just the text. Used by PdfIngestionService for scanned PDF pages.
+    /// </summary>
+    internal async Task<string> OcrImageFileAsync(string imagePath)
+    {
+        var result = await PerformOcrAsync(imagePath);
+        return result.Text;
+    }
+
     private static (string Text, List<OcrBox> Boxes) ParseOcrOutput(string json)
     {
         try

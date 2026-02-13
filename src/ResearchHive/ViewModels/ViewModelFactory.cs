@@ -20,6 +20,8 @@ public class ViewModelFactory
     private readonly ProgrammingJobRunner _programmingJobRunner;
     private readonly MaterialsJobRunner _materialsJobRunner;
     private readonly FusionJobRunner _fusionJobRunner;
+    private readonly RepoIntelligenceJobRunner _repoRunner;
+    private readonly ProjectFusionEngine _projectFusionEngine;
     private readonly ExportService _exportService;
     private readonly InboxWatcher _inboxWatcher;
     private readonly AppSettings _settings;
@@ -30,6 +32,8 @@ public class ViewModelFactory
     private readonly CitationVerificationService _citationVerifier;
     private readonly ContradictionDetector _contradictionDetector;
     private readonly ResearchComparisonService _comparisonService;
+    private readonly GlobalMemoryService _globalMemory;
+    private readonly NotificationService _notificationService;
 
     public ViewModelFactory(
         SessionManager sessionManager,
@@ -44,6 +48,8 @@ public class ViewModelFactory
         ProgrammingJobRunner programmingJobRunner,
         MaterialsJobRunner materialsJobRunner,
         FusionJobRunner fusionJobRunner,
+        RepoIntelligenceJobRunner repoRunner,
+        ProjectFusionEngine projectFusionEngine,
         ExportService exportService,
         InboxWatcher inboxWatcher,
         AppSettings settings,
@@ -53,7 +59,9 @@ public class ViewModelFactory
         CrossSessionSearchService crossSearch,
         CitationVerificationService citationVerifier,
         ContradictionDetector contradictionDetector,
-        ResearchComparisonService comparisonService)
+        ResearchComparisonService comparisonService,
+        GlobalMemoryService globalMemory,
+        NotificationService notificationService)
     {
         _sessionManager = sessionManager;
         _artifactStore = artifactStore;
@@ -67,6 +75,8 @@ public class ViewModelFactory
         _programmingJobRunner = programmingJobRunner;
         _materialsJobRunner = materialsJobRunner;
         _fusionJobRunner = fusionJobRunner;
+        _repoRunner = repoRunner;
+        _projectFusionEngine = projectFusionEngine;
         _exportService = exportService;
         _inboxWatcher = inboxWatcher;
         _settings = settings;
@@ -77,6 +87,8 @@ public class ViewModelFactory
         _citationVerifier = citationVerifier;
         _contradictionDetector = contradictionDetector;
         _comparisonService = comparisonService;
+        _globalMemory = globalMemory;
+        _notificationService = notificationService;
     }
 
     public MainViewModel CreateMainViewModel()
@@ -114,7 +126,11 @@ public class ViewModelFactory
             _crossSearch,
             _citationVerifier,
             _contradictionDetector,
-            _comparisonService);
+            _comparisonService,
+            _repoRunner,
+            _projectFusionEngine,
+            _globalMemory,
+            _notificationService);
     }
 
     public WelcomeViewModel CreateWelcome()

@@ -128,8 +128,8 @@
                     <Border Style="{StaticResource Card}">
                         <StackPanel>
                             <TextBlock Text="Latest Summary" Style="{StaticResource SectionHeader}" Margin="0,0,0,6"/>
-                            <TextBlock Text="{Binding OverviewText}" TextWrapping="Wrap" FontSize="13"
-                                       Foreground="{StaticResource TextSecondaryBrush}"/>
+                            <TextBox Text="{Binding OverviewText, Mode=OneWay}" Style="{StaticResource SelectableText}" 
+                                     FontSize="13" Foreground="{StaticResource TextSecondaryBrush}"/>
                         </StackPanel>
                     </Border>
 
@@ -515,8 +515,8 @@
                                         <StackPanel>
                                             <TextBlock Text="{Binding Description}" FontWeight="Medium"/>
                                             <TextBlock Text="{Binding Captured}" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}"/>
-                                            <TextBlock Text="{Binding OcrText}" TextWrapping="Wrap" Margin="0,8,0,0"
-                                                       FontFamily="Consolas" FontSize="12" MaxHeight="200"/>
+                                            <TextBox Text="{Binding OcrText, Mode=OneWay}" Style="{StaticResource SelectableText}" Margin="0,8,0,0"
+                                                     FontFamily="Consolas" FontSize="12" MaxHeight="200"/>
                                             <TextBlock FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,0">
                                                 <Run Text="Boxes:"/>
                                                 <Run Text="{Binding BoxCount, Mode=OneWay}"/>
@@ -573,7 +573,7 @@
                                                 <Run Text="·"/>
                                                 <Run Text="{Binding ScoreDisplay, Mode=OneWay}"/>
                                             </TextBlock>
-                                            <TextBlock Text="{Binding Text}" TextWrapping="Wrap" FontSize="12" Margin="0,4,0,0"/>
+                                            <TextBox Text="{Binding Text, Mode=OneWay}" Style="{StaticResource SelectableText}" FontSize="12" Margin="0,4,0,0"/>
                                             <TextBlock Text="{Binding SourceUrl}" FontSize="10" Foreground="{StaticResource AccentBrush}"
                                                        TextTrimming="CharacterEllipsis" Margin="0,4,0,0"
                                                        Visibility="{Binding HasSourceUrl, Converter={StaticResource BoolVis}}"
@@ -621,7 +621,7 @@
                                                 <Run Text="· Score:"/>
                                                 <Run Text="{Binding ScoreDisplay, Mode=OneWay}"/>
                                             </TextBlock>
-                                            <TextBlock Text="{Binding Text}" TextWrapping="Wrap" FontSize="12" Margin="0,4,0,0"/>
+                                            <TextBox Text="{Binding Text, Mode=OneWay}" Style="{StaticResource SelectableText}" FontSize="12" Margin="0,4,0,0"/>
                                             <TextBlock Text="{Binding SourceUrl}" FontSize="10" Foreground="{StaticResource AccentBrush}"
                                                        TextTrimming="CharacterEllipsis" Margin="0,4,0,0"
                                                        Visibility="{Binding HasSourceUrl, Converter={StaticResource BoolVis}}"
@@ -631,6 +631,41 @@
                                                 Command="{Binding DataContext.PinEvidenceCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                 CommandParameter="{Binding}" VerticalAlignment="Top"/>
                                     </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <!-- Search Engine Health -->
+                    <TextBlock Text="🔧 Search Engine Health" Style="{StaticResource SectionHeader}" Margin="0,16,0,4"
+                               Visibility="{Binding SearchEngineHealthItems.Count, Converter={StaticResource NullVis}}"/>
+                    <ItemsControl ItemsSource="{Binding SearchEngineHealthItems}" Margin="0,0,0,8"
+                                  Visibility="{Binding SearchEngineHealthItems.Count, Converter={StaticResource NullVis}}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel/>
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Background="{StaticResource SurfaceBrush}" CornerRadius="6"
+                                        Padding="10,6" Margin="0,0,8,4" MinWidth="120">
+                                    <StackPanel>
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="{Binding StatusIcon}" FontSize="14" Margin="0,0,4,0"/>
+                                            <TextBlock Text="{Binding EngineName}" FontWeight="SemiBold" FontSize="13"
+                                                       Foreground="{StaticResource TextPrimaryBrush}"/>
+                                        </StackPanel>
+                                        <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                                            <TextBlock Text="{Binding StatusDisplay}" FontSize="11"
+                                                       Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,8,0"/>
+                                            <TextBlock Text="{Binding RateDisplay}" FontSize="11"
+                                                       Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,8,0"/>
+                                            <TextBlock FontSize="11" Foreground="{StaticResource TextSecondaryBrush}">
+                                                <Run Text="{Binding TotalResults, Mode=OneWay}"/><Run Text=" results"/>
+                                            </TextBlock>
+                                        </StackPanel>
+                                    </StackPanel>
                                 </Border>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
@@ -705,7 +740,7 @@
                                                            Foreground="{StaticResource TextSecondaryBrush}"
                                                            HorizontalAlignment="Right" Margin="0,0,60,0"/>
                                             </Grid>
-                                            <TextBlock Text="{Binding Content}" TextWrapping="Wrap" FontSize="13" Margin="0,6,0,0"/>
+                                            <TextBox Text="{Binding Content, Mode=OneWay}" Style="{StaticResource SelectableText}" FontSize="13" Margin="0,6,0,0"/>
                                         </StackPanel>
 
                                         <!-- Edit mode -->
@@ -894,8 +929,8 @@
                                                 <Run Text="{Binding Type, Mode=OneWay}"/>
                                             </TextBlock>
                                             <TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="13" Margin="0,2,0,0"/>
-                                            <TextBlock Text="{Binding Description}" TextWrapping="Wrap" FontSize="12" 
-                                                       Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,0"/>
+                                            <TextBox Text="{Binding Description, Mode=OneWay}" Style="{StaticResource SelectableText}" FontSize="12" 
+                                                     Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,0"/>
                                         </StackPanel>
                                     </Grid>
                                 </Border>
@@ -944,7 +979,7 @@
                                         </Grid.ColumnDefinitions>
                                         <StackPanel>
                                         <TextBlock Text="{Binding Title}" FontSize="15" FontWeight="SemiBold"/>
-                                        <TextBlock Text="{Binding Hypothesis}" TextWrapping="Wrap" FontSize="13" Margin="0,6,0,0"/>
+                                        <TextBox Text="{Binding Hypothesis, Mode=OneWay}" Style="{StaticResource SelectableText}" FontSize="13" Margin="0,6,0,0"/>
 
                                         <Grid Margin="0,8,0,0">
                                             <Grid.ColumnDefinitions>
@@ -953,16 +988,16 @@
                                             </Grid.ColumnDefinitions>
                                             <StackPanel Grid.Column="0">
                                                 <TextBlock Text="Mechanism" Style="{StaticResource SubHeader}"/>
-                                                <TextBlock Text="{Binding Mechanism}" TextWrapping="Wrap" FontSize="12"/>
+                                                <TextBox Text="{Binding Mechanism, Mode=OneWay}" Style="{StaticResource SelectableText}" FontSize="12"/>
                                             </StackPanel>
                                             <StackPanel Grid.Column="1">
                                                 <TextBlock Text="Minimal Test Plan" Style="{StaticResource SubHeader}"/>
-                                                <TextBlock Text="{Binding TestPlan}" TextWrapping="Wrap" FontSize="12"/>
+                                                <TextBox Text="{Binding TestPlan, Mode=OneWay}" Style="{StaticResource SelectableText}" FontSize="12"/>
                                             </StackPanel>
                                         </Grid>
 
                                         <TextBlock Text="Falsification" Style="{StaticResource SubHeader}" Margin="0,8,0,0"/>
-                                        <TextBlock Text="{Binding Falsification}" TextWrapping="Wrap" FontSize="12"/>
+                                        <TextBox Text="{Binding Falsification, Mode=OneWay}" Style="{StaticResource SelectableText}" FontSize="12"/>
 
                                         <Grid Margin="0,8,0,0">
                                             <Grid.ColumnDefinitions>
@@ -1054,7 +1089,7 @@
                                             </Border>
                                         </Grid>
 
-                                        <TextBlock Text="{Binding FitRationale}" TextWrapping="Wrap" FontSize="12" Margin="0,8,0,0"/>
+                                        <TextBox Text="{Binding FitRationale, Mode=OneWay}" Style="{StaticResource SelectableText}" FontSize="12" Margin="0,8,0,0"/>
 
                                         <!-- Safety Section -->
                                         <Border Background="#FFF3E0" CornerRadius="4" Padding="8" Margin="0,8,0,0">
@@ -1076,10 +1111,10 @@
                                         </Border>
 
                                         <TextBlock Text="Properties" Style="{StaticResource SubHeader}" Margin="0,8,0,0"/>
-                                        <TextBlock Text="{Binding Properties}" FontFamily="Consolas" FontSize="11"/>
+                                        <TextBox Text="{Binding Properties, Mode=OneWay}" Style="{StaticResource SelectableText}" FontFamily="Consolas" FontSize="11"/>
 
                                         <TextBlock Text="Test Checklist" Style="{StaticResource SubHeader}" Margin="0,8,0,0"/>
-                                        <TextBlock Text="{Binding TestChecklist}" FontSize="12"/>
+                                        <TextBox Text="{Binding TestChecklist, Mode=OneWay}" Style="{StaticResource SelectableText}" FontSize="12"/>
                                         </StackPanel>
                                         <Button Grid.Column="1" Content="✕" Style="{StaticResource SubtleButton}" FontSize="10" Padding="3,1"
                                                 Command="{Binding DataContext.DeleteMaterialCandidateCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
@@ -1139,13 +1174,13 @@
                                                        Foreground="{StaticResource SuccessBrush}" FontWeight="Bold"
                                                        Visibility="{Binding IsRecommended, Converter={StaticResource BoolVis}}"/>
                                         </Grid>
-                                        <TextBlock Text="{Binding Description}" TextWrapping="Wrap" FontSize="12" Margin="0,6,0,0"/>
+                                        <TextBox Text="{Binding Description, Mode=OneWay}" Style="{StaticResource SelectableText}" FontSize="12" Margin="0,6,0,0"/>
 
                                         <TextBlock Text="Evaluation" Style="{StaticResource SubHeader}" Margin="0,8,0,0"/>
-                                        <TextBlock Text="{Binding Evaluation}" FontFamily="Consolas" FontSize="11"/>
+                                        <TextBox Text="{Binding Evaluation, Mode=OneWay}" Style="{StaticResource SelectableText}" FontFamily="Consolas" FontSize="11"/>
 
                                         <TextBlock Text="IP Analysis" Style="{StaticResource SubHeader}" Margin="0,8,0,0"/>
-                                        <TextBlock Text="{Binding IpInfo}" FontSize="11" TextWrapping="Wrap"/>
+                                        <TextBox Text="{Binding IpInfo, Mode=OneWay}" Style="{StaticResource SelectableText}" FontSize="11"/>
                                     </StackPanel>
                                 </Border>
                             </DataTemplate>
@@ -1229,17 +1264,17 @@
                                                 <TextBlock Text="{Binding Created}" HorizontalAlignment="Right"
                                                            FontSize="10" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,28,0"/>
                                             </Grid>
-                                            <TextBlock Text="{Binding Proposal}" TextWrapping="Wrap" FontSize="13" Margin="0,8,0,0"/>
+                                            <TextBox Text="{Binding Proposal, Mode=OneWay}" Style="{StaticResource SelectableText}" FontSize="13" Margin="0,8,0,0"/>
 
                                             <TextBlock Text="Provenance" Style="{StaticResource SubHeader}" Margin="0,8,0,0"/>
-                                            <TextBlock Text="{Binding ProvenanceMap}" FontSize="11" TextWrapping="Wrap"/>
+                                            <TextBox Text="{Binding ProvenanceMap, Mode=OneWay}" Style="{StaticResource SelectableText}" FontSize="11"/>
 
                                             <!-- Safety Notes (shown when present) -->
                                             <Border Background="#FFF3E0" CornerRadius="4" Padding="8,4" Margin="0,8,0,0"
                                                     Visibility="{Binding HasSafetyNotes, Converter={StaticResource BoolVis}}">
                                                 <StackPanel Orientation="Horizontal">
                                                     <TextBlock Text="⚠️ Safety: " FontWeight="SemiBold" FontSize="11" Foreground="#E65100"/>
-                                                    <TextBlock Text="{Binding SafetyNotes}" FontSize="11" Foreground="#E65100" TextWrapping="Wrap"/>
+                                                    <TextBox Text="{Binding SafetyNotes, Mode=OneWay}" Style="{StaticResource SelectableText}" FontSize="11" Foreground="#E65100"/>
                                                 </StackPanel>
                                             </Border>
 
@@ -1248,7 +1283,7 @@
                                                     Visibility="{Binding HasIpNotes, Converter={StaticResource BoolVis}}">
                                                 <StackPanel Orientation="Horizontal">
                                                     <TextBlock Text="📜 IP/License: " FontWeight="SemiBold" FontSize="11" Foreground="#283593"/>
-                                                    <TextBlock Text="{Binding IpNotes}" FontSize="11" Foreground="#283593" TextWrapping="Wrap"/>
+                                                    <TextBox Text="{Binding IpNotes, Mode=OneWay}" Style="{StaticResource SelectableText}" FontSize="11" Foreground="#283593"/>
                                                 </StackPanel>
                                             </Border>
                                         </StackPanel>
@@ -1415,8 +1450,8 @@
                                                    Foreground="{StaticResource TextPrimaryBrush}" VerticalAlignment="Center"/>
                                         <TextBlock Grid.Column="2" Text="{Binding OverlapDisplay}" 
                                                    Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center"/>
-                                        <TextBlock Grid.Column="3" Text="{Binding Claim}" TextTrimming="CharacterEllipsis"
-                                                   Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center"/>
+                                        <TextBox Grid.Column="3" Text="{Binding Claim, Mode=OneWay}" Style="{StaticResource SelectableText}"
+                                                 Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center"/>
                                     </Grid>
                                 </DataTemplate>
                             </ListView.ItemTemplate>
@@ -1462,13 +1497,13 @@
                                                 <TextBlock Text=" — Score: " Foreground="{StaticResource TextSecondaryBrush}"/>
                                                 <TextBlock Text="{Binding Score}" Foreground="#FF9800" FontWeight="Bold"/>
                                             </StackPanel>
-                                            <TextBlock Grid.Row="1" Text="{Binding TextA}" TextWrapping="Wrap"
-                                                       Foreground="{StaticResource TextPrimaryBrush}" Margin="0,4,0,0"
-                                                       FontSize="12"/>
+                                            <TextBox Grid.Row="1" Text="{Binding TextA, Mode=OneWay}" Style="{StaticResource SelectableText}"
+                                                   Foreground="{StaticResource TextPrimaryBrush}" Margin="0,4,0,0"
+                                                   FontSize="12"/>
                                             <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,4,0,0">
                                                 <TextBlock Text="vs: " FontWeight="Bold" Foreground="#FF5252" FontSize="12"/>
-                                                <TextBlock Text="{Binding TextB}" TextWrapping="Wrap"
-                                                           Foreground="{StaticResource TextSecondaryBrush}" FontSize="12"/>
+                                                <TextBox Text="{Binding TextB, Mode=OneWay}" Style="{StaticResource SelectableText}"
+                                                         Foreground="{StaticResource TextSecondaryBrush}" FontSize="12"/>
                                             </StackPanel>
                                         </Grid>
                                     </Border>
@@ -1511,45 +1546,158 @@
                     </Border>
                 </StackPanel>
 
-                <!-- ===== Global Search Tab ===== -->
+                <!-- ===== Hive Mind Tab ===== -->
                 <StackPanel Visibility="{Binding ActiveTab, Converter={StaticResource EqVis}, ConverterParameter=GlobalSearch}">
-                    <TextBlock Text="🌍 Cross-Session Search" FontSize="20" FontWeight="Bold" 
+                    <TextBlock Text="🧠 Hive Mind" FontSize="20" FontWeight="Bold" 
                                Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,4"/>
                     <TextBlock TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,0,0,12">
-                        Search across ALL research sessions — find evidence you've previously gathered on any topic.
+                        Ask questions across ALL sessions using RAG. Promote session knowledge to build a shared memory. Strategies are automatically extracted from completed jobs.
                     </TextBlock>
 
-                    <Grid Margin="0,0,0,12">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <TextBox Text="{Binding GlobalSearchQuery, UpdateSourceTrigger=PropertyChanged}" 
-                                 Style="{StaticResource ModernTextBox}"/>
-                        <CheckBox Grid.Column="1" Content="Search Reports" VerticalAlignment="Center"
-                                  IsChecked="{Binding GlobalSearchReports}" Foreground="{StaticResource TextSecondaryBrush}"
-                                  Margin="8,0,0,0"/>
-                        <Button Grid.Column="2" Content="🔍 Search" Style="{StaticResource AccentButton}"
-                                Command="{Binding SearchGlobalCommand}" Margin="8,0,0,0"/>
-                        <Button Grid.Column="3" Content="📊 Stats" Style="{StaticResource SubtleButton}"
-                                Command="{Binding LoadGlobalStatsCommand}" Margin="8,0,0,0"/>
-                    </Grid>
-                    <TextBlock Text="{Binding GlobalSearchStatus}" Foreground="{StaticResource TextSecondaryBrush}" 
-                               FontSize="12" Margin="0,0,0,8"/>
+                    <!-- Hive Mind Q&A Section -->
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,12">
+                        <StackPanel>
+                            <TextBlock Text="🧠 Ask the Hive Mind" Style="{StaticResource SectionHeader}"/>
+                            <Grid Margin="0,4,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBox Text="{Binding HiveMindQuestion, UpdateSourceTrigger=PropertyChanged}" 
+                                         Style="{StaticResource ModernTextBox}" Tag="Ask anything across all sessions..."/>
+                                <Button Grid.Column="1" Content="🧠 Ask" Style="{StaticResource AccentButton}"
+                                        Command="{Binding AskHiveMindCommand}" Margin="8,0,0,0"/>
+                                <Button Grid.Column="2" Content="📊 Stats" Style="{StaticResource SubtleButton}"
+                                        Command="{Binding LoadHiveMindStatsCommand}" Margin="8,0,0,0"/>
+                            </Grid>
+                            <TextBlock Text="{Binding HiveMindStatus}" Foreground="{StaticResource TextSecondaryBrush}" 
+                                       FontSize="12" Margin="0,4,0,0"/>
+                            <TextBlock Text="{Binding HiveMindStatsText}" Foreground="{StaticResource TextSecondaryBrush}" 
+                                       FontSize="11" Margin="0,2,0,4"
+                                       Visibility="{Binding HiveMindStatsText, Converter={StaticResource NullVis}}"/>
+                            <TextBox Text="{Binding HiveMindAnswer, Mode=OneWay}" Style="{StaticResource SelectableText}"
+                                     MaxHeight="300" Foreground="{StaticResource TextPrimaryBrush}" FontSize="13"
+                                     Margin="0,8,0,0" TextWrapping="Wrap"
+                                     Visibility="{Binding HiveMindAnswer, Converter={StaticResource NullVis}}"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Promote Session Button -->
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,12">
+                        <StackPanel Orientation="Horizontal">
+                            <Button Content="⬆️ Promote This Session" Style="{StaticResource AccentButton}"
+                                    Command="{Binding PromoteSessionCommand}" Margin="0,0,8,0"/>
+                            <TextBlock Text="Push this session's knowledge to the global Hive Mind memory" 
+                                       Foreground="{StaticResource TextSecondaryBrush}" FontSize="12"
+                                       VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Hive Mind Curation — Browse & Delete Chunks -->
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,12">
+                        <StackPanel>
+                            <TextBlock Text="📦 Knowledge Curation" Style="{StaticResource SectionHeader}"/>
+                            <Grid Margin="0,4,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Filter:" VerticalAlignment="Center" Margin="0,0,6,0"
+                                           Foreground="{StaticResource TextSecondaryBrush}"/>
+                                <TextBox Grid.Column="1" Style="{StaticResource ModernTextBox}"
+                                         Text="{Binding HiveMindSourceTypeFilter, UpdateSourceTrigger=PropertyChanged}"
+                                         Tag="Source type (report, strategy, repo_code...)"/>
+                                <Button Grid.Column="2" Content="Browse" Style="{StaticResource AccentButton}"
+                                        Command="{Binding BrowseHiveMindChunksCommand}" Margin="6,0,0,0"/>
+                            </Grid>
+                            <ListView ItemsSource="{Binding HiveMindChunks}" SelectedItem="{Binding SelectedHiveMindChunk}"
+                                      MaxHeight="280" Margin="0,8,0,0" Background="Transparent"
+                                      BorderThickness="0" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Background="{StaticResource SurfaceBrush}" CornerRadius="6"
+                                                Padding="10,8" Margin="0,2">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="{Binding TypeIcon}" FontSize="18" VerticalAlignment="Top"
+                                                           Margin="0,0,8,0"/>
+                                                <StackPanel Grid.Column="1">
+                                                    <TextBlock TextWrapping="Wrap" Text="{Binding TextPreview}"
+                                                               Foreground="{StaticResource TextPrimaryBrush}" FontSize="12"/>
+                                                    <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                                        <TextBlock Text="{Binding SourceType}" FontSize="10"
+                                                                   Foreground="{StaticResource AccentBrush}" Margin="0,0,10,0"/>
+                                                        <TextBlock Text="{Binding DomainPack}" FontSize="10"
+                                                                   Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,10,0"/>
+                                                        <TextBlock Text="{Binding Promoted}" FontSize="10"
+                                                                   Foreground="{StaticResource TextSecondaryBrush}"/>
+                                                    </StackPanel>
+                                                </StackPanel>
+                                                <Button Grid.Column="2" Content="🗑️" ToolTip="Delete chunk"
+                                                        Command="{Binding DataContext.DeleteHiveMindChunkCommand, RelativeSource={RelativeSource AncestorType=ListView}}"
+                                                        CommandParameter="{Binding}"
+                                                        Background="Transparent" BorderThickness="0" Cursor="Hand"
+                                                        VerticalAlignment="Top" FontSize="14" Padding="4,2"/>
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                            <!-- Pagination -->
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,6,0,0">
+                                <Button Content="◀ Prev" Command="{Binding HiveMindPrevPageCommand}"
+                                        IsEnabled="{Binding HiveMindPageIndex}" Margin="0,0,8,0"
+                                        Background="Transparent" Foreground="{StaticResource AccentBrush}"/>
+                                <Button Content="Next ▶" Command="{Binding HiveMindNextPageCommand}"
+                                        IsEnabled="{Binding HiveMindHasMorePages}"
+                                        Background="Transparent" Foreground="{StaticResource AccentBrush}"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Legacy Cross-Session Search -->
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,8">
+                        <StackPanel>
+                            <TextBlock Text="🔍 Cross-Session Evidence Search" Style="{StaticResource SectionHeader}"/>
+                            <Grid Margin="0,4,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBox Text="{Binding GlobalSearchQuery, UpdateSourceTrigger=PropertyChanged}" 
+                                         Style="{StaticResource ModernTextBox}"/>
+                                <CheckBox Grid.Column="1" Content="Search Reports" VerticalAlignment="Center"
+                                          IsChecked="{Binding GlobalSearchReports}" Foreground="{StaticResource TextSecondaryBrush}"
+                                          Margin="8,0,0,0"/>
+                                <Button Grid.Column="2" Content="🔍 Search" Style="{StaticResource AccentButton}"
+                                        Command="{Binding SearchGlobalCommand}" Margin="8,0,0,0"/>
+                                <Button Grid.Column="3" Content="📊 Stats" Style="{StaticResource SubtleButton}"
+                                        Command="{Binding LoadGlobalStatsCommand}" Margin="8,0,0,0"/>
+                            </Grid>
+                            <TextBlock Text="{Binding GlobalSearchStatus}" Foreground="{StaticResource TextSecondaryBrush}" 
+                                       FontSize="12" Margin="0,4,0,0"/>
+                        </StackPanel>
+                    </Border>
 
                     <!-- Global Stats -->
                     <Border Style="{StaticResource Card}" Margin="0,0,0,8"
                             Visibility="{Binding GlobalStatsText, Converter={StaticResource NullVis}}">
                         <StackPanel>
                             <TextBlock Text="📊 Global Statistics" Style="{StaticResource SectionHeader}"/>
-                            <TextBlock Text="{Binding GlobalStatsText}" TextWrapping="Wrap"
-                                       Foreground="{StaticResource TextSecondaryBrush}" FontSize="12"/>
+                            <TextBox Text="{Binding GlobalStatsText, Mode=OneWay}" Style="{StaticResource SelectableText}"
+                                     Foreground="{StaticResource TextSecondaryBrush}" FontSize="12"/>
                         </StackPanel>
                     </Border>
 
-                    <!-- Evidence Results (default) -->
+                    <!-- Evidence Results -->
                     <Border Style="{StaticResource Card}" MaxHeight="500">
                         <ListView ItemsSource="{Binding GlobalSearchResults}" 
                                   Background="Transparent" BorderThickness="0">
@@ -1565,8 +1713,8 @@
                                                            Background="#22FFFFFF" Padding="4,1"/>
                                             </StackPanel>
                                             <TextBlock Text="{Binding SourceUrl}" Foreground="#64B5F6" FontSize="11" Margin="0,2,0,0"/>
-                                            <TextBlock Text="{Binding ChunkText}" TextWrapping="Wrap" MaxHeight="60"
-                                                       Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,4,0,0"/>
+                                            <TextBox Text="{Binding ChunkText, Mode=OneWay}" Style="{StaticResource SelectableText}" MaxHeight="60"
+                                                   Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,4,0,0"/>
                                         </StackPanel>
                                     </Border>
                                 </DataTemplate>
@@ -1592,8 +1740,8 @@
                                                                Foreground="#81C784" Background="#22FFFFFF" Padding="4,1"/>
                                                 </StackPanel>
                                                 <TextBlock Text="{Binding ReportTitle}" Foreground="#64B5F6" FontSize="12" Margin="0,2,0,0"/>
-                                                <TextBlock Text="{Binding Snippet}" TextWrapping="Wrap" MaxHeight="60"
-                                                           Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,4,0,0"/>
+                                                <TextBox Text="{Binding Snippet, Mode=OneWay}" Style="{StaticResource SelectableText}" MaxHeight="60"
+                                                         Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,4,0,0"/>
                                                 <TextBlock Text="{Binding Created, StringFormat='Created: {0:g}'}" FontSize="10"
                                                            Foreground="{StaticResource TextSecondaryBrush}" Margin="0,2,0,0"/>
                                             </StackPanel>
@@ -1603,6 +1751,341 @@
                             </ListView>
                         </StackPanel>
                     </Border>
+                </StackPanel>
+
+                <!-- REPO SCAN TAB -->
+                <StackPanel Visibility="{Binding ActiveTab, Converter={StaticResource EqVis}, ConverterParameter=RepoScan}">
+                    <TextBlock Text="Repo Intelligence" FontSize="20" FontWeight="Bold" 
+                               Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,4"/>
+                    <TextBlock TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,0,0,12">
+                        Deep-analyze any GitHub repository: tech stack, dependencies, strengths, gaps, and complementary projects.
+                        Ask natural-language questions — "What will this project benefit from?", "What's the best way to extend it?", etc.
+                    </TextBlock>
+
+                    <!-- Ask About Repo — primary interaction -->
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="🧠 Ask About a Repo" Style="{StaticResource SectionHeader}"/>
+                            <TextBlock Text="Paste a repo URL and ask anything — what it needs, how to extend it, what it's missing, integration ideas, etc."
+                                       Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,8"/>
+                            <TextBox Text="{Binding RepoAskUrl, UpdateSourceTrigger=PropertyChanged}" 
+                                     Style="{StaticResource ModernTextBox}" Margin="0,0,0,6"
+                                     Tag="https://github.com/owner/repo"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBox Text="{Binding RepoAskQuestion, UpdateSourceTrigger=PropertyChanged}" 
+                                         Style="{StaticResource ModernTextBox}"
+                                         Tag="What will this project benefit from? / What's missing? / How should I extend it?"/>
+                                <Button Grid.Column="1" Content="💬 Ask" Style="{StaticResource AccentButton}" Margin="8,0,0,0"
+                                        Command="{Binding AskAboutRepoCommand}"
+                                        IsEnabled="{Binding IsRepoAsking, Converter={x:Static conv:InverseBoolConverter.Instance}}"/>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <ProgressBar Style="{StaticResource BusyIndicator}" Margin="0,4"
+                                 Visibility="{Binding IsRepoAsking, Converter={StaticResource BoolVis}}"/>
+
+                    <!-- Q&A Answer -->
+                    <Border Style="{StaticResource Card}" Margin="0,4,0,0"
+                            Visibility="{Binding RepoAskAnswer, Converter={StaticResource NullVis}}">
+                        <StackPanel>
+                            <Grid>
+                                <TextBlock Text="💡 Answer" Style="{StaticResource SectionHeader}"/>
+                                <Button Style="{StaticResource CopyButton}" HorizontalAlignment="Right"
+                                        Command="{Binding CopyTextToClipboardCommand}" 
+                                        CommandParameter="{Binding RepoAskAnswer}"/>
+                            </Grid>
+                            <TextBox Text="{Binding RepoAskAnswer, Mode=OneWay}" Style="{StaticResource SelectableText}" 
+                                     FontSize="13" Foreground="{StaticResource TextPrimaryBrush}"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Q&A History -->
+                    <ItemsControl ItemsSource="{Binding RepoQaHistory}" Margin="0,4,0,0">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Style="{StaticResource Card}" Margin="0,0,0,6">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Expander IsExpanded="False">
+                                            <Expander.Header>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="{Binding RepoLabel}" FontSize="11" Foreground="#64B5F6" Margin="0,0,8,0"/>
+                                                    <TextBlock Text="{Binding Question}" FontWeight="SemiBold" FontSize="12"
+                                                               Foreground="{StaticResource TextPrimaryBrush}" TextTrimming="CharacterEllipsis" MaxWidth="600"/>
+                                                </StackPanel>
+                                            </Expander.Header>
+                                            <TextBox Text="{Binding Answer, Mode=OneWay}" Style="{StaticResource SelectableText}"
+                                                     FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,0"/>
+                                        </Expander>
+                                        <Button Grid.Column="1" Style="{StaticResource CopyButton}"
+                                                Command="{Binding DataContext.CopyRepoQaCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                CommandParameter="{Binding}"/>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <!-- Single Scan -->
+                    <Border Style="{StaticResource Card}" Margin="0,8,0,0">
+                        <StackPanel>
+                            <TextBlock Text="Single Repo Scan" Style="{StaticResource SectionHeader}"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBox Text="{Binding RepoUrl, UpdateSourceTrigger=PropertyChanged}" 
+                                         Style="{StaticResource ModernTextBox}"
+                                         Tag="https://github.com/owner/repo"/>
+                                <Button Grid.Column="1" Content="🔎 Scan" Style="{StaticResource AccentButton}" Margin="8,0,0,0"
+                                        Command="{Binding ScanRepoCommand}"
+                                        IsEnabled="{Binding IsRepoScanning, Converter={x:Static conv:InverseBoolConverter.Instance}}"/>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Multi Scan -->
+                    <Border Style="{StaticResource Card}" Margin="0,8,0,0">
+                        <StackPanel>
+                            <TextBlock Text="Batch Scan (one URL per line)" Style="{StaticResource SectionHeader}"/>
+                            <TextBox Text="{Binding RepoUrlList, UpdateSourceTrigger=PropertyChanged}" 
+                                     Style="{StaticResource ModernTextBox}" AcceptsReturn="True"
+                                     Height="80" TextWrapping="Wrap"
+                                     Tag="Paste multiple GitHub URLs, one per line"/>
+                            <Button Content="🔎 Scan All" Style="{StaticResource AccentButton}" Margin="0,8,0,0"
+                                    HorizontalAlignment="Left"
+                                    Command="{Binding ScanMultiRepoCommand}"
+                                    IsEnabled="{Binding IsRepoScanning, Converter={x:Static conv:InverseBoolConverter.Instance}}"/>
+                        </StackPanel>
+                    </Border>
+
+                    <ProgressBar Style="{StaticResource BusyIndicator}" Margin="0,4"
+                                 Visibility="{Binding IsRepoScanning, Converter={StaticResource BoolVis}}"/>
+                    <TextBox Text="{Binding RepoScanStatus, Mode=OneWay}" Style="{StaticResource SelectableText}"
+                             Foreground="{StaticResource TextSecondaryBrush}" 
+                               FontSize="12" Margin="0,4,0,8"/>
+
+                    <!-- Scanned Profiles -->
+                    <ItemsControl ItemsSource="{Binding RepoProfiles}" Margin="0,4,0,0">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Style="{StaticResource Card}" Margin="0,0,0,8">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <!-- Scan Proof Verification Banner -->
+                                            <Border Background="#1A4CAF50" CornerRadius="4" Padding="8,4" Margin="0,0,0,6"
+                                                    BorderBrush="#4CAF50" BorderThickness="1"
+                                                    Visibility="{Binding HasProof, Converter={StaticResource BoolVis}}">
+                                                <TextBox Text="{Binding ProofBanner, Mode=OneWay}" Style="{StaticResource SelectableText}"
+                                                         FontSize="11" FontFamily="Consolas" Foreground="#81C784"/>
+                                            </Border>
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="{Binding FullName}" FontSize="16" FontWeight="Bold"
+                                                           Foreground="{StaticResource TextPrimaryBrush}"/>
+                                                <Border Style="{StaticResource Badge}" Margin="10,0,0,0">
+                                                    <TextBlock Text="{Binding PrimaryLanguage}" FontSize="11"/>
+                                                </Border>
+                                                <TextBlock Text="{Binding Stars, StringFormat='⭐ {0}'}" Foreground="{StaticResource TextSecondaryBrush}"
+                                                           FontSize="11" VerticalAlignment="Center" Margin="10,0,0,0"/>
+                                                <TextBlock Text="{Binding Forks, StringFormat='🍴 {0}'}" Foreground="{StaticResource TextSecondaryBrush}"
+                                                           FontSize="11" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                                            </StackPanel>
+                                            <TextBox Text="{Binding Description, Mode=OneWay}" Style="{StaticResource SelectableText}"
+                                                     FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,0"/>
+                                            <TextBox Text="{Binding Frameworks, Mode=OneWay}" Style="{StaticResource SelectableText}"
+                                                     FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,0"
+                                                     Visibility="{Binding Frameworks, Converter={StaticResource NullVis}}"/>
+                                            <TextBlock Text="{Binding DependencyCount, StringFormat='{}{0} dependencies'}" FontSize="11"
+                                                       Foreground="{StaticResource TextSecondaryBrush}" Margin="0,2,0,0"/>
+
+                                            <TextBlock Text="Strengths" Style="{StaticResource SubHeader}" Margin="0,8,0,2"/>
+                                            <TextBox Text="{Binding Strengths, Mode=OneWay}" Style="{StaticResource SelectableText}" FontSize="11"/>
+
+                                            <TextBlock Text="Gaps" Style="{StaticResource SubHeader}" Margin="0,6,0,2"/>
+                                            <TextBox Text="{Binding Gaps, Mode=OneWay}" Style="{StaticResource SelectableText}" FontSize="11"/>
+
+                                            <TextBlock Text="{Binding ComplementCount, StringFormat='🔗 {0} complementary projects found'}" 
+                                                       FontSize="11" Foreground="#64B5F6" Margin="0,6,0,2"/>
+                                            <!-- Complement items with clickable URLs -->
+                                            <ItemsControl ItemsSource="{Binding ComplementItems}" Margin="0,0,0,0">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <TextBlock TextWrapping="Wrap" FontSize="11"
+                                                                   Foreground="{StaticResource TextSecondaryBrush}" Margin="0,1,0,1">
+                                                            <Run Text="• "/><Run Text="{Binding Name, Mode=OneWay}" FontWeight="Medium"/>
+                                                            <Run Text=" — "/><Run Text="{Binding Purpose, Mode=OneWay}"/>
+                                                            <Run Text=": "/><Run Text="{Binding WhatItAdds, Mode=OneWay}"/>
+                                                            <LineBreak/>
+                                                            <Hyperlink NavigateUri="{Binding Url}" 
+                                                                       RequestNavigate="Hyperlink_RequestNavigate"
+                                                                       Foreground="#64B5F6" FontSize="10">
+                                                                <Run Text="{Binding Url, Mode=OneWay}"/>
+                                                            </Hyperlink>
+                                                        </TextBlock>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+
+                                            <TextBlock Text="{Binding Created}" FontSize="10"
+                                                       Foreground="{StaticResource TextSecondaryBrush}" Margin="0,6,0,0"/>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1">
+                                            <Button Content="✕" Style="{StaticResource SubtleButton}" FontSize="10" Padding="3,1"
+                                                    Command="{Binding DataContext.DeleteRepoProfileCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                    CommandParameter="{Binding}" ToolTip="Remove profile"/>
+                                            <Button Style="{StaticResource CopyButton}" Margin="0,4,0,0"
+                                                    Command="{Binding DataContext.CopyRepoProfileCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                    CommandParameter="{Binding}"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+
+                <!-- PROJECT FUSION TAB -->
+                <StackPanel Visibility="{Binding ActiveTab, Converter={StaticResource EqVis}, ConverterParameter=ProjectFusion}">
+                    <TextBlock Text="Project Fusion Engine" FontSize="20" FontWeight="Bold" 
+                               Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,4"/>
+                    <TextBlock TextWrapping="Wrap" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,0,0,12">
+                        Fuse scanned repositories and prior fusion artifacts into unified architecture documents.
+                        Select inputs, choose a goal, and let the engine produce a detailed architecture with full provenance tracking.
+                    </TextBlock>
+
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <!-- Template Picker -->
+                            <TextBlock Text="Quick Templates" Style="{StaticResource SectionHeader}"/>
+                            <ComboBox ItemsSource="{Binding ProjectFusionTemplates}" 
+                                      SelectedItem="{Binding SelectedProjectFusionTemplate}"
+                                      DisplayMemberPath="DisplayName"
+                                      Width="360" HorizontalAlignment="Left" Margin="0,0,0,4"/>
+                            <TextBlock Text="{Binding SelectedProjectFusionTemplate.Description}" 
+                                       Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" FontStyle="Italic"
+                                       TextWrapping="Wrap" Margin="0,0,0,10"
+                                       Visibility="{Binding SelectedProjectFusionTemplate, Converter={StaticResource NullVis}}"/>
+
+                            <!-- Input Selection -->
+                            <TextBlock Text="Select Inputs" Style="{StaticResource SectionHeader}"/>
+                            <TextBlock Text="Check the repo profiles and/or prior fusions to include:" 
+                                       Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,6"/>
+                            <ItemsControl ItemsSource="{Binding FusionInputOptions}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <CheckBox IsChecked="{Binding IsSelected}" Content="{Binding Title}"
+                                                  Foreground="{StaticResource TextPrimaryBrush}" Margin="0,2"/>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <!-- Focus Prompt -->
+                            <TextBlock Text="Focus Prompt" Style="{StaticResource SectionHeader}" Margin="0,10,0,0"/>
+                            <TextBox Text="{Binding ProjectFusionFocus, UpdateSourceTrigger=PropertyChanged}" 
+                                     Style="{StaticResource ModernTextBox}" AcceptsReturn="True"
+                                     Height="60" TextWrapping="Wrap" Margin="0,0,0,8"
+                                     Tag="Describe what you want from this fusion..."/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="Goal:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                    <ComboBox ItemsSource="{Binding ProjectFusionGoals}" SelectedItem="{Binding ProjectFusionGoal}" Width="140"/>
+                                </StackPanel>
+                                <Button Grid.Column="1" Content="🏗️ Fuse Projects" Style="{StaticResource AccentButton}"
+                                        Command="{Binding RunProjectFusionCommand}"
+                                        IsEnabled="{Binding IsProjectFusing, Converter={x:Static conv:InverseBoolConverter.Instance}}"/>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <ProgressBar Style="{StaticResource BusyIndicator}" Margin="0,4"
+                                 Visibility="{Binding IsProjectFusing, Converter={StaticResource BoolVis}}"/>
+                    <TextBox Text="{Binding RepoScanStatus, Mode=OneWay}" Style="{StaticResource SelectableText}"
+                             Foreground="{StaticResource TextSecondaryBrush}" 
+                               FontSize="12" Margin="0,4,0,8"
+                               Visibility="{Binding IsProjectFusing, Converter={StaticResource BoolVis}}"/>
+
+                    <!-- Fusion Artifacts -->
+                    <ItemsControl ItemsSource="{Binding ProjectFusions}" Margin="0,4,0,0">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Style="{StaticResource Card}" Margin="0,0,0,8">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="{Binding Title}" FontSize="15" FontWeight="Bold"
+                                                           Foreground="{StaticResource TextPrimaryBrush}"/>
+                                                <Border Style="{StaticResource Badge}" Margin="10,0,0,0">
+                                                    <TextBlock Text="{Binding Goal}" FontSize="11"/>
+                                                </Border>
+                                            </StackPanel>
+                                            <TextBlock Text="{Binding InputSummary, StringFormat='Inputs: {0}'}" FontSize="11"
+                                                       Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,0"/>
+
+                                            <TextBlock Text="Unified Vision" Style="{StaticResource SubHeader}" Margin="0,8,0,2"/>
+                                            <TextBox Text="{Binding Vision, Mode=OneWay}" Style="{StaticResource SelectableText}" FontSize="12"/>
+
+                                            <TextBlock Text="Architecture" Style="{StaticResource SubHeader}" Margin="0,8,0,2"/>
+                                            <TextBox Text="{Binding Architecture, Mode=OneWay}" Style="{StaticResource SelectableText}" FontSize="12"/>
+
+                                            <TextBlock Text="{Binding FeatureCount, StringFormat='📋 {0} features mapped'}" 
+                                                       FontSize="11" Foreground="#64B5F6" Margin="0,6,0,0"/>
+
+                                            <TextBlock Text="Feature Matrix" Style="{StaticResource SubHeader}" Margin="0,6,0,2"/>
+                                            <TextBox Text="{Binding FeatureMatrix, Mode=OneWay}" Style="{StaticResource SelectableText}" FontSize="11"/>
+
+                                            <TextBlock Text="Gaps Closed" Style="{StaticResource SubHeader}" Margin="0,6,0,2"/>
+                                            <TextBox Text="{Binding GapsClosed, Mode=OneWay}" Style="{StaticResource SelectableText}" FontSize="11"/>
+
+                                            <TextBlock Text="New Gaps" Style="{StaticResource SubHeader}" Margin="0,6,0,2"/>
+                                            <TextBox Text="{Binding NewGaps, Mode=OneWay}" Style="{StaticResource SelectableText}" FontSize="11"/>
+
+                                            <!-- IP Notes -->
+                                            <Border Background="#E8EAF6" CornerRadius="4" Padding="8,4" Margin="0,6,0,0"
+                                                    Visibility="{Binding HasIpNotes, Converter={StaticResource BoolVis}}">
+                                                <TextBox Text="{Binding IpNotes, Mode=OneWay}" Style="{StaticResource SelectableText}"
+                                                         FontSize="11" Foreground="#283593"/>
+                                            </Border>
+
+                                            <TextBlock Text="Provenance" Style="{StaticResource SubHeader}" Margin="0,6,0,2"/>
+                                            <TextBox Text="{Binding ProvenanceMap, Mode=OneWay}" Style="{StaticResource SelectableText}" FontSize="11"/>
+
+                                            <TextBlock Text="{Binding Created}" FontSize="10"
+                                                       Foreground="{StaticResource TextSecondaryBrush}" Margin="0,6,0,0"/>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1">
+                                            <Button Content="✕" Style="{StaticResource SubtleButton}" FontSize="10" Padding="3,1"
+                                                    Command="{Binding DataContext.DeleteProjectFusionCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                    CommandParameter="{Binding}" ToolTip="Remove fusion"/>
+                                            <Button Style="{StaticResource CopyButton}" Margin="0,4,0,0"
+                                                    Command="{Binding DataContext.CopyProjectFusionCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                    CommandParameter="{Binding}"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
                 </StackPanel>
 
             </Grid>

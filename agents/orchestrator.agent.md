@@ -24,6 +24,17 @@ Follow the specs in `/spec/*`, especially:
 - Packaging output produced
 - End-to-end demo checklist passes
 
+## Documentation enforcement
+After completing any implementation step:
+1. Update `CAPABILITY_MAP.md` — add/modify entries for new or changed capabilities (status, files, rationale, tests).
+2. If a new service, UI tab, or database table is added, it MUST appear in the capability map before the task is marked done.
+3. Append a row to the Change Log table at the bottom of `CAPABILITY_MAP.md` with date, summary, and affected files.
+4. If a capability's file location, status, or design rationale changes, update its entry.
+5. Keep entries terse — one line per capability, one-liner rationale. Do not write prose.
+6. After updating, verify the map's "Last verified" header line reflects the current test count and date.
+
+Do NOT skip documentation updates due to token pressure. If budget is tight, update the capability map BEFORE writing a summary response.
+
 ## Output rules
 - No placeholders, no stubs, no TODO-only logic.
 - Keep build green at each milestone.

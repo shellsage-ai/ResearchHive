@@ -6,7 +6,9 @@ public enum JobType
     Discovery,
     Materials,
     ProgrammingIP,
-    Fusion
+    Fusion,
+    RepoAnalysis,
+    ProjectFusion
 }
 
 public enum JobState
@@ -51,6 +53,9 @@ public class JobProgressEventArgs : EventArgs
     public double SufficiencyScore { get; set; }
     public int BrowserPoolAvailable { get; set; }
     public int BrowserPoolTotal { get; set; }
+
+    // Search engine health (per-engine success/failure rates)
+    public List<SearchEngineHealthEntry> SearchEngineHealth { get; set; } = new();
 }
 
 public class SourceHealthEntry
@@ -71,6 +76,29 @@ public enum SourceFetchStatus
     Paywall,
     Error,
     CircuitBroken
+}
+
+/// <summary>Per-engine search health during a research job.</summary>
+public class SearchEngineHealthEntry
+{
+    public string EngineName { get; set; } = "";
+    public int QueriesAttempted { get; set; }
+    public int QueriesSucceeded { get; set; }
+    public int TotalResultsFound { get; set; }
+    public int ConsecutiveFailures { get; set; }
+    public bool IsSkipped { get; set; }
+    public string StatusDisplay => IsSkipped ? "Skipped" :
+        QueriesAttempted == 0 ? "Idle" :
+        QueriesSucceeded == QueriesAttempted ? "Healthy" :
+        QueriesSucceeded > 0 ? "Degraded" : "Failed";
+    public string StatusIcon => StatusDisplay switch
+    {
+        "Healthy" => "✅",
+        "Degraded" => "⚠️",
+        "Failed" => "❌",
+        "Skipped" => "⏭️",
+        _ => "⏸️"
+    };
 }
 
 public class ResearchJob

@@ -137,3 +137,121 @@ public class NotebookEntry
     public DateTime UpdatedUtc { get; set; } = DateTime.UtcNow;
     public List<string> Tags { get; set; } = new();
 }
+
+// ---- Repo Intelligence & Project Fusion models ----
+
+public class RepoProfile
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N")[..12];
+    public string SessionId { get; set; } = string.Empty;
+    public string RepoUrl { get; set; } = string.Empty;
+    public string Owner { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public string PrimaryLanguage { get; set; } = string.Empty;
+    public List<string> Languages { get; set; } = new();
+    public List<string> Frameworks { get; set; } = new();
+    public List<RepoDependency> Dependencies { get; set; } = new();
+    public int Stars { get; set; }
+    public int Forks { get; set; }
+    public int OpenIssues { get; set; }
+    public List<string> Topics { get; set; } = new();
+    public DateTime? LastCommitUtc { get; set; }
+    public string ReadmeContent { get; set; } = string.Empty;
+    public List<string> Strengths { get; set; } = new();
+    public List<string> Gaps { get; set; } = new();
+    public List<ComplementProject> ComplementSuggestions { get; set; } = new();
+    /// <summary>First few files/folders from the repo root — proof of live scan.</summary>
+    public List<RepoEntry> TopLevelEntries { get; set; } = new();
+    public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
+
+    // Repo RAG fields
+    /// <summary>LLM-generated architecture summary of the codebase.</summary>
+    public string CodeBook { get; set; } = string.Empty;
+    /// <summary>Git HEAD SHA at last index — used for cache invalidation.</summary>
+    public string TreeSha { get; set; } = string.Empty;
+    /// <summary>Number of source files indexed into chunks.</summary>
+    public int IndexedFileCount { get; set; }
+    /// <summary>Total chunks created from source files.</summary>
+    public int IndexedChunkCount { get; set; }
+}
+
+/// <summary>A single file or directory entry in a repo, used as scan-proof.</summary>
+public class RepoEntry
+{
+    public string Name { get; set; } = string.Empty;
+    /// <summary>"file" or "dir".</summary>
+    public string Type { get; set; } = "file";
+    public string DisplayIcon => Type == "dir" ? "📁" : "📄";
+}
+
+public class RepoDependency
+{
+    public string Name { get; set; } = string.Empty;
+    public string Version { get; set; } = string.Empty;
+    public string License { get; set; } = string.Empty;
+    public string ManifestFile { get; set; } = string.Empty;
+}
+
+public class ComplementProject
+{
+    public string Name { get; set; } = string.Empty;
+    public string Url { get; set; } = string.Empty;
+    public string Purpose { get; set; } = string.Empty;
+    public string WhatItAdds { get; set; } = string.Empty;
+    public string Category { get; set; } = string.Empty;
+    public string License { get; set; } = string.Empty;
+    public string Maturity { get; set; } = string.Empty;
+}
+
+public enum ProjectFusionGoal { Merge, Extend, Compare, Architect }
+
+public enum FusionInputType { RepoProfile, FusionArtifact }
+
+/// <summary>Scope for global memory queries.</summary>
+public enum MemoryScope
+{
+    /// <summary>Search only within the current session.</summary>
+    ThisSession,
+    /// <summary>Search only chunks associated with a specific repository.</summary>
+    ThisRepo,
+    /// <summary>Search only chunks from a specific domain pack.</summary>
+    ThisDomain,
+    /// <summary>Search everything — the full hive mind.</summary>
+    HiveMind
+}
+
+public class ProjectFusionInput
+{
+    public string Id { get; set; } = string.Empty;
+    public FusionInputType Type { get; set; }
+    public string Title { get; set; } = string.Empty;
+}
+
+public class ProjectFusionRequest
+{
+    public string SessionId { get; set; } = string.Empty;
+    public List<ProjectFusionInput> Inputs { get; set; } = new();
+    public ProjectFusionGoal Goal { get; set; } = ProjectFusionGoal.Merge;
+    public string FocusPrompt { get; set; } = string.Empty;
+}
+
+public class ProjectFusionArtifact
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N")[..12];
+    public string SessionId { get; set; } = string.Empty;
+    public string JobId { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string InputSummary { get; set; } = string.Empty;
+    public List<ProjectFusionInput> Inputs { get; set; } = new();
+    public ProjectFusionGoal Goal { get; set; }
+    public string UnifiedVision { get; set; } = string.Empty;
+    public string ArchitectureProposal { get; set; } = string.Empty;
+    public string TechStackDecisions { get; set; } = string.Empty;
+    public Dictionary<string, string> FeatureMatrix { get; set; } = new(); // feature -> source
+    public List<string> GapsClosed { get; set; } = new();
+    public List<string> NewGaps { get; set; } = new();
+    public IpAssessment? IpNotes { get; set; }
+    public Dictionary<string, string> ProvenanceMap { get; set; } = new();
+    public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
+}

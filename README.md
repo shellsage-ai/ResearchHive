@@ -8,7 +8,7 @@
 
 ## What Is ResearchHive?
 
-ResearchHive is a WPF desktop application that runs **autonomous research workflows** across any topic. It plans searches, gathers evidence from the web, indexes everything into a per-session knowledge base, and synthesizes cited reports — all without manual intervention. Beyond basic research, it offers a full suite of analytical tools: hypothesis generation, materials exploration, idea fusion, contradiction detection, and more.
+ResearchHive is a WPF desktop application that runs **autonomous research workflows** across any topic. It plans searches, gathers evidence from the web, indexes everything into a per-session knowledge base, and synthesizes cited reports — all without manual intervention. Beyond basic research, it offers a full suite of analytical tools: hypothesis generation, materials exploration, idea fusion, contradiction detection, repo intelligence, and cross-session knowledge via **Hive Mind**.
 
 Every substantive claim is **cited to immutable evidence** or clearly labeled as a hypothesis. When topics touch the physical world, the system automatically flags **safety hazards, PPE requirements, and disposal protocols**. When topics touch software, it surfaces **licensing signals, patent risks, and clean-room design-around options**.
 
@@ -26,6 +26,7 @@ Every substantive claim is **cited to immutable evidence** or clearly labeled as
 
 ### Evidence & Artifacts
 - **Immutable Web Snapshots** — Playwright-based page capture for reproducible citations.
+- **PDF Ingestion** — Two-tier extraction via PdfPig (text layer) with automatic OCR fallback for scanned pages.
 - **Screenshot OCR** — Extract text from images with bounding-box extraction.
 - **Evidence Pinning** — Pin key findings for quick reference across your session.
 - **Time-Range Filtering** — Focus on evidence from specific date windows.
@@ -39,7 +40,8 @@ Every substantive claim is **cited to immutable evidence** or clearly labeled as
 | **Idea Fusion Engine** | Combine research into new proposals using 4 modes: Blend, Cross-Apply, Substitute, Optimize. Includes 10 built-in prompt templates. Each result includes a provenance map, safety flags, and IP notes. |
 | **Materials Explorer** | Search for material candidates by properties, with include/avoid filters, safety labeling, and a property comparison table across all candidates. |
 | **Programming Research & IP** | Generate an Approach Matrix comparing solutions across criteria, with IP/licensing analysis (license signals, risk flags, design-around options). |
-| **Cross-Session Search** | Search across ALL sessions — find evidence or reports you've previously gathered on any topic. Includes global statistics dashboard. |
+| **Hive Mind** | Cross-session global memory with FTS5 + semantic search, strategy extraction, knowledge curation (browse/filter/paginate/delete), and RAG Q&A across all sessions. |
+| **Repo Intelligence** | GitHub repo scanning, shallow cloning, code chunking, CodeBook generation, RAG-powered Q&A, and multi-repo Project Fusion (Merge/Extend/Compare/Architect). |
 | **Citation Verification** | Quick text-match verification plus deep LLM-backed verification that citations actually support their claims. |
 | **Contradiction Detection** | Fast heuristic scan plus deep embedding + LLM analysis to find conflicting claims across sources. |
 | **Research Comparison** | Side-by-side comparison of sessions with overlap analysis, unique findings, and gap identification. |
@@ -50,6 +52,8 @@ Every substantive claim is **cited to immutable evidence** or clearly labeled as
 - **Overview Dashboard** — At-a-glance session statistics: evidence count, source diversity, report coverage.
 - **Export Formats** — HTML reports, Research Packets (ZIP), and full session archives.
 - **Markdown Tables** — Full markdown rendering with advanced extensions (tables, task lists, etc.) via Markdig.
+- **Job Completion Notifications** — Taskbar flash + system sound when jobs finish while the app is unfocused.
+- **Search Engine Health** — Live per-engine status cards (Healthy/Degraded/Failed/Skipped) during multi-lane searches.
 
 ### Safety & IP System
 - **Physical-World Safety** — Automatic labeling of environment requirements (desk / ventilated area / fume hood / pro lab), minimum PPE, hazards, and disposal protocols.
@@ -64,18 +68,19 @@ Every substantive claim is **cited to immutable evidence** or clearly labeled as
 ResearchHive.sln
 ├── src/
 │   ├── ResearchHive/              # WPF UI (.NET 8, CommunityToolkit.Mvvm)
-│   │   ├── Views/                 # XAML views
-│   │   ├── ViewModels/            # MVVM ViewModels with source generators
+│   │   ├── Views/                 # XAML views (22 workspace tabs)
+│   │   ├── ViewModels/            # MVVM ViewModels (decomposed into 12 partial class files)
 │   │   ├── Controls/              # Custom controls (MarkdownViewer)
 │   │   ├── Converters/            # Value converters
+│   │   ├── Services/              # NotificationService (P/Invoke)
 │   │   └── Resources/             # Styles, themes
 │   └── ResearchHive.Core/         # Business logic & services
-│       ├── Data/                   # SessionDb, RegistryDb (SQLite WAL)
+│       ├── Data/                   # SessionDb, RegistryDb, GlobalDb (SQLite WAL)
 │       ├── Models/                 # Domain models, DTOs
-│       ├── Services/               # 22 registered services
+│       ├── Services/               # 37 registered services
 │       └── Configuration/          # AppSettings
 ├── tests/
-│   └── ResearchHive.Tests/        # xUnit test suite (272 tests)
+│   └── ResearchHive.Tests/        # xUnit test suite (341 tests)
 ├── spec/                           # Full product specifications
 ├── agents/                         # AI agent prompt definitions
 └── prompts/                        # Build automation prompts
@@ -89,36 +94,52 @@ ResearchHive.sln
 | **MVVM** | CommunityToolkit.Mvvm 8.2.2 (source generators) |
 | **Markdown** | Markdig 0.34.0 with advanced extensions |
 | **Database** | SQLite via Microsoft.Data.Sqlite 8.0.0 (WAL mode, per-session) |
+| **PDF Extraction** | PdfPig 0.1.13 (text layer + OCR fallback) |
 | **Web Scraping** | Microsoft.Playwright 1.52.0 |
 | **Stealth Browsing** | Selenium.UndetectedChromeDriver 1.1.3 |
 | **Key Storage** | System.Security.Cryptography.ProtectedData (DPAPI) |
 | **DI** | Microsoft.Extensions.DependencyInjection 8.0.0 |
 | **Testing** | xUnit + FluentAssertions-style assertions |
 
-### Core Services (22 registered via DI)
+### Core Services (37 registered via DI)
 
 - `SessionManager` — Create, list, delete sessions
-- `SessionDb` — Per-session SQLite with 19 tables
+- `SessionDb` — Per-session SQLite with 20 tables
 - `ArtifactStore` — Content-addressed immutable evidence storage
-- `SnapshotService` — Playwright-based web snapshots
+- `SnapshotService` — Playwright-based web snapshots + PDF URL detection
 - `OcrService` — Screenshot text extraction
+- `PdfIngestionService` — Two-tier PDF extraction (PdfPig + OCR fallback)
 - `IndexService` — Chunking + FTS5 indexing + embeddings
-- `RetrievalService` — Hybrid keyword + semantic search with optional reranking
-- `ResearchJobRunner` — Agentic research loop (plan → search → extract → synthesize)
+- `RetrievalService` — Hybrid keyword + semantic search with source type filtering
+- `ResearchJobRunner` — Agentic research loop with per-engine health tracking
 - `DiscoveryJobRunner` — Hypothesis generation and scoring
-- `FusionJobRunner` — Idea fusion across modes
+- `FusionJobRunner` — Idea fusion across 4 modes
 - `MaterialsJobRunner` — Material candidate search with safety
 - `ProgrammingJobRunner` — Approach matrix + IP analysis
-- `CrossSessionSearchService` — Global search across all sessions
+- `GlobalDb` — Cross-session SQLite with FTS5 for Hive Mind
+- `GlobalMemoryService` — Promote, curate, and query global knowledge
+- `CrossSessionSearchService` — Legacy keyword search across all sessions
+- `RepoScannerService` — GitHub repo metadata + dependency parsing
+- `RepoCloneService` — Shallow git clone with ZIP fallback
+- `CodeChunker` — Language-agnostic code splitting at semantic boundaries
+- `RepoIndexService` — Clone → chunk → embed → save pipeline
+- `CodeBookGenerator` — LLM architecture summary from code chunks
+- `RepoIntelligenceJobRunner` — Full repo analysis pipeline
+- `ComplementResearchService` — Find projects that fill repo gaps
+- `ProjectFusionEngine` — Multi-repo architecture fusion
 - `CitationVerificationService` — Quick + deep citation checks
 - `ContradictionDetector` — Heuristic + LLM contradiction analysis
 - `ResearchComparisonService` — Session comparison engine
 - `EmbeddingService` — Vector embeddings (local Ollama or API)
-- `LlmService` — LLM synthesis routing
-- `CourtesyPolicy` — Rate limiting and politeness
+- `LlmService` — Multi-provider LLM routing (Ollama + 8 cloud providers)
+- `CodexCliService` — OpenAI Codex CLI integration
+- `CourtesyPolicy` — Rate limiting, circuit breaker, per-domain delays
+- `GoogleSearchService` — Selenium-based Google search
+- `BrowserSearchService` — DuckDuckGo/Brave/Bing HTML scraping
 - `ExportService` — ZIP, HTML, and packet export
+- `InboxWatcher` — Auto-ingest dropped files
 - `SecureKeyStore` — DPAPI-protected API key storage
-- `SourceQualityScorer` — Automated source ranking
+- `NotificationService` — Taskbar flash + sound on job completion
 
 ---
 
@@ -211,7 +232,7 @@ dotnet test tests/ResearchHive.Tests/
 ```
 
 ```
-Passed!  - Failed: 0, Passed: 272, Skipped: 2, Total: 274
+Passed!  - Failed: 0, Passed: 339, Skipped: 2, Total: 341
 ```
 
 ---
@@ -240,7 +261,7 @@ Private repository. All rights reserved.
 This is currently a private project. If you have access, please:
 1. Create a feature branch from `main`
 2. Make your changes with tests
-3. Ensure `dotnet test` passes (272+ tests, 0 failures)
+3. Ensure `dotnet test` passes (341+ tests, 0 failures)
 4. Submit a pull request
 
 ---
