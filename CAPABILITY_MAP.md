@@ -649,6 +649,7 @@ tests/
 
 | Date | Change | Files |
 |------|--------|-------|
+| 2026-02-13 | Add PolyForm Noncommercial 1.0.0 license + commercial licensing guide + README update | LICENSE.md, COMMERCIAL_LICENSE.md, README.md |
 | 2026-02-14 | Phase 26: Project Fusion quality overhaul — anti-hallucination grounding (7 rules), comprehensive FormatProfileForLlm (deps+versions, Topics, file tree, CodeBook), new PROJECT_IDENTITIES section, goal-specific section prompts (Merge/Extend/Compare/Architect), Compare mode differentiation (goal-aware section titles), source URL references in reports, enriched UI (goal descriptions, dynamic labels, template descriptions) | ProjectFusionEngine.cs, DomainModels.cs, SessionWorkspaceSubViewModels.cs, SessionWorkspaceView.xaml |
 | 2026-02-13 | Phase 25: Research report quality + readability overhaul — 6 pipeline bug fixes (iteration cap, citation label collisions, early-exit thresholds, sufficiency skip, expert search queries, target sources 5→8) + formatting/highlighting in all prompts | ResearchJobRunner.cs, ReportTemplateService.cs, SessionWorkspaceViewModel.cs |
 | 2026-02-13 | Phase 24: Dynamic anti-hallucination pipeline — 4-layer complement filtering (expanded models, 7 deterministic checks, LLM relevance, 17-rule dynamic search) | RepoFactSheetBuilder.cs, PostScanVerifier.cs, ComplementResearchService.cs, RepoIntelligenceJobRunner.cs, DomainModels.cs, ServiceRegistration.cs |
