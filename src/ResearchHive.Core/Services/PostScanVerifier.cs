@@ -238,7 +238,7 @@ public class PostScanVerifier
     }
 
     /// <summary>Minimum complements to retain after pruning. Backfills from pruned pool if needed.</summary>
-    internal const int MinimumComplementFloor = 3;
+    internal const int MinimumComplementFloor = 5;
 
     /// <summary>Validate complement project URLs, ecosystem match, and redundancy. Enforces minimum floor + category diversity.</summary>
     private async Task ValidateComplementsAsync(
@@ -272,6 +272,15 @@ public class PostScanVerifier
                 }
             }
             if (alreadyInstalled) continue;
+
+            // ── Meta-project / infrastructure engine filter ──
+            // Some repos are engines or platforms, not installable libraries (e.g., dependabot-core is Ruby infra).
+            // Reject complements whose repo language doesn't match the target ecosystem.
+            if (IsMetaProjectNotUsableDirectly(comp, factSheet))
+            {
+                toRemove.Add((comp, $"META-PROJECT: \"{comp.Name}\" — infrastructure engine, not an installable {factSheet.Ecosystem} package", "HARD"));
+                continue;
+            }
 
             // ── Database technology contradiction: reject if complement conflicts with DB choice ──
             if (!string.IsNullOrEmpty(factSheet.DatabaseTechnology))
@@ -458,9 +467,19 @@ public class PostScanVerifier
         // Only inject from diagnostic files missing + confirmed absent capabilities that are important
         foreach (var missing in factSheet.DiagnosticFilesMissing)
         {
+            // Skip items that were deliberately pruned by app-type or DB-tech checks.
+            // If GapsRemoved contains an entry mentioning this missing item (e.g., "WRONG-APPTYPE: ... Dockerfile ..."),
+            // re-injecting it would undo the pruning.
+            var missingKeywords = ExtractKeywords(missing.ToLowerInvariant());
+            bool deliberatelyPruned = result.GapsRemoved.Any(r =>
+                r.Contains(missing, StringComparison.OrdinalIgnoreCase) ||
+                missingKeywords.Any(kw => r.ToLowerInvariant().Contains(kw)));
+
+            if (deliberatelyPruned) continue;
+
             bool alreadyMentioned = profile.Gaps.Any(g =>
                 g.Contains(missing, StringComparison.OrdinalIgnoreCase) ||
-                ExtractKeywords(missing.ToLowerInvariant()).Any(kw => g.ToLowerInvariant().Contains(kw)));
+                missingKeywords.Any(kw => g.ToLowerInvariant().Contains(kw)));
 
             if (!alreadyMentioned)
             {
@@ -507,6 +526,52 @@ public class PostScanVerifier
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Detect meta-projects / infrastructure engines that aren't installable packages for the target ecosystem.
+    /// Examples: dependabot-core (Ruby engine), terraform (Go binary), renovate (Node platform).
+    /// These are useful tools but not NuGet/pip/npm packages you'd add as a dependency.
+    /// </summary>
+    internal static bool IsMetaProjectNotUsableDirectly(ComplementProject comp, RepoFactSheet factSheet)
+    {
+        if (string.IsNullOrEmpty(factSheet.Ecosystem)) return false;
+
+        var ecosystem = factSheet.Ecosystem.ToLowerInvariant();
+        var compText = $"{comp.Name} {comp.Purpose} {comp.WhatItAdds}".ToLowerInvariant();
+        var compNameLower = comp.Name.ToLowerInvariant();
+
+        // Known infrastructure engines / platform repos that are NOT installable packages
+        var knownMetaProjects = new[]
+        {
+            ("dependabot-core", "ruby"),      // Ruby engine: users configure YAML, not install as NuGet
+            ("renovate", "node"),              // Node.js platform: users configure JSON, not install as NuGet
+            ("terraform", "go"),               // Go binary infrastructure tool
+            ("ansible", "python"),             // Python automation platform
+            ("pulumi", "go"),                  // Go infrastructure-as-code (has multi-lang SDKs but core is Go)
+        };
+
+        foreach (var (name, lang) in knownMetaProjects)
+        {
+            if (compNameLower.Contains(name) && !ecosystem.Contains(lang))
+                return true;
+        }
+
+        // Heuristic: if the complement describes itself as a "platform", "engine", or "service"
+        // and the URL points to a different-language repo, it's likely a meta-project
+        var metaKeywords = new[] { "platform", "engine", "infrastructure", "service runner", "orchestrator" };
+        if (metaKeywords.Any(kw => compText.Contains(kw)))
+        {
+            // Check if the comp name / URL contain indicators of a different primary language
+            var rubyIndicators = new[] { "ruby", "gemfile", "bundler" };
+            var goIndicators = new[] { "golang", "go module" };
+
+            if ((ecosystem.Contains(".net") || ecosystem.Contains("c#")) &&
+                (rubyIndicators.Any(r => compText.Contains(r)) || goIndicators.Any(g => compText.Contains(g))))
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>Extract significant keywords from a capability label for fuzzy matching.</summary>

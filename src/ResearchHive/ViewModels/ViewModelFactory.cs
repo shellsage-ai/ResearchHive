@@ -34,6 +34,7 @@ public class ViewModelFactory
     private readonly ResearchComparisonService _comparisonService;
     private readonly GlobalMemoryService _globalMemory;
     private readonly NotificationService _notificationService;
+    private readonly GitHubDiscoveryService _discoveryService;
 
     public ViewModelFactory(
         SessionManager sessionManager,
@@ -61,7 +62,8 @@ public class ViewModelFactory
         ContradictionDetector contradictionDetector,
         ResearchComparisonService comparisonService,
         GlobalMemoryService globalMemory,
-        NotificationService notificationService)
+        NotificationService notificationService,
+        GitHubDiscoveryService discoveryService)
     {
         _sessionManager = sessionManager;
         _artifactStore = artifactStore;
@@ -89,6 +91,7 @@ public class ViewModelFactory
         _comparisonService = comparisonService;
         _globalMemory = globalMemory;
         _notificationService = notificationService;
+        _discoveryService = discoveryService;
     }
 
     public MainViewModel CreateMainViewModel()
@@ -130,7 +133,8 @@ public class ViewModelFactory
             _repoRunner,
             _projectFusionEngine,
             _globalMemory,
-            _notificationService);
+            _notificationService,
+            _discoveryService);
     }
 
     public WelcomeViewModel CreateWelcome()

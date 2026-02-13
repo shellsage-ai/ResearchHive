@@ -30,6 +30,9 @@ public partial class App : Application
         // Register notification service (Windows toast)
         services.AddSingleton<NotificationService>();
 
+        // Register GitHub discovery service (for Project Discovery panel)
+        services.AddSingleton<GitHubDiscoveryService>();
+
         // Register ViewModelFactory and ViewModels
         services.AddSingleton<ViewModelFactory>();
         services.AddTransient<MainViewModel>(sp =>

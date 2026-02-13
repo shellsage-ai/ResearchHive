@@ -697,3 +697,32 @@ public class ProjectFusionTemplate
         }
     };
 }
+
+/// <summary>ViewModel wrapper for a GitHub Discovery search result.</summary>
+public class DiscoveryResultViewModel : ObservableObject
+{
+    public DiscoveryResult Result { get; }
+
+    public DiscoveryResultViewModel(DiscoveryResult result)
+    {
+        Result = result;
+    }
+
+    public string FullName => Result.FullName;
+    public string Description => Result.Description.Length > 160 ? Result.Description[..160] + "…" : Result.Description;
+    public string HtmlUrl => Result.HtmlUrl;
+    public string Stars => Result.Stars.ToString("N0");
+    public string Forks => Result.Forks.ToString("N0");
+    public string Language => Result.Language;
+    public string UpdatedAgo => Result.UpdatedAgo;
+    public string License => string.IsNullOrEmpty(Result.License) ? "" : Result.License;
+    public string Topics => Result.Topics.Count > 0 ? string.Join(", ", Result.Topics.Take(6)) : "";
+    public bool IsArchived => Result.IsArchived;
+
+    private bool _isSelected;
+    public bool IsSelected
+    {
+        get => _isSelected;
+        set => SetProperty(ref _isSelected, value);
+    }
+}

@@ -1878,6 +1878,102 @@
                         </StackPanel>
                     </Border>
 
+                    <!-- ═══════════════════════════════════════════════ -->
+                    <!-- PROJECT DISCOVERY: search GitHub, select, scan -->
+                    <!-- ═══════════════════════════════════════════════ -->
+                    <Border Style="{StaticResource Card}" Margin="0,12,0,0">
+                        <StackPanel>
+                            <TextBlock Text="🔍 Project Discovery" Style="{StaticResource SectionHeader}"/>
+                            <TextBlock Text="Search GitHub for related projects — select the ones you want, then scan them all at once."
+                                       Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,8"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="120"/>
+                                    <ColumnDefinition Width="80"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBox Text="{Binding DiscoveryQuery, UpdateSourceTrigger=PropertyChanged}"
+                                         Style="{StaticResource ModernTextBox}"
+                                         Tag="e.g., WPF MVVM data visualization .NET"/>
+                                <TextBox Grid.Column="1" Text="{Binding DiscoveryLanguageFilter, UpdateSourceTrigger=PropertyChanged}"
+                                         Style="{StaticResource ModernTextBox}" Margin="6,0,0,0"
+                                         Tag="Language (optional)"/>
+                                <TextBox Grid.Column="2" Text="{Binding DiscoveryMinStars, UpdateSourceTrigger=PropertyChanged}"
+                                         Style="{StaticResource ModernTextBox}" Margin="6,0,0,0"
+                                         Tag="Min ⭐"/>
+                                <Button Grid.Column="3" Content="🔍 Search" Style="{StaticResource AccentButton}" Margin="8,0,0,0"
+                                        Command="{Binding DiscoverySearchCommand}"
+                                        IsEnabled="{Binding IsDiscoverySearching, Converter={x:Static conv:InverseBoolConverter.Instance}}"/>
+                            </Grid>
+
+                            <ProgressBar Style="{StaticResource BusyIndicator}" Margin="0,6,0,0"
+                                         Visibility="{Binding IsDiscoverySearching, Converter={StaticResource BoolVis}}"/>
+                            <TextBlock Text="{Binding DiscoveryStatus}" FontSize="11"
+                                       Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,0"
+                                       Visibility="{Binding DiscoveryStatus, Converter={StaticResource NullVis}}"/>
+
+                            <!-- Discovery action bar -->
+                            <StackPanel Orientation="Horizontal" Margin="0,6,0,0"
+                                        Visibility="{Binding DiscoveryResults.Count, Converter={StaticResource EmptyVis}}">
+                                <Button Content="☑ Select All" Style="{StaticResource SubtleButton}" Padding="8,3"
+                                        Command="{Binding DiscoverySelectAllCommand}"/>
+                                <Button Content="🔎 Scan Selected" Style="{StaticResource AccentButton}" Padding="10,3" Margin="8,0,0,0"
+                                        Command="{Binding DiscoveryScanSelectedCommand}"
+                                        IsEnabled="{Binding IsRepoScanning, Converter={x:Static conv:InverseBoolConverter.Instance}}"/>
+                            </StackPanel>
+
+                            <!-- Discovery results list -->
+                            <ItemsControl ItemsSource="{Binding DiscoveryResults}" Margin="0,6,0,0">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border BorderBrush="#333" BorderThickness="0,0,0,1" Padding="6,6" Margin="0,0,0,2">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <CheckBox IsChecked="{Binding IsSelected}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                                <StackPanel Grid.Column="1">
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <TextBlock FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}">
+                                                            <Hyperlink NavigateUri="{Binding HtmlUrl}" 
+                                                                       RequestNavigate="Hyperlink_RequestNavigate"
+                                                                       Foreground="#64B5F6">
+                                                                <Run Text="{Binding FullName, Mode=OneWay}"/>
+                                                            </Hyperlink>
+                                                        </TextBlock>
+                                                        <Border Style="{StaticResource Badge}" Margin="8,0,0,0"
+                                                                Visibility="{Binding Language, Converter={StaticResource NullVis}}">
+                                                            <TextBlock Text="{Binding Language}" FontSize="10"/>
+                                                        </Border>
+                                                        <TextBlock Text="{Binding Stars, StringFormat='⭐ {0}'}" FontSize="10"
+                                                                   Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                                                        <TextBlock Text="{Binding UpdatedAgo}" FontSize="10"
+                                                                   Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                                                        <TextBlock Text="{Binding License}" FontSize="10"
+                                                                   Foreground="#66BB6A" VerticalAlignment="Center" Margin="8,0,0,0"
+                                                                   Visibility="{Binding License, Converter={StaticResource NullVis}}"/>
+                                                    </StackPanel>
+                                                    <TextBlock Text="{Binding Description}" TextWrapping="Wrap" FontSize="11"
+                                                               Foreground="{StaticResource TextSecondaryBrush}" Margin="0,2,0,0"/>
+                                                    <TextBlock Text="{Binding Topics}" FontSize="10"
+                                                               Foreground="#9E9E9E" Margin="0,2,0,0" TextWrapping="Wrap"
+                                                               Visibility="{Binding Topics, Converter={StaticResource NullVis}}"/>
+                                                </StackPanel>
+                                                <Button Grid.Column="2" Content="📋" Style="{StaticResource SubtleButton}" 
+                                                        Padding="4,2" VerticalAlignment="Top" ToolTip="Copy URL"
+                                                        Command="{Binding DataContext.CopyDiscoveryUrlCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                        CommandParameter="{Binding}"/>
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Border>
+
                     <ProgressBar Style="{StaticResource BusyIndicator}" Margin="0,4"
                                  Visibility="{Binding IsRepoScanning, Converter={StaticResource BoolVis}}"/>
                     <TextBox Text="{Binding RepoScanStatus, Mode=OneWay}" Style="{StaticResource SelectableText}"

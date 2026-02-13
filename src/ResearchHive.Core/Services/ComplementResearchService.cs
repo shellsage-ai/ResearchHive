@@ -20,7 +20,7 @@ public class ComplementResearchService
     private readonly HttpClient _http;
 
     /// <summary>Minimum number of complement suggestions to produce.</summary>
-    public const int MinimumComplements = 5;
+    public const int MinimumComplements = 8;
 
     /// <summary>Number of web search calls in the last ResearchAsync invocation.</summary>
     public int LastSearchCallCount { get; private set; }

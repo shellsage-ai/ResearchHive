@@ -436,6 +436,23 @@ public class FactSheetAndVerifierTests : IDisposable
             WhatItAdds = "Benchmark suite",
             Category = "Performance"
         });
+        // Extra complements to stay above the floor (5) even after removing NUnit
+        profile.ComplementSuggestions.Add(new ComplementProject
+        {
+            Name = "Verify",
+            Url = "https://github.com/VerifyTests/Verify",
+            Purpose = "Snapshot testing for .NET",
+            WhatItAdds = "Approval-based testing",
+            Category = "Testing"
+        });
+        profile.ComplementSuggestions.Add(new ComplementProject
+        {
+            Name = "MediatR",
+            Url = "https://github.com/jbogard/MediatR",
+            Purpose = "Mediator pattern implementation for .NET",
+            WhatItAdds = "In-process messaging",
+            Category = "Other"
+        });
 
         var factSheet = new RepoFactSheet { TestFramework = "xUnit", Ecosystem = ".NET/C#" };
 
@@ -1345,7 +1362,7 @@ public class AiProviderRouter
         var verifier = new PostScanVerifier();
         var profile = CreateTestProfile();
 
-        // Add 4 complements — some redundant with proven capabilities
+        // Add 7 complements — some redundant with proven capabilities
         profile.ComplementSuggestions.Add(new ComplementProject
         {
             Name = "Polly", Url = "https://github.com/App-vNext/Polly",
@@ -1374,6 +1391,28 @@ public class AiProviderRouter
             WhatItAdds = "Enriched structured log output",
             Category = "Logging"
         });
+        // Additional complements to ensure floor works at 5
+        profile.ComplementSuggestions.Add(new ComplementProject
+        {
+            Name = "Verify", Url = "https://github.com/VerifyTests/Verify",
+            Purpose = "Snapshot testing",
+            WhatItAdds = "Approval-based test assertions",
+            Category = "Testing"
+        });
+        profile.ComplementSuggestions.Add(new ComplementProject
+        {
+            Name = "Swashbuckle", Url = "https://github.com/domaindrivendev/Swashbuckle.AspNetCore",
+            Purpose = "OpenAPI documentation",
+            WhatItAdds = "Swagger UI for APIs",
+            Category = "Other"
+        });
+        profile.ComplementSuggestions.Add(new ComplementProject
+        {
+            Name = "MediatR", Url = "https://github.com/jbogard/MediatR",
+            Purpose = "Mediator pattern for .NET",
+            WhatItAdds = "In-process messaging and CQRS",
+            Category = "Other"
+        });
 
         // Fact sheet that makes Polly redundant (circuit breaker proven) and BenchmarkDotNet redundant
         var factSheet = new RepoFactSheet { Ecosystem = ".NET/C#" };
@@ -1390,7 +1429,7 @@ public class AiProviderRouter
 
         var result = await verifier.VerifyAsync(profile, factSheet);
 
-        // Even if Polly is redundant, minimum floor should keep at least 3
+        // Even if Polly is redundant, minimum floor should keep at least 5
         profile.ComplementSuggestions.Count.Should().BeGreaterOrEqualTo(PostScanVerifier.MinimumComplementFloor,
             "complement count should not drop below the minimum floor");
     }
@@ -1401,7 +1440,7 @@ public class AiProviderRouter
         var verifier = new PostScanVerifier();
         var profile = CreateTestProfile();
 
-        // Only 2 complements, one is soft-rejected (redundant)
+        // 6 complements — some are soft-rejected (redundant), but backfill should maintain floor of 5
         profile.ComplementSuggestions.Add(new ComplementProject
         {
             Name = "Polly", Url = "https://github.com/App-vNext/Polly",
@@ -1422,6 +1461,27 @@ public class AiProviderRouter
             Purpose = "Code coverage for .NET",
             WhatItAdds = "Code coverage reports",
             Category = "Testing"
+        });
+        profile.ComplementSuggestions.Add(new ComplementProject
+        {
+            Name = "BenchmarkDotNet", Url = "https://github.com/dotnet/BenchmarkDotNet",
+            Purpose = "Performance benchmarking",
+            WhatItAdds = "Benchmark suite for .NET",
+            Category = "Performance"
+        });
+        profile.ComplementSuggestions.Add(new ComplementProject
+        {
+            Name = "Verify", Url = "https://github.com/VerifyTests/Verify",
+            Purpose = "Snapshot testing",
+            WhatItAdds = "Approval-based test assertions",
+            Category = "Testing"
+        });
+        profile.ComplementSuggestions.Add(new ComplementProject
+        {
+            Name = "MediatR", Url = "https://github.com/jbogard/MediatR",
+            Purpose = "Mediator pattern for .NET",
+            WhatItAdds = "In-process messaging and CQRS",
+            Category = "Other"
         });
 
         var factSheet = new RepoFactSheet { Ecosystem = ".NET/C#" };
@@ -1957,5 +2017,234 @@ public class AiProviderRouter
         prompt.Should().Contain("Do NOT suggest packages the project already uses");
         prompt.Should().Contain("Do NOT suggest basic documentation repos");
         prompt.Should().Contain("technologies the project explicitly chose NOT to use");
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  Phase 23: Dockerfile re-injection fix, meta-project filter, complement floor
+    // ═══════════════════════════════════════════════════
+
+    [Fact]
+    public async Task PostScanVerifier_DoesNotReinjectDockerGap_ForDesktopApps()
+    {
+        // Previously: PruneAppTypeInappropriateGaps removed Docker gaps, but InjectConfirmedGaps
+        // re-added "No Dockerfile found" from DiagnosticFilesMissing. This must NOT happen.
+        var verifier = new PostScanVerifier();
+        var profile = CreateTestProfile();
+        profile.Gaps.Add("No Dockerfile found"); // Will be pruned by step 1b
+
+        var factSheet = new RepoFactSheet
+        {
+            AppType = "WPF desktop application",
+            Ecosystem = ".NET/C#",
+            DiagnosticFilesMissing = { "Dockerfile" } // Fact sheet says Dockerfile is missing
+        };
+
+        var result = await verifier.VerifyAsync(profile, factSheet);
+
+        profile.Gaps.Should().NotContain(g => g.Contains("Dockerfile", StringComparison.OrdinalIgnoreCase),
+            "Dockerfile should stay pruned — InjectConfirmedGaps must respect the WRONG-APPTYPE removal");
+        result.GapsRemoved.Should().Contain(s => s.Contains("WRONG-APPTYPE") && s.Contains("Dockerfile"));
+        result.GapsAdded.Should().NotContain(s => s.Contains("Dockerfile"),
+            "InjectConfirmedGaps must not re-add a deliberately pruned gap");
+    }
+
+    [Fact]
+    public async Task PostScanVerifier_StillInjectsDockerGap_ForWebApps()
+    {
+        // For web apps, Dockerfile IS a valid gap — InjectConfirmedGaps should add it.
+        var verifier = new PostScanVerifier();
+        var profile = CreateTestProfile();
+        // LLM didn't mention Docker
+
+        var factSheet = new RepoFactSheet
+        {
+            AppType = "ASP.NET Core web application",
+            Ecosystem = ".NET/C#",
+            DiagnosticFilesMissing = { "Dockerfile" }
+        };
+
+        var result = await verifier.VerifyAsync(profile, factSheet);
+
+        profile.Gaps.Should().Contain(g => g.Contains("Dockerfile", StringComparison.OrdinalIgnoreCase),
+            "Web apps SHOULD have Dockerfile injected as a gap");
+        result.GapsAdded.Should().Contain(s => s.Contains("Dockerfile"));
+    }
+
+    [Fact]
+    public async Task PostScanVerifier_DoesNotReinjectOrmGap_WhenUsingRawSqlite()
+    {
+        // Same pattern: if PruneAppTypeInappropriateGaps removes ORM/EF Core gaps,
+        // InjectConfirmedGaps must not re-add them from hypothetical diagnostic entries.
+        var verifier = new PostScanVerifier();
+        var profile = CreateTestProfile();
+        profile.Gaps.Add("No Entity Framework Core integration");
+
+        var factSheet = new RepoFactSheet
+        {
+            AppType = "WPF desktop application",
+            DatabaseTechnology = "Raw SQLite via Microsoft.Data.Sqlite (NOT EF Core)",
+            Ecosystem = ".NET/C#"
+        };
+
+        var result = await verifier.VerifyAsync(profile, factSheet);
+
+        profile.Gaps.Should().NotContain(g => g.Contains("Entity Framework", StringComparison.OrdinalIgnoreCase));
+        result.GapsRemoved.Should().Contain(s => s.Contains("WRONG-DB"));
+    }
+
+    [Fact]
+    public void IsMetaProjectNotUsableDirectly_RejectsDependabotCore_ForDotNet()
+    {
+        var comp = new ComplementProject
+        {
+            Name = "dependabot-core",
+            Purpose = "Automated dependency update engine",
+            WhatItAdds = "Handles version resolution and PR creation",
+            Url = "https://github.com/dependabot/dependabot-core"
+        };
+        var factSheet = new RepoFactSheet { Ecosystem = ".NET/C#" };
+
+        PostScanVerifier.IsMetaProjectNotUsableDirectly(comp, factSheet)
+            .Should().BeTrue("dependabot-core is a Ruby engine, not a .NET package");
+    }
+
+    [Fact]
+    public void IsMetaProjectNotUsableDirectly_AcceptsBenchmarkDotNet_ForDotNet()
+    {
+        var comp = new ComplementProject
+        {
+            Name = "BenchmarkDotNet",
+            Purpose = "Performance benchmarking library",
+            WhatItAdds = "Micro-benchmarking for .NET code",
+            Url = "https://github.com/dotnet/BenchmarkDotNet"
+        };
+        var factSheet = new RepoFactSheet { Ecosystem = ".NET/C#" };
+
+        PostScanVerifier.IsMetaProjectNotUsableDirectly(comp, factSheet)
+            .Should().BeFalse("BenchmarkDotNet is a legitimate .NET NuGet package");
+    }
+
+    [Fact]
+    public void IsMetaProjectNotUsableDirectly_RejectsRenovate_ForDotNet()
+    {
+        var comp = new ComplementProject
+        {
+            Name = "renovate",
+            Purpose = "Automated dependency update platform",
+            WhatItAdds = "Multi-language dependency updates",
+            Url = "https://github.com/renovatebot/renovate"
+        };
+        var factSheet = new RepoFactSheet { Ecosystem = ".NET/C#" };
+
+        PostScanVerifier.IsMetaProjectNotUsableDirectly(comp, factSheet)
+            .Should().BeTrue("renovate is a Node.js platform, not a .NET package");
+    }
+
+    [Fact]
+    public void IsMetaProjectNotUsableDirectly_AcceptsNuGetPackage_ForDotNet()
+    {
+        var comp = new ComplementProject
+        {
+            Name = "Serilog",
+            Purpose = "Structured logging",
+            WhatItAdds = "Flexible diagnostic logging for .NET",
+            Url = "https://github.com/serilog/serilog"
+        };
+        var factSheet = new RepoFactSheet { Ecosystem = ".NET/C#" };
+
+        PostScanVerifier.IsMetaProjectNotUsableDirectly(comp, factSheet)
+            .Should().BeFalse("Serilog is a legitimate .NET NuGet package");
+    }
+
+    [Fact]
+    public void MinimumComplementFloor_IsNowFive()
+    {
+        PostScanVerifier.MinimumComplementFloor.Should().Be(5,
+            "Phase 23 raised the minimum complement floor from 3 to 5");
+    }
+
+    [Fact]
+    public void MinimumComplements_IsNowEight()
+    {
+        ComplementResearchService.MinimumComplements.Should().Be(8,
+            "Phase 23 raised the minimum complements from 5 to 8");
+    }
+
+    [Fact]
+    public async Task PostScanVerifier_RejectsMetaProject_InComplementValidation()
+    {
+        // Full integration: meta-project filter should remove dependabot-core during complement validation
+        var verifier = new PostScanVerifier();
+        var profile = CreateTestProfile();
+        profile.ComplementSuggestions.Add(new ComplementProject
+        {
+            Name = "dependabot-core",
+            Purpose = "Automated dependency updates",
+            WhatItAdds = "Dependency version resolution engine",
+            Url = "https://github.com/dependabot/dependabot-core"
+        });
+        // Need enough complements above the floor so removal isn't backfilled
+        for (int i = 0; i < 6; i++)
+        {
+            profile.ComplementSuggestions.Add(new ComplementProject
+            {
+                Name = $"valid-lib-{i}",
+                Purpose = $"Test library {i}",
+                WhatItAdds = $"Test feature {i} for .NET",
+                Url = $"https://github.com/test/valid-lib-{i}"
+            });
+        }
+
+        var factSheet = new RepoFactSheet { Ecosystem = ".NET/C#" };
+
+        var result = await verifier.VerifyAsync(profile, factSheet);
+
+        profile.ComplementSuggestions.Should().NotContain(c => c.Name == "dependabot-core",
+            "meta-project should be hard-rejected");
+        result.ComplementsRemoved.Should().Contain(s => s.Contains("META-PROJECT"));
+    }
+
+    // ── GitHub Discovery Service unit tests ──
+
+    [Fact]
+    public void DiscoveryResult_UpdatedAgo_FormatsCorrectly()
+    {
+        var recent = new DiscoveryResult { UpdatedAt = DateTime.UtcNow.AddDays(-5) };
+        recent.UpdatedAgo.Should().Be("5d ago");
+
+        var months = new DiscoveryResult { UpdatedAt = DateTime.UtcNow.AddDays(-90) };
+        months.UpdatedAgo.Should().Be("3mo ago");
+
+        var years = new DiscoveryResult { UpdatedAt = DateTime.UtcNow.AddDays(-400) };
+        years.UpdatedAgo.Should().Be("1y ago");
+
+        var today = new DiscoveryResult { UpdatedAt = DateTime.UtcNow };
+        today.UpdatedAgo.Should().Be("today");
+
+        var empty = new DiscoveryResult(); // default DateTime.MinValue
+        empty.UpdatedAgo.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void DiscoveryResult_Properties_RoundTrip()
+    {
+        var result = new DiscoveryResult
+        {
+            FullName = "dotnet/BenchmarkDotNet",
+            Description = "Powerful .NET library for benchmarking",
+            HtmlUrl = "https://github.com/dotnet/BenchmarkDotNet",
+            Stars = 10200,
+            Forks = 945,
+            Language = "C#",
+            Topics = new List<string> { "benchmarking", "dotnet", "performance" },
+            License = "MIT",
+            IsArchived = false
+        };
+
+        result.FullName.Should().Be("dotnet/BenchmarkDotNet");
+        result.Stars.Should().Be(10200);
+        result.Topics.Should().HaveCount(3);
+        result.License.Should().Be("MIT");
+        result.IsArchived.Should().BeFalse();
     }
 }

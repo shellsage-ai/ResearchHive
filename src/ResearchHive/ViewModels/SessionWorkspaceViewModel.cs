@@ -38,6 +38,7 @@ public partial class SessionWorkspaceViewModel : ObservableObject
     private readonly ProjectFusionEngine _projectFusionEngine;
     private readonly GlobalMemoryService _globalMemory;
     private readonly NotificationService _notificationService;
+    private readonly GitHubDiscoveryService _discoveryService;
     private CancellationTokenSource? _jobCts;
     private readonly DispatcherTimer _autoSaveTimer;
     private bool _notebookDirty;
@@ -243,6 +244,14 @@ public partial class SessionWorkspaceViewModel : ObservableObject
     [ObservableProperty] private bool _isRepoAsking;
     [ObservableProperty] private ObservableCollection<RepoQaMessageViewModel> _repoQaHistory = new();
 
+    // Project Discovery — search GitHub, one-click scan
+    [ObservableProperty] private string _discoveryQuery = "";
+    [ObservableProperty] private string _discoveryLanguageFilter = "";
+    [ObservableProperty] private int _discoveryMinStars;
+    [ObservableProperty] private ObservableCollection<DiscoveryResultViewModel> _discoveryResults = new();
+    [ObservableProperty] private bool _isDiscoverySearching;
+    [ObservableProperty] private string _discoveryStatus = "";
+
     // Project Fusion
     [ObservableProperty] private ObservableCollection<ProjectFusionArtifactViewModel> _projectFusions = new();
     [ObservableProperty] private ObservableCollection<FusionInputOption> _fusionInputOptions = new();
@@ -279,7 +288,8 @@ public partial class SessionWorkspaceViewModel : ObservableObject
         RepoIntelligenceJobRunner repoRunner,
         ProjectFusionEngine projectFusionEngine,
         GlobalMemoryService globalMemory,
-        NotificationService notificationService)
+        NotificationService notificationService,
+        GitHubDiscoveryService discoveryService)
     {
         _sessionId = sessionId;
         _sessionManager = sessionManager;
@@ -305,6 +315,7 @@ public partial class SessionWorkspaceViewModel : ObservableObject
         _projectFusionEngine = projectFusionEngine;
         _globalMemory = globalMemory;
         _notificationService = notificationService;
+        _discoveryService = discoveryService;
 
         // Initialize streamlined toggle from settings — only show when Codex OAuth is active
         IsStreamlinedCodex = appSettings.StreamlinedCodexMode;
