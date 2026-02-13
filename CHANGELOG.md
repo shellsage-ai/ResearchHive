@@ -3,6 +3,10 @@
 All changes are tracked in `CAPABILITY_MAP.md` (Change Log section) for granular file-level detail.
 This file provides a high-level summary per milestone.
 
+## 2026-02-12 — UI/WPF Documentation Overhaul
+- **UI_WPF_SPEC.md**: Expanded from 14 lines to comprehensive spec (~600 lines) covering every view, tab, control, style, converter, ViewModel, and interaction
+- Documents all 20 session workspace tabs, 24 sub-ViewModels, 10 value converters, 14 named styles, full color palette, keyboard shortcuts, tab visibility rules by domain pack, and UX patterns
+
 ## 2026-02-12 — Phase 13: Model Attribution + Complement Enforcement
 - **Model attribution**: Every AI-generated output now tracks which LLM model produced it (`LlmResponse.ModelName`, `LastModelUsed` on LlmService)
 - **Domain model fields**: `ResearchJob.ModelUsed`, `Report.ModelUsed`, `QaMessage.ModelUsed`, `RepoProfile.AnalysisModelUsed`
