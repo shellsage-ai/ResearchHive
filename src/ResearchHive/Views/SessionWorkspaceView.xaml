@@ -1915,6 +1915,19 @@
                                             </StackPanel>
                                             <TextBox Text="{Binding Description, Mode=OneWay}" Style="{StaticResource SelectableText}"
                                                      FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,0"/>
+
+                                            <!-- Analysis Model — prominent display -->
+                                            <Border Background="#1A448AFF" CornerRadius="6" Padding="10,6" Margin="0,6,0,2"
+                                                    BorderBrush="#448AFF" BorderThickness="1">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="🤖" FontSize="16" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                                    <TextBlock Text="Analysis Model:" FontSize="14" FontWeight="SemiBold"
+                                                               Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center"/>
+                                                    <TextBlock Text="{Binding AnalysisModel}" FontSize="16" FontWeight="Bold"
+                                                               Foreground="#82B1FF" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                                                </StackPanel>
+                                            </Border>
+
                                             <TextBox Text="{Binding Frameworks, Mode=OneWay}" Style="{StaticResource SelectableText}"
                                                      FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,0"
                                                      Visibility="{Binding Frameworks, Converter={StaticResource NullVis}}"/>
