@@ -2158,13 +2158,21 @@
                                                     <TextBlock Text="{Binding Goal}" FontSize="11"/>
                                                 </Border>
                                             </StackPanel>
+                                            <TextBlock Text="{Binding GoalDescription}" FontSize="11"
+                                                       Foreground="{StaticResource TextSecondaryBrush}" Margin="0,2,0,0"/>
                                             <TextBlock Text="{Binding InputSummary, StringFormat='Inputs: {0}'}" FontSize="11"
-                                                       Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,0"/>
+                                                       Foreground="{StaticResource TextSecondaryBrush}" Margin="0,2,0,0"/>
 
-                                            <TextBlock Text="Unified Vision" Style="{StaticResource SubHeader}" Margin="0,8,0,2"/>
+                                            <!-- Project Identities -->
+                                            <TextBlock Text="Project Identities" Style="{StaticResource SubHeader}" Margin="0,8,0,2"
+                                                       Visibility="{Binding HasProjectIdentities, Converter={StaticResource BoolVis}}"/>
+                                            <TextBox Text="{Binding ProjectIdentities, Mode=OneWay}" Style="{StaticResource SelectableText}" FontSize="12"
+                                                     Visibility="{Binding HasProjectIdentities, Converter={StaticResource BoolVis}}"/>
+
+                                            <TextBlock Text="{Binding VisionLabel}" Style="{StaticResource SubHeader}" Margin="0,8,0,2"/>
                                             <TextBox Text="{Binding Vision, Mode=OneWay}" Style="{StaticResource SelectableText}" FontSize="12"/>
 
-                                            <TextBlock Text="Architecture" Style="{StaticResource SubHeader}" Margin="0,8,0,2"/>
+                                            <TextBlock Text="{Binding ArchitectureLabel}" Style="{StaticResource SubHeader}" Margin="0,8,0,2"/>
                                             <TextBox Text="{Binding Architecture, Mode=OneWay}" Style="{StaticResource SelectableText}" FontSize="12"/>
 
                                             <TextBlock Text="{Binding FeatureCount, StringFormat='📋 {0} features mapped'}" 
@@ -2173,10 +2181,10 @@
                                             <TextBlock Text="Feature Matrix" Style="{StaticResource SubHeader}" Margin="0,6,0,2"/>
                                             <TextBox Text="{Binding FeatureMatrix, Mode=OneWay}" Style="{StaticResource SelectableText}" FontSize="11"/>
 
-                                            <TextBlock Text="Gaps Closed" Style="{StaticResource SubHeader}" Margin="0,6,0,2"/>
+                                            <TextBlock Text="{Binding GapsClosedLabel}" Style="{StaticResource SubHeader}" Margin="0,6,0,2"/>
                                             <TextBox Text="{Binding GapsClosed, Mode=OneWay}" Style="{StaticResource SelectableText}" FontSize="11"/>
 
-                                            <TextBlock Text="New Gaps" Style="{StaticResource SubHeader}" Margin="0,6,0,2"/>
+                                            <TextBlock Text="{Binding NewGapsLabel}" Style="{StaticResource SubHeader}" Margin="0,6,0,2"/>
                                             <TextBox Text="{Binding NewGaps, Mode=OneWay}" Style="{StaticResource SelectableText}" FontSize="11"/>
 
                                             <!-- IP Notes -->
@@ -2186,7 +2194,7 @@
                                                          FontSize="11" Foreground="#283593"/>
                                             </Border>
 
-                                            <TextBlock Text="Provenance" Style="{StaticResource SubHeader}" Margin="0,6,0,2"/>
+                                            <TextBlock Text="{Binding ProvenanceLabel}" Style="{StaticResource SubHeader}" Margin="0,6,0,2"/>
                                             <TextBox Text="{Binding ProvenanceMap, Mode=OneWay}" Style="{StaticResource SelectableText}" FontSize="11"/>
 
                                             <TextBlock Text="{Binding Created}" FontSize="10"

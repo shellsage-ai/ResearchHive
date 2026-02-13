@@ -544,17 +544,26 @@ public class ProjectFusionArtifactViewModel
     public ProjectFusionArtifact Artifact { get; }
     public string Title => Artifact.Title;
     public string Goal => Artifact.Goal.ToString();
+    public string GoalDescription => ProjectFusionEngine.GoalDescription(Artifact.Goal);
     public string InputSummary => Artifact.InputSummary;
+    public string ProjectIdentities => Artifact.ProjectIdentities;
+    public bool HasProjectIdentities => !string.IsNullOrWhiteSpace(Artifact.ProjectIdentities);
     public string Vision => Artifact.UnifiedVision.Length > 400 ? Artifact.UnifiedVision[..400] + "..." : Artifact.UnifiedVision;
+    public string VisionLabel => Artifact.Goal == ProjectFusionGoal.Compare ? "Comparison Overview" : "Unified Vision";
     public string Architecture => Artifact.ArchitectureProposal.Length > 400 ? Artifact.ArchitectureProposal[..400] + "..." : Artifact.ArchitectureProposal;
+    public string ArchitectureLabel => Artifact.Goal == ProjectFusionGoal.Compare ? "Architecture Comparison" : "Architecture";
     public string TechStack => Artifact.TechStackDecisions;
+    public string TechStackLabel => Artifact.Goal == ProjectFusionGoal.Compare ? "Technology Comparison" : "Tech Stack";
     public string FeatureMatrix => string.Join("\n", Artifact.FeatureMatrix.Select(kv => $"• {kv.Key} ← {kv.Value}"));
     public int FeatureCount => Artifact.FeatureMatrix.Count;
     public string GapsClosed => string.Join("\n", Artifact.GapsClosed.Select(g => $"✅ {g}"));
-    public string NewGaps => string.Join("\n", Artifact.NewGaps.Select(g => $"🔸 {g}"));
+    public string GapsClosedLabel => Artifact.Goal == ProjectFusionGoal.Compare ? "Complementary Strengths" : "Gaps Closed";
+    public string NewGaps => string.Join("\n", Artifact.NewGaps.Select(g => $"• {g}"));
+    public string NewGapsLabel => Artifact.Goal == ProjectFusionGoal.Compare ? "Shared Gaps & Conflicts" : "New Gaps / Challenges";
     public bool HasIpNotes => Artifact.IpNotes != null;
     public string IpNotes => Artifact.IpNotes?.Notes ?? "";
     public string ProvenanceMap => string.Join("\n", Artifact.ProvenanceMap.Select(kv => $"• {kv.Key} ← {kv.Value}"));
+    public string ProvenanceLabel => Artifact.Goal == ProjectFusionGoal.Compare ? "Recommendation Map" : "Provenance Map";
     public string Created => Artifact.CreatedUtc.ToLocalTime().ToString("g");
 
     /// <summary>Full text of entire fusion artifact for clipboard export.</summary>
@@ -564,29 +573,35 @@ public class ProjectFusionArtifactViewModel
         {
             var sb = new System.Text.StringBuilder();
             sb.AppendLine($"Project Fusion: {Title}");
-            sb.AppendLine($"Goal: {Goal}");
+            sb.AppendLine($"Goal: {GoalDescription}");
             sb.AppendLine($"Inputs: {InputSummary}");
             sb.AppendLine();
-            sb.AppendLine("=== Unified Vision ===");
+            if (HasProjectIdentities)
+            {
+                sb.AppendLine("=== Project Identities ===");
+                sb.AppendLine(Artifact.ProjectIdentities);
+                sb.AppendLine();
+            }
+            sb.AppendLine($"=== {VisionLabel} ===");
             sb.AppendLine(Artifact.UnifiedVision);
             sb.AppendLine();
-            sb.AppendLine("=== Architecture ===");
+            sb.AppendLine($"=== {ArchitectureLabel} ===");
             sb.AppendLine(Artifact.ArchitectureProposal);
             sb.AppendLine();
-            sb.AppendLine("=== Tech Stack ===");
+            sb.AppendLine($"=== {TechStackLabel} ===");
             sb.AppendLine(Artifact.TechStackDecisions);
             sb.AppendLine();
             sb.AppendLine("=== Feature Matrix ===");
             sb.AppendLine(FeatureMatrix);
             sb.AppendLine();
-            sb.AppendLine("=== Gaps Closed ===");
+            sb.AppendLine($"=== {GapsClosedLabel} ===");
             sb.AppendLine(GapsClosed);
             sb.AppendLine();
-            sb.AppendLine("=== New Gaps ===");
+            sb.AppendLine($"=== {NewGapsLabel} ===");
             sb.AppendLine(NewGaps);
             if (HasIpNotes) { sb.AppendLine(); sb.AppendLine($"IP Notes: {IpNotes}"); }
             sb.AppendLine();
-            sb.AppendLine("=== Provenance ===");
+            sb.AppendLine($"=== {ProvenanceLabel} ===");
             sb.AppendLine(ProvenanceMap);
             return sb.ToString();
         }
@@ -649,43 +664,43 @@ public class ProjectFusionTemplate
         new ProjectFusionTemplate
         {
             Name = "Full Merge",
-            Description = "Combine all repos into one unified project with a single architecture.",
-            Prompt = "Merge all repositories into a single cohesive project. Resolve duplicate functionality, unify the tech stack, and produce a clean architecture.",
+            Description = "Combine all repos into one unified project — resolves overlaps, unifies the tech stack, and shows what the combined project would look like.",
+            Prompt = "Merge all repositories into a single cohesive project. Resolve duplicate functionality, unify the tech stack, and produce a clean architecture. Show how the merged project would work as one unit.",
             Goal = ProjectFusionGoal.Merge
         },
         new ProjectFusionTemplate
         {
             Name = "Plugin Architecture",
-            Description = "Keep the first repo as core, integrate others as plugins/extensions.",
-            Prompt = "Use the first project as the core platform. Design a plugin architecture where other projects integrate as extensions. Define clear extension points and APIs.",
+            Description = "Keep the first repo as core, integrate others as plugins/extensions. Shows what changes and what the base project gains.",
+            Prompt = "Use the first project as the core platform. Design a plugin architecture where other projects integrate as extensions. Define clear extension points, APIs, and what capabilities each extension adds.",
             Goal = ProjectFusionGoal.Extend
         },
         new ProjectFusionTemplate
         {
             Name = "Best of Each",
-            Description = "Cherry-pick the best features from each repo into a new design.",
-            Prompt = "Design a new system that takes the best feature from each input project. Don't merge blindly — be selective and justify each choice.",
+            Description = "Design a new system cherry-picking the best features from each. Explains which ideas come from where and why.",
+            Prompt = "Design a new system that takes the best features from each input project. Be selective — justify each choice and attribute it to its source project.",
             Goal = ProjectFusionGoal.Architect
         },
         new ProjectFusionTemplate
         {
             Name = "Gap Filler",
-            Description = "Use complementary repos to fill gaps in the primary project.",
-            Prompt = "The first project has known gaps. Use the other projects to fill those gaps. Focus on what the primary project is missing and how others can contribute.",
+            Description = "Use complementary repos to fill gaps in the primary project. Shows exactly which gaps get resolved and how.",
+            Prompt = "The first project has known gaps. Use the other projects to fill those gaps. Focus on what the primary project is missing, how others contribute, and potential integration challenges.",
             Goal = ProjectFusionGoal.Extend
         },
         new ProjectFusionTemplate
         {
             Name = "Side-by-Side Comparison",
-            Description = "Detailed comparison: architecture, tech stack, strengths, weaknesses.",
-            Prompt = "Compare these projects in detail. Analyze architecture patterns, tech stack choices, testing strategies, documentation quality, and community health. Recommend which is better for different use cases.",
+            Description = "Detailed comparison with tables: architecture, tech stack, strengths, gaps. Helps you decide between projects or understand their differences.",
+            Prompt = "Compare these projects in detail using comparison tables. Analyze architecture patterns, tech stack choices, testing strategies, and community health. Recommend which is better for different use cases.",
             Goal = ProjectFusionGoal.Compare
         },
         new ProjectFusionTemplate
         {
             Name = "Ecosystem Blueprint",
-            Description = "Design a microservices/ecosystem where each repo becomes a service.",
-            Prompt = "Design a microservices ecosystem where each input project becomes a service or component. Define service boundaries, communication protocols, shared data models, and deployment strategy.",
+            Description = "Design a system where each repo becomes a service or component. Defines boundaries and communication.",
+            Prompt = "Design an ecosystem where each input project becomes a service or component. Define service boundaries, communication protocols, shared data models, and deployment strategy.",
             Goal = ProjectFusionGoal.Architect
         },
         new ProjectFusionTemplate

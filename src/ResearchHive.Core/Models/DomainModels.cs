@@ -534,6 +534,8 @@ public class ProjectFusionArtifact
     public string InputSummary { get; set; } = string.Empty;
     public List<ProjectFusionInput> Inputs { get; set; } = new();
     public ProjectFusionGoal Goal { get; set; }
+    /// <summary>Identity card for each input project: what it is, source, capabilities, maturity.</summary>
+    public string ProjectIdentities { get; set; } = string.Empty;
     public string UnifiedVision { get; set; } = string.Empty;
     public string ArchitectureProposal { get; set; } = string.Empty;
     public string TechStackDecisions { get; set; } = string.Empty;

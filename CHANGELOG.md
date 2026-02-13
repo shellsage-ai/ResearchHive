@@ -3,6 +3,38 @@
 All changes are tracked in `CAPABILITY_MAP.md` (Change Log section) for granular file-level detail.
 This file provides a high-level summary per milestone.
 
+## 2026-02-14 — Phase 26: Project Fusion Quality Overhaul
+### Anti-Hallucination Grounding for Fusion Engine
+- **Grounded system prompt**: 7 critical rules — only reference technologies from input data, no inventing libraries, every claim must be traceable to input profiles
+- **Comprehensive input formatting**: `FormatProfileForLlm` now includes all dependencies with versions/licenses, Topics, OpenIssues, LastCommitUtc, TopLevelEntries (file tree), CodeBook (architecture summary), up to 40 deps (was 20 names only)
+- **New PROJECT_IDENTITIES section**: Every fusion now starts with identity cards — what each project IS, source URL, language/framework, 3-5 capabilities, maturity indicators
+
+### Goal-Specific Fusion Modes (Merge / Extend / Compare / Architect)
+- **Detailed goal instructions**: 5-line contextual instructions per mode (was generic one-liners)
+- **Section-specific expand prompts**: Each of the 9 sections gets goal-aware writing guidance via `GetSectionGuidance()` switch expression
+- **Compare mode differentiation**: Vision→"Comparison Overview", Architecture→"Architecture Comparison" with tables, GapsClosed→"Complementary Strengths", Provenance→"Recommendation Map"
+- **Report headings adapt per goal**: `GenerateReport` uses goal-aware section titles
+
+### Source References & Provenance
+- **Source Projects header in report**: Every fusion report now lists input URLs/paths at the top
+- **Input URLs tracked through pipeline**: `inputUrls` collected during gather phase, passed to report generation
+- **FormatFusionForLlm enhanced**: Prior fusions now include ProjectIdentities and InputSummary
+
+### UI Improvements
+- **Goal description shown in UI**: Fusion artifact cards now display what each mode means
+- **Goal-aware section labels**: XAML binds to `VisionLabel`, `ArchitectureLabel`, `GapsClosedLabel`, `NewGapsLabel`, `ProvenanceLabel`
+- **Project Identities visible**: New section in artifact card (auto-hidden when empty for backward compat)
+- **Template descriptions enriched**: Each built-in fusion template now explains what the output will show
+
+### Model & ViewModel Updates
+- `ProjectFusionArtifact.ProjectIdentities` — new string field (backward-compatible, defaults empty)
+- `ProjectFusionArtifactViewModel` — 8 new properties: `GoalDescription`, `ProjectIdentities`, `HasProjectIdentities`, `VisionLabel`, `ArchitectureLabel`, `GapsClosedLabel`, `NewGapsLabel`, `ProvenanceLabel`
+- `ProjectFusionEngine.GoalDescription()` — public static method for UI use
+
+### Stats
+- Engine: 493→689 lines (net +196)
+- All 597 tests pass, 0 failures
+
 ## 2026-02-13 — Phase 25: Research Report Quality + Readability Overhaul
 ### 6 Pipeline Bug Fixes (root causes of shallow, poorly-cited reports)
 - **Iteration cap raised**: Was force-capped at 1, now allows 2 — gap-focused refinement pass adds 3-6 high-value sources

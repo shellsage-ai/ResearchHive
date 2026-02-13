@@ -1,11 +1,11 @@
 # ResearchHive — Project Progress
 
 ## Status
-- Current milestone: All milestones (1-9) + Phases 10-25 complete
+- Current milestone: All milestones (1-9) + Phases 10-26 complete
 - Build status: ✅ PASSING (0 errors)
 - Test baseline: 597 total — 597 passed, 2 skipped, 0 failures
 - Services: 42 DI registrations (38 unique concrete services incl. interfaces + App.xaml.cs)
-- Last verified: Full test suite green (Phase 25 commit `fadf193`)
+- Last verified: Full test suite green (Phase 26)
 
 ## Build / Run Commands
 ```
@@ -231,6 +231,17 @@ dotnet publish src/ResearchHive/ResearchHive.csproj -c Release -o publish/Resear
 - Report readability: All prompts instruct LLM to use **bold**, tables, blockquotes, `code`, structured lists
 - `ReportTemplateService` section instructions updated with per-section formatting guidance
 - 597 tests passing, 0 failures
+
+### Phase 26 — Project Fusion Quality Overhaul ✅
+- Anti-hallucination grounding: 7 critical rules in system prompt — only reference technologies from input data
+- Comprehensive `FormatProfileForLlm`: dependencies w/ versions, Topics, file tree, CodeBook, up to 40 deps
+- New PROJECT_IDENTITIES section: identity cards per project (what it is, source URL, capabilities, maturity)
+- Goal-specific fusion: detailed per-mode instructions (Merge/Extend/Compare/Architect), section-specific expand prompts
+- Compare mode differentiation: goal-aware section titles throughout (Vision→Comparison Overview, etc.)
+- Source references: every report lists input URLs/paths at top, provenance tracked through pipeline
+- UI: goal descriptions on artifact cards, goal-aware section labels, enriched template descriptions
+- Model: `ProjectFusionArtifact.ProjectIdentities` field, 8 new ViewModel properties
+- Engine: 493→689 lines, 597 tests passing, 0 failures
 
 ## End-to-End Demo Checklist
 

@@ -290,6 +290,7 @@ Status: `[x]` = implemented + tested | `[~]` = implemented, untested or partial 
   WHY: Maps ~40 known packages → human-readable labels; runs before LLM analysis so frameworks appear even with weak models
 
 - [x] Project Fusion (4 goals: Merge, Extend, Compare, Architect × 6 templates) — ProjectFusionEngine.cs
+  - Anti-hallucination grounded (7 rules), goal-specific section prompts, PROJECT_IDENTITIES section, source URL references
   WHY: Fuse multiple scanned repos into unified architecture documents with provenance
   TESTS: RepoIntelligenceTests.cs
 
@@ -648,6 +649,7 @@ tests/
 
 | Date | Change | Files |
 |------|--------|-------|
+| 2026-02-14 | Phase 26: Project Fusion quality overhaul — anti-hallucination grounding (7 rules), comprehensive FormatProfileForLlm (deps+versions, Topics, file tree, CodeBook), new PROJECT_IDENTITIES section, goal-specific section prompts (Merge/Extend/Compare/Architect), Compare mode differentiation (goal-aware section titles), source URL references in reports, enriched UI (goal descriptions, dynamic labels, template descriptions) | ProjectFusionEngine.cs, DomainModels.cs, SessionWorkspaceSubViewModels.cs, SessionWorkspaceView.xaml |
 | 2026-02-13 | Phase 25: Research report quality + readability overhaul — 6 pipeline bug fixes (iteration cap, citation label collisions, early-exit thresholds, sufficiency skip, expert search queries, target sources 5→8) + formatting/highlighting in all prompts | ResearchJobRunner.cs, ReportTemplateService.cs, SessionWorkspaceViewModel.cs |
 | 2026-02-13 | Phase 24: Dynamic anti-hallucination pipeline — 4-layer complement filtering (expanded models, 7 deterministic checks, LLM relevance, 17-rule dynamic search) | RepoFactSheetBuilder.cs, PostScanVerifier.cs, ComplementResearchService.cs, RepoIntelligenceJobRunner.cs, DomainModels.cs, ServiceRegistration.cs |
 | 2026-02-13 | Phase 23: Dockerfile gap fix, meta-project filter, Project Discovery panel, session nav fix | PostScanVerifier.cs, GitHubDiscoveryService.cs, SessionWorkspaceViewModel.ProjectDiscovery.cs, SessionWorkspaceView.xaml, MainViewModel.cs |
