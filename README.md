@@ -252,7 +252,13 @@ Passed!  - Failed: 0, Passed: 339, Skipped: 2, Total: 341
 
 ## License
 
-Private repository. All rights reserved.
+This project is licensed under the **[PolyForm Noncommercial License 1.0.0](LICENSE.md)**.
+
+**TL;DR:** Free for personal use, research, education, and evaluation. Commercial use (selling products/services that incorporate ResearchHive or its derivatives) requires a **paid commercial license**.
+
+See [COMMERCIAL_LICENSE.md](COMMERCIAL_LICENSE.md) for details on what counts as commercial use and how to obtain a license.
+
+Copyright (c) 2025–2026 ShellSage AI. All rights reserved.
 
 ---
 
