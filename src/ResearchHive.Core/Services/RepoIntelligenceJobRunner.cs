@@ -120,6 +120,41 @@ public class RepoIntelligenceJobRunner
             phaseSw.Stop();
             telemetry.Phases.Add(new PhaseTimingRecord { Phase = "Clone + Index", DurationMs = phaseSw.ElapsedMilliseconds });
 
+            // ── Phase 2.25: Identity Scan (focused LLM call for project purpose — separate from code analysis) ──
+            phaseSw = Stopwatch.StartNew();
+            try
+            {
+                var identityPath = _cloneService?.GetClonePath(repoUrl) ?? (isLocal ? Path.GetFullPath(repoUrl.Trim()) : "");
+                if (!string.IsNullOrEmpty(identityPath) && Directory.Exists(identityPath))
+                {
+                    AddReplay(job, "identity", "Identity Scan", "Reading project docs to determine what this project IS...");
+                    await _scanner.RunIdentityScanAsync(profile, identityPath, ct);
+                    var idResult = !string.IsNullOrWhiteSpace(profile.ProductCategory)
+                        ? $"Category: {profile.ProductCategory}"
+                        : "Category: undetermined";
+                    var summaryPreview = !string.IsNullOrWhiteSpace(profile.ProjectSummary)
+                        ? profile.ProjectSummary.Length > 100
+                            ? profile.ProjectSummary[..100] + "…"
+                            : profile.ProjectSummary
+                        : "(no summary)";
+                    AddReplay(job, "identity_done", "Identity Established",
+                        $"{idResult} | {summaryPreview}");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Identity scan failed — proceeding with code analysis");
+                AddReplay(job, "identity_warn", "Identity Scan Skipped", ex.Message);
+            }
+            phaseSw.Stop();
+            telemetry.Phases.Add(new PhaseTimingRecord { Phase = "Identity Scan", DurationMs = phaseSw.ElapsedMilliseconds });
+            telemetry.LlmCalls.Add(new LlmCallRecord
+            {
+                Purpose = "Identity Scan",
+                Model = _llmService.LastModelUsed,
+                DurationMs = phaseSw.ElapsedMilliseconds
+            });
+
             // ── Phase 2.5: Deterministic Fact Sheet (zero-LLM ground truth) ──
             phaseSw = Stopwatch.StartNew();
             if (_factSheetBuilder != null)
@@ -860,6 +895,20 @@ public class RepoIntelligenceJobRunner
         {
             sb.AppendLine("## Project Summary");
             sb.AppendLine(p.ProjectSummary);
+            sb.AppendLine();
+        }
+
+        if (!string.IsNullOrWhiteSpace(p.ProductCategory))
+        {
+            sb.AppendLine($"**Product Category:** {p.ProductCategory}");
+            sb.AppendLine();
+        }
+
+        if (p.CoreCapabilities.Count > 0)
+        {
+            sb.AppendLine("## Core Capabilities");
+            foreach (var cap in p.CoreCapabilities)
+                sb.AppendLine($"- {cap}");
             sb.AppendLine();
         }
 

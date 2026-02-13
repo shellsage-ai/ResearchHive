@@ -4,7 +4,7 @@
 > This file is the single source of truth for "what exists, where, and why."
 >
 > **Maintenance rule**: Updated after every implementation step per `agents/orchestrator.agent.md` enforcement rules.
-> **Last verified**: 2026-02-13 — 597 tests (597 passed, 2 skipped), 0 build errors. Phase 28 commit (pending).
+> **Last verified**: 2026-02-14 — 599 tests (597 passed, 2 skipped), 0 build errors. Phase 29 commit (pending).
 
 ---
 
@@ -304,6 +304,11 @@ Status: `[x]` = implemented + tested | `[~]` = implemented, untested or partial 
 - [x] Project Summary in scans — RepoScannerService.cs (## Summary section in all prompts)
   WHY: Concise 1-3 sentence project summary extracted during scan; answers "what is this project and what does it do"
   TESTS: SmartPipelineTests.cs, Phase17AgenticTests.cs
+
+- [x] Identity Scan (Phase 2.25) — RepoScannerService.cs (RunIdentityScanAsync, GatherIdentityDocuments, BuildIdentityPrompt, ParseIdentityScanResponse)
+  WHY: Dedicated scan phase focused exclusively on product-level identity (what the project IS), separate from code analysis; reads README, docs/, spec/, project briefs, entry points; produces ProductCategory + CoreCapabilities + enriched Summary; fills empty Description for local repos via ExtractFirstParagraph
+  MODEL FIELDS: RepoProfile.ProductCategory, RepoProfile.CoreCapabilities
+  UI: ProductCategory badge (amber) + CoreCapabilities list (purple) on scan cards
 
 - [x] Scan anti-hallucination rules — RepoScannerService.cs (AppendFormatInstructions, BuildConsolidatedAnalysisPrompt, BuildFullAgenticPrompt)
   WHY: Prevents LLM from listing analysis tool/model as a repo strength, inventing licenses, or confusing project identities
@@ -663,6 +668,7 @@ tests/
 
 | Date | Change | Files |
 |------|--------|-------|
+| 2026-02-14 | Phase 29: Identity Scan — dedicated pipeline phase (2.25) for product-level identity, separate from code analysis; RunIdentityScanAsync reads README/docs/spec/project briefs/entry points (6000 char cap), 1 focused LLM call (~800 tokens), produces ProductCategory + CoreCapabilities; fills empty Description for local repos via deterministic first-paragraph extraction; FormatProfileForLlm enriched with identity fields; scan report includes identity; XAML UI: ProductCategory badge + CoreCapabilities list on scan cards | RepoScannerService.cs, DomainModels.cs, RepoIntelligenceJobRunner.cs, ProjectFusionEngine.cs, SessionWorkspaceSubViewModels.cs, SessionWorkspaceView.xaml |
 | 2026-02-13 | Add PolyForm Noncommercial 1.0.0 license + commercial licensing guide + README update | LICENSE.md, COMMERCIAL_LICENSE.md, README.md |
 | 2026-02-13 | Phase 28: Fusion identity grounding + scan/fusion cancellation — 12 grounding rules (added #11 cross-attribution, #12 distinct purpose), identity-first outline prompt (2-step: verify then outline), per-section identity reminder injection, ╔══ PROJECT ══╗ markers in FormatProfileForLlm, CodeBook limit 2500→4000, AnalysisModelUsed in profile, stronger Summary prompts in all 4 scan paths, CancellationTokenSource for scan/fusion/discovery, Cancel UI buttons with confirmation dialogs | ProjectFusionEngine.cs, RepoScannerService.cs, SessionWorkspaceViewModel.RepoIntelligence.cs, SessionWorkspaceViewModel.ProjectDiscovery.cs, SessionWorkspaceViewModel.cs, SessionWorkspaceView.xaml |
 | 2026-02-14 | Phase 27: Scan & Fusion quality overhaul — ProjectSummary field (## Summary in all 4 scan prompts + parsers), ProjectedCapabilities (PROJECTED_CAPABILITIES fusion section, goal-aware), anti-hallucination rules in all scan prompts, 3 new fusion grounding rules, UI panels for both new fields, test assertions for Summary parsing | DomainModels.cs, RepoScannerService.cs, ProjectFusionEngine.cs, RepoIntelligenceJobRunner.cs, SessionWorkspaceSubViewModels.cs, SessionWorkspaceView.xaml, SmartPipelineTests.cs, Phase17AgenticTests.cs |

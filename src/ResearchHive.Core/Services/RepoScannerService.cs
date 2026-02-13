@@ -392,6 +392,280 @@ public class RepoScannerService
         return profile;
     }
 
+    // ─────────────── Identity Scan (separate from code analysis) ───────────────
+
+    /// <summary>
+    /// Focused identity scan: reads project documentation files and makes a single LLM call
+    /// to determine what the project IS, who it is for, and what it does at a product level.
+    /// This runs separately from code analysis to avoid infrastructure patterns drowning out purpose.
+    /// </summary>
+    public async Task RunIdentityScanAsync(RepoProfile profile, string diskPath, CancellationToken ct = default)
+    {
+        // 1. Gather identity-rich documents (non-code files that describe the project)
+        var identityDocs = GatherIdentityDocuments(profile, diskPath);
+
+        if (identityDocs.Length < 50)
+        {
+            // Not enough documentation to identify — fall back to description + name-based inference
+            if (string.IsNullOrWhiteSpace(profile.Description) && !string.IsNullOrWhiteSpace(profile.ReadmeContent))
+                profile.Description = ExtractFirstParagraph(profile.ReadmeContent);
+            return;
+        }
+
+        // 2. Fill Description from README for local repos that have no GitHub description
+        if (string.IsNullOrWhiteSpace(profile.Description) && !string.IsNullOrWhiteSpace(profile.ReadmeContent))
+            profile.Description = ExtractFirstParagraph(profile.ReadmeContent);
+
+        // 3. Build focused identity prompt — ONLY about what the project IS, not how it's built
+        var prompt = BuildIdentityPrompt(profile, identityDocs);
+
+        var response = await _llmService.GenerateAsync(prompt,
+            "You are identifying what a software project IS and DOES. Focus on product-level purpose, not implementation details. " +
+            "If it's a library, describe what it provides to consumers. If it's an application, describe what users can do with it.",
+            800, ct: ct);
+
+        // 4. Parse the identity response into ProjectSummary and ProductCategory
+        ParseIdentityScanResponse(response, profile);
+    }
+
+    /// <summary>Read docs, README, briefs, and project context files from disk.</summary>
+    internal static string GatherIdentityDocuments(RepoProfile profile, string diskPath)
+    {
+        var sb = new System.Text.StringBuilder();
+        var maxTotalLen = 6000; // Keep the identity context small for a focused call
+
+        // Priority 1: README (already loaded)
+        if (!string.IsNullOrWhiteSpace(profile.ReadmeContent))
+        {
+            var readme = profile.ReadmeContent.Length > 2000
+                ? profile.ReadmeContent[..2000] + "\n...(truncated)"
+                : profile.ReadmeContent;
+            sb.AppendLine("=== README.md ===");
+            sb.AppendLine(readme);
+            sb.AppendLine();
+        }
+
+        // Priority 2: Project documentation files (high-value identity signals)
+        var identityFiles = new[]
+        {
+            "PROJECT_CONTEXT.md", "PRODUCT_BRIEF.md", "ARCHITECTURE.md",
+            "ABOUT.md", "OVERVIEW.md", "INTRODUCTION.md", "DESCRIPTION.md",
+            "docs/README.md", "doc/README.md",
+            ".github/DESCRIPTION", "package.json"
+        };
+
+        foreach (var relPath in identityFiles)
+        {
+            if (sb.Length >= maxTotalLen) break;
+            var fullPath = Path.Combine(diskPath, relPath);
+            if (File.Exists(fullPath))
+            {
+                try
+                {
+                    var content = File.ReadAllText(fullPath);
+                    if (content.Length > 1500) content = content[..1500] + "\n...(truncated)";
+                    sb.AppendLine($"=== {relPath} ===");
+                    sb.AppendLine(content);
+                    sb.AppendLine();
+                }
+                catch { /* non-fatal */ }
+            }
+        }
+
+        // Priority 3: First few files from spec/ or docs/ directories
+        foreach (var docsDir in new[] { "spec", "docs", "doc" })
+        {
+            if (sb.Length >= maxTotalLen) break;
+            var dirPath = Path.Combine(diskPath, docsDir);
+            if (Directory.Exists(dirPath))
+            {
+                try
+                {
+                    var mdFiles = Directory.EnumerateFiles(dirPath, "*.md", SearchOption.TopDirectoryOnly)
+                        .Take(3);
+                    foreach (var mdFile in mdFiles)
+                    {
+                        if (sb.Length >= maxTotalLen) break;
+                        var content = File.ReadAllText(mdFile);
+                        var relName = Path.GetRelativePath(diskPath, mdFile).Replace('\\', '/');
+                        if (content.Length > 800) content = content[..800] + "\n...(truncated)";
+                        sb.AppendLine($"=== {relName} ===");
+                        sb.AppendLine(content);
+                        sb.AppendLine();
+                    }
+                }
+                catch { /* non-fatal */ }
+            }
+        }
+
+        // Priority 4: App entry points (what kind of app is this?)
+        foreach (var entry in new[] { "App.xaml.cs", "Program.cs", "Startup.cs", "src/App.xaml.cs", "src/Program.cs" })
+        {
+            if (sb.Length >= maxTotalLen) break;
+            var fullPath = Path.Combine(diskPath, entry);
+            if (!File.Exists(fullPath))
+            {
+                // Try recursive find
+                try
+                {
+                    var found = Directory.EnumerateFiles(diskPath, Path.GetFileName(entry), SearchOption.AllDirectories)
+                        .Where(f => !f.Contains("bin") && !f.Contains("obj") && !f.Contains("node_modules"))
+                        .FirstOrDefault();
+                    if (found != null) fullPath = found;
+                }
+                catch { continue; }
+            }
+            if (File.Exists(fullPath))
+            {
+                try
+                {
+                    var content = File.ReadAllText(fullPath);
+                    if (content.Length > 500) content = content[..500] + "\n...(truncated)";
+                    var relName = Path.GetRelativePath(diskPath, fullPath).Replace('\\', '/');
+                    sb.AppendLine($"=== {relName} (entry point) ===");
+                    sb.AppendLine(content);
+                    sb.AppendLine();
+                }
+                catch { /* non-fatal */ }
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    private static string BuildIdentityPrompt(RepoProfile profile, string identityDocs)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("# Project Identity Analysis");
+        sb.AppendLine();
+        sb.AppendLine($"**Repository:** {profile.Owner}/{profile.Name}");
+        sb.AppendLine($"**Primary Language:** {profile.PrimaryLanguage}");
+        if (profile.Frameworks.Count > 0)
+            sb.AppendLine($"**Detected Frameworks:** {string.Join(", ", profile.Frameworks)}");
+        if (profile.Dependencies.Count > 0)
+            sb.AppendLine($"**Key Dependencies ({Math.Min(10, profile.Dependencies.Count)}):** {string.Join(", ", profile.Dependencies.Take(10).Select(d => d.Name))}");
+        sb.AppendLine();
+        sb.AppendLine("## Project Documentation");
+        sb.AppendLine(identityDocs);
+        sb.AppendLine();
+        sb.AppendLine("## Your Task");
+        sb.AppendLine("Based on the documentation above, answer these questions:");
+        sb.AppendLine();
+        sb.AppendLine("SUMMARY:");
+        sb.AppendLine("Write 2-4 sentences describing what this project IS and DOES at a product level.");
+        sb.AppendLine("- If it's a library/framework: What does it provide to consumers? What problem does it solve?");
+        sb.AppendLine("- If it's an application: What can users do with it? What is its primary function?");
+        sb.AppendLine("- If it's a tool: What workflow does it support?");
+        sb.AppendLine("Focus on PURPOSE and VALUE, not implementation patterns (don't mention 'circuit breaker' or 'retry logic' — those are HOW, not WHAT).");
+        sb.AppendLine();
+        sb.AppendLine("CATEGORY:");
+        sb.AppendLine("One phrase classifying this project. Examples:");
+        sb.AppendLine("- 'Object-Object Mapping Library'");
+        sb.AppendLine("- 'WPF Desktop Research Platform'");
+        sb.AppendLine("- 'REST API Framework'");
+        sb.AppendLine("- 'Command-Line Build Tool'");
+        sb.AppendLine("- 'Data Visualization Dashboard'");
+        sb.AppendLine();
+        sb.AppendLine("CORE_CAPABILITIES:");
+        sb.AppendLine("List 3-7 product-level capabilities (what users/developers can DO with this project).");
+        sb.AppendLine("NOT implementation details like 'uses dependency injection' — instead describe user-facing features.");
+        sb.AppendLine("Format: one capability per line, prefixed with '- '");
+        sb.AppendLine();
+        sb.AppendLine("Respond with EXACTLY the three sections labeled SUMMARY:, CATEGORY:, and CORE_CAPABILITIES:.");
+
+        return sb.ToString();
+    }
+
+    internal static void ParseIdentityScanResponse(string response, RepoProfile profile)
+    {
+        var lines = response.Split('\n').Select(l => l.Trim()).ToList();
+        var inSection = "";
+        var summarySb = new System.Text.StringBuilder();
+        var capabilities = new List<string>();
+        string category = "";
+
+        foreach (var line in lines)
+        {
+            if (line.StartsWith("SUMMARY:", StringComparison.OrdinalIgnoreCase))
+            {
+                inSection = "summary";
+                var rest = line.Substring("SUMMARY:".Length).Trim();
+                if (!string.IsNullOrWhiteSpace(rest)) summarySb.AppendLine(rest);
+                continue;
+            }
+            if (line.StartsWith("CATEGORY:", StringComparison.OrdinalIgnoreCase))
+            {
+                inSection = "category";
+                var rest = line.Substring("CATEGORY:".Length).Trim();
+                if (!string.IsNullOrWhiteSpace(rest)) category = rest;
+                continue;
+            }
+            if (line.StartsWith("CORE_CAPABILITIES:", StringComparison.OrdinalIgnoreCase))
+            {
+                inSection = "capabilities";
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(line) && inSection == "summary" && summarySb.Length > 0)
+            {
+                inSection = "";
+                continue;
+            }
+
+            switch (inSection)
+            {
+                case "summary":
+                    summarySb.AppendLine(line);
+                    break;
+                case "category":
+                    if (!string.IsNullOrWhiteSpace(line) && string.IsNullOrWhiteSpace(category))
+                        category = line;
+                    break;
+                case "capabilities":
+                    if (line.StartsWith("- ") || line.StartsWith("* ") || line.StartsWith("• "))
+                        capabilities.Add(line.TrimStart('-', '*', '•', ' '));
+                    break;
+            }
+        }
+
+        var summary = summarySb.ToString().Trim();
+        if (!string.IsNullOrWhiteSpace(summary))
+            profile.ProjectSummary = summary;
+        if (!string.IsNullOrWhiteSpace(category))
+            profile.ProductCategory = category.Trim('*', ' ', '"', '\'');
+
+        // Store core capabilities — these are user-facing, not code-level
+        if (capabilities.Count > 0)
+            profile.CoreCapabilities = capabilities;
+    }
+
+    /// <summary>Extract the first non-empty paragraph from markdown text (for description fallback).</summary>
+    internal static string ExtractFirstParagraph(string markdown)
+    {
+        var lines = markdown.Split('\n');
+        var paraSb = new System.Text.StringBuilder();
+        bool started = false;
+
+        foreach (var rawLine in lines)
+        {
+            var line = rawLine.Trim();
+            // Skip headings and badges
+            if (line.StartsWith('#') || line.StartsWith('[') || line.StartsWith('!') || line.StartsWith("---"))
+                continue;
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                if (started && paraSb.Length > 30) break; // Found a paragraph
+                continue;
+            }
+            started = true;
+            if (paraSb.Length > 0) paraSb.Append(' ');
+            paraSb.Append(line);
+        }
+
+        var result = paraSb.ToString().Trim();
+        return result.Length > 300 ? result[..300] + "…" : result;
+    }
+
     /// <summary>
     /// Perform a shallow LLM analysis using only metadata + README + manifests.
     /// Used as fallback when code indexing is unavailable.

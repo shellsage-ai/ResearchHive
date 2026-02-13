@@ -148,8 +148,12 @@ public class RepoProfile
     public string Owner { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
-    /// <summary>LLM-generated 1-3 sentence summary of what the project IS and DOES.</summary>
+    /// <summary>LLM-generated 2-4 sentence summary of what the project IS and DOES (from identity scan).</summary>
     public string ProjectSummary { get; set; } = string.Empty;
+    /// <summary>Product-level category: e.g., "Object-Object Mapping Library", "WPF Desktop Research Platform".</summary>
+    public string ProductCategory { get; set; } = string.Empty;
+    /// <summary>User-facing core capabilities (from identity scan) — what users/developers can DO with this project.</summary>
+    public List<string> CoreCapabilities { get; set; } = new();
     public string PrimaryLanguage { get; set; } = string.Empty;
     public List<string> Languages { get; set; } = new();
     public List<string> Frameworks { get; set; } = new();

@@ -562,9 +562,17 @@ RULES:
         // Prominent identity block — LLM must read this first
         sb.AppendLine($"╔══ PROJECT: {p.Owner}/{p.Name} ══╗");
         sb.AppendLine($"**Source:** {p.RepoUrl}");
+        if (!string.IsNullOrWhiteSpace(p.ProductCategory))
+            sb.AppendLine($"**Product Category:** {p.ProductCategory}");
         sb.AppendLine($"**Description:** {p.Description}");
         if (!string.IsNullOrWhiteSpace(p.ProjectSummary))
-            sb.AppendLine($"**Project Summary:** {p.ProjectSummary}");
+            sb.AppendLine($"**Project Summary (what this project IS and DOES):** {p.ProjectSummary}");
+        if (p.CoreCapabilities.Count > 0)
+        {
+            sb.AppendLine("**Core Capabilities (user-facing):**");
+            foreach (var cap in p.CoreCapabilities)
+                sb.AppendLine($"  - {cap}");
+        }
         sb.AppendLine($"**Primary Language:** {p.PrimaryLanguage} | **All Languages:** {string.Join(", ", p.Languages)}");
         if (!string.IsNullOrWhiteSpace(p.AnalysisModelUsed))
             sb.AppendLine($"**Scanned By:** {p.AnalysisModelUsed}");

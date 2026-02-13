@@ -456,6 +456,12 @@ public class RepoProfileViewModel
     public string Description => Profile.Description.Length > 200 ? Profile.Description[..200] + "..." : Profile.Description;
     public string ProjectSummary => Profile.ProjectSummary;
     public bool HasProjectSummary => !string.IsNullOrWhiteSpace(Profile.ProjectSummary);
+    public string ProductCategory => Profile.ProductCategory;
+    public bool HasProductCategory => !string.IsNullOrWhiteSpace(Profile.ProductCategory);
+    public string CoreCapabilities => Profile.CoreCapabilities.Count > 0
+        ? string.Join("\n", Profile.CoreCapabilities.Select(c => $"🎯 {c}"))
+        : "";
+    public bool HasCoreCapabilities => Profile.CoreCapabilities.Count > 0;
     public string PrimaryLanguage => Profile.PrimaryLanguage;
     public string Stars => Profile.Stars.ToString("N0");
     public string Forks => Profile.Forks.ToString("N0");
@@ -492,6 +498,13 @@ public class RepoProfileViewModel
                 sb.AppendLine();
                 sb.AppendLine("Summary:");
                 sb.AppendLine($"  {Profile.ProjectSummary}");
+            }
+            if (!string.IsNullOrWhiteSpace(Profile.ProductCategory))
+                sb.AppendLine($"Product Category: {Profile.ProductCategory}");
+            if (Profile.CoreCapabilities.Count > 0)
+            {
+                sb.AppendLine("Core Capabilities:");
+                foreach (var c in Profile.CoreCapabilities) sb.AppendLine($"  🎯 {c}");
             }
             if (Profile.TopLevelEntries.Count > 0)
                 sb.AppendLine($"Root: {TopEntriesProof}");
