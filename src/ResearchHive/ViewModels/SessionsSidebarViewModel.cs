@@ -14,6 +14,7 @@ public partial class SessionsSidebarViewModel : ObservableObject
     private readonly Action<string> _onSessionSelected;
     private readonly Action<string>? _onSessionDeleted;
     private readonly IDialogService _dialogService;
+    private readonly GlobalMemoryService? _globalMemory;
 
     [ObservableProperty] private ObservableCollection<SessionItemViewModel> _sessions = new();
     [ObservableProperty] private SessionItemViewModel? _selectedSession;
@@ -32,13 +33,15 @@ public partial class SessionsSidebarViewModel : ObservableObject
         ViewModelFactory factory, 
         Action<string> onSessionSelected,
         IDialogService dialogService,
-        Action<string>? onSessionDeleted = null)
+        Action<string>? onSessionDeleted = null,
+        GlobalMemoryService? globalMemory = null)
     {
         _sessionManager = sessionManager;
         _factory = factory;
         _onSessionSelected = onSessionSelected;
         _dialogService = dialogService;
         _onSessionDeleted = onSessionDeleted;
+        _globalMemory = globalMemory;
         LoadSessions();
     }
 
@@ -115,6 +118,11 @@ public partial class SessionsSidebarViewModel : ObservableObject
         var deletedId = item.Session.Id;
         _sessionManager.CloseSessionDb(deletedId);
         _sessionManager.DeleteSession(deletedId);
+
+        // Clean up promoted chunks from global Hive Mind
+        try { _globalMemory?.DeleteSessionChunks(deletedId); }
+        catch { /* best-effort cleanup */ }
+
         LoadSessions();
         _onSessionDeleted?.Invoke(deletedId);
     }

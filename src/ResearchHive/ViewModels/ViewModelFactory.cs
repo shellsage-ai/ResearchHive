@@ -99,9 +99,12 @@ public class ViewModelFactory
         return new MainViewModel(_sessionManager, this, _llmService, _settings);
     }
 
+    /// <summary>Expose GlobalMemoryService for startup orphan purge.</summary>
+    public GlobalMemoryService? GetGlobalMemory() => _globalMemory;
+
     public SessionsSidebarViewModel CreateSessionsSidebar(Action<string> onSessionSelected, Action<string>? onSessionDeleted = null)
     {
-        return new SessionsSidebarViewModel(_sessionManager, this, onSessionSelected, _dialogService, onSessionDeleted);
+        return new SessionsSidebarViewModel(_sessionManager, this, onSessionSelected, _dialogService, onSessionDeleted, _globalMemory);
     }
 
     public SessionWorkspaceViewModel CreateSessionWorkspace(string sessionId)

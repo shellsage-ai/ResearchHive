@@ -288,6 +288,83 @@ public class GlobalDb : IDisposable
         }
     }
 
+    /// <summary>
+    /// Purge all chunks whose session_id is not in the provided set of active session IDs.
+    /// Chunks with null session_id are kept (they may be manually added).
+    /// Returns the number of chunks deleted.
+    /// </summary>
+    public int PurgeOrphanedChunks(HashSet<string> activeSessionIds)
+    {
+        // Get all distinct session_ids in the store
+        var orphanIds = new List<string>();
+        using (var cmd = _conn.CreateCommand())
+        {
+            cmd.CommandText = "SELECT DISTINCT session_id FROM global_chunks WHERE session_id IS NOT NULL";
+            using var r = cmd.ExecuteReader();
+            while (r.Read())
+            {
+                var sid = r.GetString(0);
+                if (!activeSessionIds.Contains(sid))
+                    orphanIds.Add(sid);
+            }
+        }
+
+        if (orphanIds.Count == 0) return 0;
+
+        int totalDeleted = 0;
+        foreach (var sid in orphanIds)
+        {
+            // Clean FTS entries first
+            var ids = new List<string>();
+            using (var sel = _conn.CreateCommand())
+            {
+                sel.CommandText = "SELECT id FROM global_chunks WHERE session_id = $sid";
+                sel.Parameters.AddWithValue("$sid", sid);
+                using var r = sel.ExecuteReader();
+                while (r.Read()) ids.Add(r.GetString(0));
+            }
+
+            using var tx = _conn.BeginTransaction();
+            try
+            {
+                foreach (var id in ids)
+                {
+                    using var fts = _conn.CreateCommand();
+                    fts.Transaction = tx;
+                    fts.CommandText = "DELETE FROM fts_global WHERE id = $id";
+                    fts.Parameters.AddWithValue("$id", id);
+                    fts.ExecuteNonQuery();
+                }
+
+                using var del = _conn.CreateCommand();
+                del.Transaction = tx;
+                del.CommandText = "DELETE FROM global_chunks WHERE session_id = $sid";
+                del.Parameters.AddWithValue("$sid", sid);
+                totalDeleted += del.ExecuteNonQuery();
+
+                tx.Commit();
+            }
+            catch
+            {
+                tx.Rollback();
+                throw;
+            }
+        }
+
+        return totalDeleted;
+    }
+
+    /// <summary>Get all distinct session IDs present in the global store.</summary>
+    public List<string> GetDistinctSessionIds()
+    {
+        var list = new List<string>();
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = "SELECT DISTINCT session_id FROM global_chunks WHERE session_id IS NOT NULL";
+        using var r = cmd.ExecuteReader();
+        while (r.Read()) list.Add(r.GetString(0));
+        return list;
+    }
+
     // ── Helpers ──
 
     private static void AddChunkParams(SqliteCommand cmd, GlobalChunk gc)

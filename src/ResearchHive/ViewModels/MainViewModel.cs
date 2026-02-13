@@ -2,6 +2,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ResearchHive.Core.Configuration;
 using ResearchHive.Core.Services;
+using System.Diagnostics;
 using System.Windows.Threading;
 
 namespace ResearchHive.ViewModels;
@@ -28,6 +29,22 @@ public partial class MainViewModel : ObservableObject
         _settings = settings;
         _sidebar = factory.CreateSessionsSidebar(OnSessionSelected, OnSessionDeleted);
         _currentView = factory.CreateWelcome();
+
+        // Purge orphaned Hive Mind chunks from deleted sessions (fire-and-forget)
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                var globalMemory = factory.GetGlobalMemory();
+                var purged = globalMemory?.PurgeOrphanedSessions() ?? 0;
+                if (purged > 0)
+                    Debug.WriteLine($"[HiveMind] Purged {purged} orphaned chunks from deleted sessions");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[HiveMind] Orphan purge failed: {ex.Message}");
+            }
+        });
 
         // Check Ollama status immediately and every 30 seconds
         _ollamaTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };

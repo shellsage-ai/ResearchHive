@@ -276,6 +276,19 @@ Provide a thorough answer based on the available evidence.";
         };
     }
 
+    // ── Orphan cleanup ──
+
+    /// <summary>
+    /// Purge global chunks from sessions that no longer exist.
+    /// Call at startup or after session deletion to keep global.db clean.
+    /// </summary>
+    public int PurgeOrphanedSessions()
+    {
+        var activeIds = new HashSet<string>(
+            _sessionManager.GetAllSessions().Select(s => s.Id));
+        return _globalDb.PurgeOrphanedChunks(activeIds);
+    }
+
     // ── Curation API ──
 
     /// <summary>Browse global chunks with pagination and optional filters.</summary>
