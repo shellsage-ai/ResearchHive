@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Markdig;
 using ResearchHive.Core.Configuration;
 using ResearchHive.Core.Models;
 using ResearchHive.Core.Services;
@@ -366,5 +367,114 @@ public class ExportServiceTests : IDisposable
         File.Exists(Path.Combine(packageDir, "run.bat")).Should().BeTrue();
         File.Exists(Path.Combine(packageDir, "README.md")).Should().BeTrue();
         File.Exists(Path.Combine(packageDir, "appsettings.json")).Should().BeTrue();
+    }
+
+    // ── Markdown depth-safety tests ──
+
+    [Fact]
+    public void FlattenMarkdownNesting_CapsBlockquoteDepth()
+    {
+        // 8-deep blockquote should be flattened to 4
+        var deep = ">>>>>>>>> deeply quoted text";
+        var result = ExportService.FlattenMarkdownNesting(deep);
+        // Count leading '>' characters
+        int depth = 0;
+        foreach (char c in result)
+        {
+            if (c == '>') depth++;
+            else break;
+        }
+        depth.Should().BeLessOrEqualTo(4, "blockquote nesting should be capped at 4");
+        result.Should().Contain("deeply quoted text");
+    }
+
+    [Fact]
+    public void FlattenMarkdownNesting_CapsListIndentation()
+    {
+        // 24-space indented list item should be flattened to 12
+        var deep = "                        - deeply nested item";
+        var result = ExportService.FlattenMarkdownNesting(deep);
+        var match = System.Text.RegularExpressions.Regex.Match(result, @"^(\s+)-");
+        match.Success.Should().BeTrue();
+        match.Groups[1].Value.Length.Should().BeLessOrEqualTo(12, "list indentation should be capped");
+        result.Should().Contain("deeply nested item");
+    }
+
+    [Fact]
+    public void FlattenMarkdownNesting_PreservesNormalContent()
+    {
+        var normal = "# Title\n\n> A quote\n\n- Item 1\n  - Item 2\n\nParagraph.";
+        var result = ExportService.FlattenMarkdownNesting(normal);
+        result.Should().Be(normal);
+    }
+
+    [Fact]
+    public void SafeMarkdownToHtml_HandlesNormalMarkdown()
+    {
+        var pipeline = new Markdig.MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
+        var html = ExportService.SafeMarkdownToHtml("# Hello\n\nWorld", pipeline);
+        html.Should().Contain("Hello</h1>");
+        html.Should().Contain("World");
+    }
+
+    [Fact]
+    public void SafeMarkdownToHtml_EmptyInput_ReturnsEmpty()
+    {
+        var pipeline = new Markdig.MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
+        ExportService.SafeMarkdownToHtml("", pipeline).Should().BeEmpty();
+        ExportService.SafeMarkdownToHtml(null!, pipeline).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void SafeMarkdownToHtml_DeeplyNestedBlockquotes_DoesNotThrow()
+    {
+        // Build a markdown string with 20-deep blockquotes mixed with lists
+        var sb = new System.Text.StringBuilder();
+        for (int i = 0; i < 20; i++)
+        {
+            sb.Append(new string('>', i + 1));
+            sb.AppendLine($" Level {i + 1}");
+            sb.Append(new string('>', i + 1));
+            sb.AppendLine($" - list inside quote level {i + 1}");
+        }
+        var pipeline = new Markdig.MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
+        var html = ExportService.SafeMarkdownToHtml(sb.ToString(), pipeline);
+        html.Should().NotBeNullOrEmpty("should produce HTML even with deeply nested markdown");
+        html.Should().Contain("Level 1");
+    }
+
+    [Fact]
+    public async Task ExportPacket_DeeplyNestedReport_DoesNotThrow()
+    {
+        var session = _manager.CreateSession("Deep Test", "Nested md", DomainPack.GeneralResearch);
+        var db = _manager.GetSessionDb(session.Id);
+
+        // Create a report with deeply nested blockquotes + lists
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("# Analysis Report");
+        for (int i = 0; i < 15; i++)
+        {
+            sb.Append(new string('>', i + 1));
+            sb.AppendLine($" Nested analysis layer {i + 1}");
+            sb.Append(new string(' ', (i + 1) * 4));
+            sb.AppendLine($"- Finding at depth {i + 1}");
+        }
+        db.SaveReport(new Report
+        {
+            SessionId = session.Id,
+            JobId = "job-deep",
+            Title = "Deep Analysis",
+            ReportType = "analysis",
+            Content = sb.ToString(),
+            Format = "markdown"
+        });
+
+        var folder = await _export.ExportResearchPacketAsync(session.Id, _outputDir);
+        Directory.Exists(folder).Should().BeTrue("packet folder should be created");
+        var reportFiles = Directory.GetFiles(Path.Combine(folder, "reports"), "*.html");
+        reportFiles.Should().NotBeEmpty("report HTML should be generated");
+
+        var html = await File.ReadAllTextAsync(reportFiles[0]);
+        html.Should().Contain("Analysis Report");
     }
 }

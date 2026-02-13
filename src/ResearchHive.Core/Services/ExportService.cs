@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Text;
+using System.Text.RegularExpressions;
 using Markdig;
 using ResearchHive.Core.Models;
 
@@ -12,9 +13,98 @@ public class ExportService
 {
     private readonly SessionManager _sessionManager;
 
+    /// <summary>Maximum blockquote nesting depth allowed before flattening.</summary>
+    private const int MaxBlockquoteDepth = 4;
+    /// <summary>Maximum list nesting depth allowed before flattening.</summary>
+    private const int MaxListIndentSpaces = 12; // 3 levels of 4-space indent
+
     public ExportService(SessionManager sessionManager)
     {
         _sessionManager = sessionManager;
+    }
+
+    // ────────────────────────────────────────────────────────
+    //  Safe markdown → HTML with depth-flattening + fallback
+    // ────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Convert markdown to HTML safely.  Pre-processes the source to flatten
+    /// excessive nesting that can trip Markdig's internal depth limit, and
+    /// falls back to HTML-escaped &lt;pre&gt; text if conversion still fails.
+    /// </summary>
+    internal static string SafeMarkdownToHtml(string markdown, MarkdownPipeline pipeline)
+    {
+        if (string.IsNullOrWhiteSpace(markdown))
+            return string.Empty;
+
+        var flattened = FlattenMarkdownNesting(markdown);
+
+        try
+        {
+            return Markdig.Markdown.ToHtml(flattened, pipeline);
+        }
+        catch
+        {
+            // Last resort: render as preformatted, HTML-escaped text
+            return $"<pre>{EscapeHtml(markdown)}</pre>";
+        }
+    }
+
+    /// <summary>
+    /// Reduce nesting depth of blockquotes and indented list items so that
+    /// Markdig's parser doesn't exceed its internal depth limit.
+    /// </summary>
+    internal static string FlattenMarkdownNesting(string markdown)
+    {
+        if (string.IsNullOrEmpty(markdown))
+            return markdown;
+
+        var sb = new StringBuilder(markdown.Length);
+        foreach (var rawLine in markdown.Split('\n'))
+        {
+            var line = rawLine;
+
+            // ── Flatten deep blockquotes ( >>>>> → >>>> ) ──
+            int quoteDepth = 0;
+            int idx = 0;
+            while (idx < line.Length && (line[idx] == '>' || line[idx] == ' '))
+            {
+                if (line[idx] == '>') quoteDepth++;
+                idx++;
+            }
+            if (quoteDepth > MaxBlockquoteDepth)
+            {
+                // Rebuild with capped depth
+                var remainder = line[idx..];
+                line = new string('>', MaxBlockquoteDepth) + " " + remainder.TrimStart();
+            }
+
+            // ── Flatten deep list indentation ──
+            // Detect leading spaces/tabs before a list marker (-, *, +, or digit.)
+            var listMatch = Regex.Match(line, @"^(\s+)([-*+]|\d+[.)]) ");
+            if (listMatch.Success)
+            {
+                int indent = 0;
+                foreach (char c in listMatch.Groups[1].Value)
+                    indent += c == '\t' ? 4 : 1;
+
+                if (indent > MaxListIndentSpaces)
+                {
+                    var marker = listMatch.Groups[2].Value;
+                    var rest = line[listMatch.Length..];
+                    line = new string(' ', MaxListIndentSpaces) + marker + " " + rest;
+                }
+            }
+
+            sb.Append(line);
+            sb.Append('\n');
+        }
+
+        // Remove trailing extra newline we added
+        if (sb.Length > 0 && sb[sb.Length - 1] == '\n')
+            sb.Length--;
+
+        return sb.ToString();
     }
 
     public string ExportSessionToZip(string sessionId, string outputPath)
@@ -56,7 +146,7 @@ public class ExportService
             ?? throw new InvalidOperationException($"Report {reportId} not found");
 
         var pipeline = new MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
-        var htmlBody = Markdig.Markdown.ToHtml(report.Content, pipeline);
+        var htmlBody = SafeMarkdownToHtml(report.Content, pipeline);
 
         var fullHtml = $$"""
 <!DOCTYPE html>
@@ -130,7 +220,7 @@ public class ExportService
         var reportLinks = new StringBuilder();
         foreach (var report in reports)
         {
-            var htmlBody = Markdig.Markdown.ToHtml(report.Content, pipeline);
+            var htmlBody = SafeMarkdownToHtml(report.Content, pipeline);
             var reportHtml = WrapHtml(report.Title, htmlBody, report.ReportType, report.CreatedUtc);
             var reportFileName = $"{SanitizeFileName(report.Title)}_{ShortId(report.Id)}.html";
             await File.WriteAllTextAsync(Path.Combine(packetDir, "reports", reportFileName), reportHtml, Encoding.UTF8, ct);
@@ -194,7 +284,7 @@ public class ExportService
                 notebookMd.AppendLine(entry.Content);
                 notebookMd.AppendLine("\n---\n");
             }
-            var notebookHtml = WrapHtml("Research Notebook", Markdig.Markdown.ToHtml(notebookMd.ToString(), pipeline), "notebook", DateTime.UtcNow);
+            var notebookHtml = WrapHtml("Research Notebook", SafeMarkdownToHtml(notebookMd.ToString(), pipeline), "notebook", DateTime.UtcNow);
             await File.WriteAllTextAsync(Path.Combine(packetDir, "notebook.html"), notebookHtml, Encoding.UTF8, ct);
         }
 
