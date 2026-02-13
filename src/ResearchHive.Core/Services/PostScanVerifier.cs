@@ -47,7 +47,7 @@ public class PostScanVerifier
         // 3. Reject phantom frameworks listed as if active
         PrunePhantomFrameworks(profile, factSheet, result);
 
-        // 4. Validate complement URLs + ecosystem + redundancy
+        // 4. Validate complement URLs + ecosystem + redundancy (with floor + diversity)
         await ValidateComplementsAsync(profile, factSheet, result, ct);
 
         // 5. Inject fact-sheet-derived strengths the LLM may have missed
@@ -170,19 +170,21 @@ public class PostScanVerifier
             profile.Frameworks.Remove(fw);
     }
 
-    /// <summary>Validate complement project URLs, ecosystem match, and redundancy.</summary>
+    /// <summary>Minimum complements to retain after pruning. Backfills from pruned pool if needed.</summary>
+    internal const int MinimumComplementFloor = 3;
+
+    /// <summary>Validate complement project URLs, ecosystem match, and redundancy. Enforces minimum floor + category diversity.</summary>
     private async Task ValidateComplementsAsync(
         RepoProfile profile, RepoFactSheet factSheet, VerificationResult result, CancellationToken ct)
     {
-        var toRemove = new List<ComplementProject>();
+        var toRemove = new List<(ComplementProject comp, string reason, string severity)>();
 
         foreach (var comp in profile.ComplementSuggestions)
         {
-            // ── Ecosystem check ──
+            // ── Ecosystem check ── (hard reject — never backfill)
             if (!IsEcosystemCompatible(comp, factSheet))
             {
-                toRemove.Add(comp);
-                result.ComplementsRemoved.Add($"WRONG-ECOSYSTEM: \"{comp.Name}\" — not compatible with {factSheet.Ecosystem}");
+                toRemove.Add((comp, $"WRONG-ECOSYSTEM: \"{comp.Name}\" — not compatible with {factSheet.Ecosystem}", "HARD"));
                 continue;
             }
 
@@ -194,8 +196,7 @@ public class PostScanVerifier
                 var keywords = ExtractKeywords(proven.Capability.ToLowerInvariant());
                 if (keywords.Count(kw => compLower.Contains(kw)) >= 2) // Require 2+ keyword matches for redundancy
                 {
-                    toRemove.Add(comp);
-                    result.ComplementsRemoved.Add($"REDUNDANT: \"{comp.Name}\" — project already has: {proven.Capability}");
+                    toRemove.Add((comp, $"REDUNDANT: \"{comp.Name}\" — project already has: {proven.Capability}", "SOFT"));
                     redundant = true;
                     break;
                 }
@@ -212,9 +213,7 @@ public class PostScanVerifier
 
                 if (isTestFramework && !isAlreadyUsedFramework)
                 {
-                    // Suggesting a DIFFERENT test framework when one already exists = redundant
-                    toRemove.Add(comp);
-                    result.ComplementsRemoved.Add($"REDUNDANT-TEST: \"{comp.Name}\" — already using {factSheet.TestFramework}");
+                    toRemove.Add((comp, $"REDUNDANT-TEST: \"{comp.Name}\" — already using {factSheet.TestFramework}", "SOFT"));
                     continue;
                 }
             }
@@ -228,20 +227,93 @@ public class PostScanVerifier
                     using var response = await _http.SendAsync(request, ct);
                     if (!response.IsSuccessStatusCode && (int)response.StatusCode != 301 && (int)response.StatusCode != 302)
                     {
-                        toRemove.Add(comp);
-                        result.ComplementsRemoved.Add($"DEAD-URL: \"{comp.Name}\" — {comp.Url} returned {(int)response.StatusCode}");
+                        toRemove.Add((comp, $"DEAD-URL: \"{comp.Name}\" — {comp.Url} returned {(int)response.StatusCode}", "HARD"));
                     }
                 }
                 catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
                 {
-                    toRemove.Add(comp);
-                    result.ComplementsRemoved.Add($"DEAD-URL: \"{comp.Name}\" — {comp.Url} unreachable: {ex.Message}");
+                    toRemove.Add((comp, $"DEAD-URL: \"{comp.Name}\" — {comp.Url} unreachable: {ex.Message}", "HARD"));
                 }
             }
         }
 
-        foreach (var comp in toRemove)
+        // ── Minimum floor enforcement: if removing all flagged items drops below the floor, ──
+        // ── backfill from the SOFT-reject pool (sorted by relevance, preserving diversity) ──
+        var hardRejects = toRemove.Where(r => r.severity == "HARD").Select(r => r.comp).ToHashSet();
+        var softRejects = toRemove.Where(r => r.severity == "SOFT").ToList();
+        var remaining = profile.ComplementSuggestions.Except(toRemove.Select(t => t.comp)).ToList();
+
+        if (remaining.Count < MinimumComplementFloor && softRejects.Count > 0)
+        {
+            // Backfill from soft rejects, preferring category diversity
+            var backfillPool = softRejects
+                .Where(r => !hardRejects.Contains(r.comp))
+                .ToList();
+
+            // Ensure category diversity in backfill: pick from as many different categories as possible
+            var categorizedPool = backfillPool
+                .Select(r => (r.comp, category: GetComplementCategory(r.comp)))
+                .OrderBy(x => remaining.Any(c => GetComplementCategory(c) == x.category) ? 1 : 0) // Prefer new categories
+                .ToList();
+
+            foreach (var (comp, category) in categorizedPool)
+            {
+                if (remaining.Count >= MinimumComplementFloor) break;
+                remaining.Add(comp);
+                softRejects.RemoveAll(r => r.comp == comp);
+                result.ComplementsBackfilled.Add($"BACKFILLED: \"{comp.Name}\" (category: {category}) — retained to meet minimum floor");
+            }
+        }
+
+        // Apply the final removal list
+        foreach (var (comp, reason, _) in toRemove.Where(r => !remaining.Contains(r.comp)))
+        {
             profile.ComplementSuggestions.Remove(comp);
+            result.ComplementsRemoved.Add(reason);
+        }
+
+        // ── Category diversity enforcement: warn but don't re-add if all same category ──
+        EnforceCategoryDiversity(profile.ComplementSuggestions, result);
+    }
+
+    /// <summary>Categorize a complement project for diversity tracking.</summary>
+    internal static string GetComplementCategory(ComplementProject comp)
+    {
+        var text = $"{comp.Name} {comp.Purpose} {comp.WhatItAdds}".ToLowerInvariant();
+
+        if (text.Contains("security") || text.Contains("vulnerab") || text.Contains("scan") || text.Contains("snyk") || text.Contains("dependabot"))
+            return "security";
+        if (text.Contains("ci/cd") || text.Contains("pipeline") || text.Contains("deploy") || text.Contains("github actions") || text.Contains("workflow"))
+            return "ci-cd";
+        if (text.Contains("test") || text.Contains("coverage") || text.Contains("mock") || text.Contains("assert"))
+            return "testing";
+        if (text.Contains("monitor") || text.Contains("observ") || text.Contains("trac") || text.Contains("telemetry") || text.Contains("metrics"))
+            return "observability";
+        // Containerization must be checked BEFORE documentation — "docker" contains "doc"
+        if (text.Contains("container") || text.Contains("docker") || text.Contains("kubernetes") || text.Contains("helm"))
+            return "containerization";
+        if (text.Contains("document") || text.Contains("readme") || text.Contains("wiki") || text.Contains("api doc"))
+            return "documentation";
+        if (text.Contains("lint") || text.Contains("format") || text.Contains("analyz") || text.Contains("style"))
+            return "code-quality";
+        if (text.Contains("perform") || text.Contains("bench") || text.Contains("profil") || text.Contains("cache"))
+            return "performance";
+        if (text.Contains("log") || text.Contains("serilog") || text.Contains("nlog"))
+            return "logging";
+
+        return "other";
+    }
+
+    /// <summary>Track category distribution. If all complements share the same category, log a warning.</summary>
+    private static void EnforceCategoryDiversity(List<ComplementProject> complements, VerificationResult result)
+    {
+        if (complements.Count <= 1) return;
+
+        var categories = complements.Select(GetComplementCategory).Distinct().ToList();
+        if (categories.Count == 1)
+        {
+            result.DiversityWarning = $"Low diversity: all {complements.Count} complements are in category '{categories[0]}'";
+        }
     }
 
     /// <summary>Add proven capabilities as strengths if the LLM missed them.</summary>
@@ -360,8 +432,10 @@ public class VerificationResult
     public List<string> StrengthsRemoved { get; set; } = new();
     public List<string> FrameworksRemoved { get; set; } = new();
     public List<string> ComplementsRemoved { get; set; } = new();
+    public List<string> ComplementsBackfilled { get; set; } = new();
     public List<string> StrengthsAdded { get; set; } = new();
     public List<string> GapsAdded { get; set; } = new();
+    public string? DiversityWarning { get; set; }
 
     public int TotalCorrections =>
         GapsRemoved.Count + StrengthsRemoved.Count + FrameworksRemoved.Count +
@@ -376,8 +450,10 @@ public class VerificationResult
             if (StrengthsRemoved.Count > 0) parts.Add($"{StrengthsRemoved.Count} hallucinated strengths removed");
             if (FrameworksRemoved.Count > 0) parts.Add($"{FrameworksRemoved.Count} phantom frameworks removed");
             if (ComplementsRemoved.Count > 0) parts.Add($"{ComplementsRemoved.Count} invalid complements removed");
+            if (ComplementsBackfilled.Count > 0) parts.Add($"{ComplementsBackfilled.Count} complements backfilled");
             if (StrengthsAdded.Count > 0) parts.Add($"{StrengthsAdded.Count} proven strengths injected");
             if (GapsAdded.Count > 0) parts.Add($"{GapsAdded.Count} confirmed gaps injected");
+            if (!string.IsNullOrEmpty(DiversityWarning)) parts.Add(DiversityWarning);
             return parts.Count > 0 ? string.Join(" | ", parts) : "No corrections needed";
         }
     }

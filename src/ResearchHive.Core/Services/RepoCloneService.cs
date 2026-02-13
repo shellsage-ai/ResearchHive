@@ -40,15 +40,29 @@ public class RepoCloneService
     /// <summary>Get the local clone directory for a given repo URL (deterministic, no I/O).</summary>
     public string GetClonePath(string repoUrl)
     {
+        // Local paths are already on disk — return as-is
+        if (RepoScannerService.IsLocalPath(repoUrl))
+            return Path.GetFullPath(repoUrl.Trim());
+
         var (owner, name) = RepoScannerService.ParseRepoUrl(repoUrl);
         return Path.Combine(_settings.RepoClonePath, $"{owner}_{name}");
     }
 
     /// <summary>
     /// Clone or update a repo. Returns the local clone path.
+    /// For local paths, skips cloning and returns the path directly.
     /// </summary>
     public async Task<string> CloneOrUpdateAsync(string repoUrl, CancellationToken ct = default)
     {
+        // Local paths are already on disk — no clone needed
+        if (RepoScannerService.IsLocalPath(repoUrl))
+        {
+            var localPath = Path.GetFullPath(repoUrl.Trim());
+            if (!Directory.Exists(localPath))
+                throw new DirectoryNotFoundException($"Local repo path does not exist: {localPath}");
+            return localPath;
+        }
+
         var (owner, name) = RepoScannerService.ParseRepoUrl(repoUrl);
         var clonePath = Path.Combine(_settings.RepoClonePath, $"{owner}_{name}");
 

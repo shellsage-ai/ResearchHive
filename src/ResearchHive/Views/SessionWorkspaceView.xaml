@@ -1776,11 +1776,11 @@
                     <Border Style="{StaticResource Card}">
                         <StackPanel>
                             <TextBlock Text="🧠 Ask About a Repo" Style="{StaticResource SectionHeader}"/>
-                            <TextBlock Text="Paste a repo URL and ask anything — what it needs, how to extend it, what it's missing, integration ideas, etc."
+                            <TextBlock Text="Paste a repo URL or local project path and ask anything — what it needs, how to extend it, what it's missing, integration ideas, etc."
                                        Foreground="{StaticResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,8"/>
                             <TextBox Text="{Binding RepoAskUrl, UpdateSourceTrigger=PropertyChanged}" 
                                      Style="{StaticResource ModernTextBox}" Margin="0,0,0,6"
-                                     Tag="https://github.com/owner/repo"/>
+                                     Tag="https://github.com/owner/repo  or  C:\path\to\project"/>
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
@@ -1855,7 +1855,7 @@
                                 </Grid.ColumnDefinitions>
                                 <TextBox Text="{Binding RepoUrl, UpdateSourceTrigger=PropertyChanged}" 
                                          Style="{StaticResource ModernTextBox}"
-                                         Tag="https://github.com/owner/repo"/>
+                                         Tag="https://github.com/owner/repo  or  C:\path\to\project"/>
                                 <Button Grid.Column="1" Content="🔎 Scan" Style="{StaticResource AccentButton}" Margin="8,0,0,0"
                                         Command="{Binding ScanRepoCommand}"
                                         IsEnabled="{Binding IsRepoScanning, Converter={x:Static conv:InverseBoolConverter.Instance}}"/>
@@ -1866,11 +1866,11 @@
                     <!-- Multi Scan -->
                     <Border Style="{StaticResource Card}" Margin="0,8,0,0">
                         <StackPanel>
-                            <TextBlock Text="Batch Scan (one URL per line)" Style="{StaticResource SectionHeader}"/>
+                            <TextBlock Text="Batch Scan (one URL or path per line)" Style="{StaticResource SectionHeader}"/>
                             <TextBox Text="{Binding RepoUrlList, UpdateSourceTrigger=PropertyChanged}" 
                                      Style="{StaticResource ModernTextBox}" AcceptsReturn="True"
                                      Height="80" TextWrapping="Wrap"
-                                     Tag="Paste multiple GitHub URLs, one per line"/>
+                                     Tag="Paste GitHub URLs or local paths, one per line"/>
                             <Button Content="🔎 Scan All" Style="{StaticResource AccentButton}" Margin="0,8,0,0"
                                     HorizontalAlignment="Left"
                                     Command="{Binding ScanMultiRepoCommand}"

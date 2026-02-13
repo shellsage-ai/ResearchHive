@@ -40,8 +40,48 @@ public class RepoScannerService
         return (parts[0], parts[1]);
     }
 
+    /// <summary>
+    /// Detect whether the input is a local file system path rather than a URL.
+    /// Supports Windows absolute paths (C:\...), UNC (\\server\...), Unix absolute (/home/...),
+    /// and relative paths (./foo, ../bar).
+    /// </summary>
+    public static bool IsLocalPath(string input)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return false;
+        input = input.Trim();
+
+        // Obvious URL schemes
+        if (input.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+            input.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
+            input.StartsWith("git://", StringComparison.OrdinalIgnoreCase) ||
+            input.StartsWith("ssh://", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        // Windows absolute paths: C:\... D:/...
+        if (input.Length >= 3 && char.IsLetter(input[0]) && input[1] == ':' && (input[2] == '\\' || input[2] == '/'))
+            return true;
+
+        // UNC paths: \\server\share
+        if (input.StartsWith("\\\\")) return true;
+
+        // Unix absolute paths
+        if (input.StartsWith("/")) return true;
+
+        // Relative paths
+        if (input.StartsWith("./") || input.StartsWith(".\\") ||
+            input.StartsWith("../") || input.StartsWith("..\\"))
+            return true;
+
+        // Last resort: if it exists on disk as a directory, treat it as local
+        try { return Directory.Exists(input); } catch { return false; }
+    }
+
     public async Task<RepoProfile> ScanAsync(string repoUrl, CancellationToken ct = default)
     {
+        // Route to local scanner if the input is a file system path
+        if (IsLocalPath(repoUrl))
+            return await ScanLocalAsync(repoUrl, ct);
+
         LastScanApiCallCount = 0;
         var (owner, repo) = ParseRepoUrl(repoUrl);
         var profile = new RepoProfile { RepoUrl = repoUrl, Owner = owner, Name = repo };
@@ -202,6 +242,150 @@ public class RepoScannerService
 
         // Deterministic framework detection — ensures key technologies are captured
         // regardless of LLM quality. LLM analysis may add more later.
+        var frameworkHints = DetectFrameworkHints(profile.Dependencies, depFiles);
+        profile.Frameworks.AddRange(frameworkHints);
+
+        return profile;
+    }
+
+    /// <summary>
+    /// Scan a local directory as a repository. Reads metadata from the file system instead of GitHub API.
+    /// Discovers README, manifest files, languages, and root entries directly from disk.
+    /// </summary>
+    public async Task<RepoProfile> ScanLocalAsync(string localPath, CancellationToken ct = default)
+    {
+        LastScanApiCallCount = 0;
+        localPath = Path.GetFullPath(localPath.Trim());
+
+        if (!Directory.Exists(localPath))
+            throw new DirectoryNotFoundException($"Local path does not exist: {localPath}");
+
+        var dirName = Path.GetFileName(localPath);
+        var profile = new RepoProfile
+        {
+            RepoUrl = localPath,
+            Owner = "local",
+            Name = dirName,
+        };
+
+        // 1. Read README if present
+        var readmePaths = new[] { "README.md", "readme.md", "README.txt", "README", "README.rst" };
+        foreach (var rp in readmePaths)
+        {
+            var readmePath = Path.Combine(localPath, rp);
+            if (File.Exists(readmePath))
+            {
+                try { profile.ReadmeContent = await File.ReadAllTextAsync(readmePath, ct); }
+                catch { /* non-fatal */ }
+                break;
+            }
+        }
+
+        // 2. Capture root-level entries (up to 3 as scan proof)
+        try
+        {
+            var rootEntries = Directory.EnumerateFileSystemEntries(localPath)
+                .Select(Path.GetFileName)
+                .Where(n => n != null && !n.StartsWith(".git"))
+                .Take(3)
+                .ToList();
+            foreach (var entry in rootEntries)
+            {
+                var fullPath = Path.Combine(localPath, entry!);
+                profile.TopLevelEntries.Add(new RepoEntry
+                {
+                    Name = entry!,
+                    Type = Directory.Exists(fullPath) ? "dir" : "file"
+                });
+            }
+        }
+        catch { /* non-fatal */ }
+
+        // 3. Detect languages from file extensions
+        var langCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            foreach (var file in Directory.EnumerateFiles(localPath, "*.*", SearchOption.AllDirectories))
+            {
+                var dir = Path.GetDirectoryName(file) ?? "";
+                if (dir.Contains(".git") || dir.Contains("node_modules") || dir.Contains("bin") || dir.Contains("obj"))
+                    continue;
+                var ext = Path.GetExtension(file).ToLowerInvariant();
+                var lang = ext switch
+                {
+                    ".cs" => "C#", ".py" => "Python", ".js" => "JavaScript", ".ts" => "TypeScript",
+                    ".java" => "Java", ".go" => "Go", ".rs" => "Rust", ".rb" => "Ruby",
+                    ".php" => "PHP", ".swift" => "Swift", ".kt" => "Kotlin", ".cpp" or ".cc" => "C++",
+                    ".c" or ".h" => "C", ".r" => "R", ".scala" => "Scala",
+                    _ => null
+                };
+                if (lang != null)
+                    langCounts[lang] = langCounts.GetValueOrDefault(lang) + 1;
+            }
+        }
+        catch { /* non-fatal */ }
+
+        profile.Languages = langCounts.OrderByDescending(kv => kv.Value).Select(kv => kv.Key).ToList();
+        profile.PrimaryLanguage = profile.Languages.FirstOrDefault() ?? "Unknown";
+
+        // 4. Find and read manifest files
+        var depFiles = new Dictionary<string, string>();
+        var manifestNames = new[] { "package.json", "requirements.txt", "Cargo.toml", "go.mod", "Gemfile", "pom.xml", "build.gradle", "pubspec.yaml", "composer.json" };
+
+        // Root level manifests
+        foreach (var mf in manifestNames)
+        {
+            var mfPath = Path.Combine(localPath, mf);
+            if (File.Exists(mfPath))
+            {
+                try { depFiles[mf] = await File.ReadAllTextAsync(mfPath, ct); }
+                catch { /* non-fatal */ }
+            }
+        }
+
+        // Find .csproj / .sln files recursively (skip bin/obj/node_modules)
+        try
+        {
+            foreach (var csproj in Directory.EnumerateFiles(localPath, "*.csproj", SearchOption.AllDirectories))
+            {
+                var dir = Path.GetDirectoryName(csproj) ?? "";
+                if (dir.Contains("bin") || dir.Contains("obj") || dir.Contains("node_modules")) continue;
+                var relPath = Path.GetRelativePath(localPath, csproj).Replace('\\', '/');
+                try { depFiles[relPath] = await File.ReadAllTextAsync(csproj, ct); }
+                catch { /* non-fatal */ }
+            }
+            foreach (var sln in Directory.EnumerateFiles(localPath, "*.sln", SearchOption.TopDirectoryOnly))
+            {
+                var relPath = Path.GetRelativePath(localPath, sln).Replace('\\', '/');
+                try { depFiles[relPath] = await File.ReadAllTextAsync(sln, ct); }
+                catch { /* non-fatal */ }
+            }
+        }
+        catch { /* non-fatal */ }
+
+        // 5. Try to get last commit date from git
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "git", Arguments = "log -1 --format=%cI",
+                WorkingDirectory = localPath,
+                RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true
+            };
+            using var proc = System.Diagnostics.Process.Start(psi);
+            if (proc != null)
+            {
+                var output = await proc.StandardOutput.ReadToEndAsync(ct);
+                await proc.WaitForExitAsync(ct);
+                if (proc.ExitCode == 0 && DateTime.TryParse(output.Trim(), out var lastCommit))
+                    profile.LastCommitUtc = lastCommit.ToUniversalTime();
+            }
+        }
+        catch { /* not a git repo or git unavailable — non-fatal */ }
+
+        profile.Dependencies = ParseDependencies(depFiles);
+        profile.ManifestContents = depFiles;
+
         var frameworkHints = DetectFrameworkHints(profile.Dependencies, depFiles);
         profile.Frameworks.AddRange(frameworkHints);
 

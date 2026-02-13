@@ -53,24 +53,30 @@ public class ComplementResearchService
         foreach (var gap in profile.Gaps.Take(8))
             searchTopics.Add(gap);
 
-        // If fewer than MinimumComplements gaps, add general improvement categories
-        if (searchTopics.Count < MinimumComplements)
+        // Ensure category diversity — even if gaps exist, always inject underrepresented categories
+        // so complements span security, CI/CD, observability, docs, etc.
+        var diverseCategories = new[]
         {
-            var generalCategories = new[]
+            "testing and quality assurance",
+            "performance monitoring and observability",
+            "security scanning and vulnerability detection",
+            "documentation generation",
+            "CI/CD and deployment automation",
+            "code analysis and linting",
+            "dependency management",
+            "containerization and deployment",
+            "developer experience tooling"
+        };
+
+        var existingCategoryWords = searchTopics.SelectMany(t => t.ToLowerInvariant().Split(' ')).ToHashSet();
+        foreach (var cat in diverseCategories)
+        {
+            if (searchTopics.Count >= MinimumComplements + 4) break; // search extra for diversity
+            var catKeyword = cat.Split(' ')[0];
+            if (!existingCategoryWords.Contains(catKeyword))
             {
-                "testing and quality assurance",
-                "performance monitoring and observability",
-                "security scanning and vulnerability detection",
-                "documentation generation",
-                "CI/CD and deployment automation",
-                "code analysis and linting",
-                "dependency management"
-            };
-            foreach (var cat in generalCategories)
-            {
-                if (searchTopics.Count >= MinimumComplements + 2) break; // search a few extra for redundancy
-                if (!searchTopics.Any(s => s.Contains(cat.Split(' ')[0], StringComparison.OrdinalIgnoreCase)))
-                    searchTopics.Add(cat);
+                searchTopics.Add(cat);
+                existingCategoryWords.Add(catKeyword);
             }
         }
 

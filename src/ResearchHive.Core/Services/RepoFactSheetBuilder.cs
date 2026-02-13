@@ -214,12 +214,51 @@ public class RepoFactSheetBuilder
         ".html", ".htm", ".css", ".svg", ".png", ".jpg", ".ico",
     };
 
-    /// <summary>Filter fileContents to source-code-only files (exclude docs, config, manifests).</summary>
+    /// <summary>
+    /// File names whose content defines fingerprint patterns — matches in these files are self-referential.
+    /// These files are excluded from capability detection to prevent the scanner from detecting its own regex strings.
+    /// </summary>
+    private static readonly HashSet<string> ScannerOwnFiles = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "RepoFactSheetBuilder.cs", "PostScanVerifier.cs", "RepoScannerService.cs",
+        "ComplementResearchService.cs", "RepoCloneService.cs"
+    };
+
+    /// <summary>
+    /// Filter fileContents to source-code-only files, excluding:
+    ///   1. Non-source extensions (docs, config, manifests)
+    ///   2. Test files (contain assertion data that triggers false positives)
+    ///   3. Scanner's own source files (prevent self-referential regex matching)
+    /// </summary>
     private static Dictionary<string, string> GetSourceCodeOnly(Dictionary<string, string> fileContents)
     {
         return fileContents
             .Where(kv => !NonSourceExtensions.Contains(Path.GetExtension(kv.Key)))
+            .Where(kv => !IsTestFile(kv.Key))
+            .Where(kv => !ScannerOwnFiles.Contains(Path.GetFileName(kv.Key)))
             .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Detect test files by path conventions (Tests/, test/, *Tests.cs, *Test.cs, *_test.py, etc.).</summary>
+    internal static bool IsTestFile(string relativePath)
+    {
+        var normalized = relativePath.Replace('\\', '/');
+        var fileName = Path.GetFileNameWithoutExtension(normalized);
+
+        // Directory-based: tests/, test/, __tests__/, spec/
+        if (Regex.IsMatch(normalized, @"(^|/)tests?/", RegexOptions.IgnoreCase)) return true;
+        if (Regex.IsMatch(normalized, @"(^|/)(__tests__|spec)/", RegexOptions.IgnoreCase)) return true;
+
+        // Filename-based: *Tests.cs, *Test.cs, *_test.py, *_spec.rb, *.test.ts, *.spec.js
+        if (fileName.EndsWith("Tests", StringComparison.OrdinalIgnoreCase) ||
+            fileName.EndsWith("Test", StringComparison.OrdinalIgnoreCase) ||
+            fileName.EndsWith("_test", StringComparison.OrdinalIgnoreCase) ||
+            fileName.EndsWith("_spec", StringComparison.OrdinalIgnoreCase) ||
+            fileName.EndsWith(".test", StringComparison.OrdinalIgnoreCase) ||
+            fileName.EndsWith(".spec", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return false;
     }
 
     private static void DetectCapabilities(
@@ -229,9 +268,8 @@ public class RepoFactSheetBuilder
     {
         var fingerprints = GetCapabilityFingerprints(primaryLanguage);
 
-        // CRITICAL: Only scan actual source code files, not README/docs/config
+        // CRITICAL: Only scan production source code — exclude docs, tests, and scanner's own code
         var sourceOnly = GetSourceCodeOnly(fileContents);
-        var allText = string.Join("\n", sourceOnly.Values);
 
         foreach (var (capability, patterns, absenceLabel) in fingerprints)
         {
@@ -242,12 +280,11 @@ public class RepoFactSheetBuilder
             {
                 try
                 {
-                    var match = Regex.Match(allText, pattern, RegexOptions.IgnoreCase | RegexOptions.Multiline, TimeSpan.FromSeconds(2));
-                    if (match.Success)
+                    // Search per-file rather than concatenated text to get accurate file attribution
+                    var matchFile = FindFileWithRegex(sourceOnly, pattern);
+                    if (matchFile != null)
                     {
-                        // Find which source file contains this match
-                        var file = FindFileWithRegex(sourceOnly, pattern);
-                        evidence = $"found in {file ?? "source code"}";
+                        evidence = $"found in {matchFile}";
                         found = true;
                         break;
                     }
@@ -746,6 +783,12 @@ public class RepoFactSheetBuilder
             // ── Logging ──
             ("Structured logging",
                 new[] { @"ILogger<\w+>", @"LogInformation\(|LogWarning\(|LogError\(" },
+                null),
+
+            // ── Multi-cloud / provider support ──
+            ("Multiple cloud AI providers",
+                new[] { @"OpenAI|Anthropic|Google.*Gemini|Mistral|OpenRouter|Azure.*OpenAI|GitHub.*Models",
+                        @"SelectedPaidProvider|PaidProvider|CloudPrimary|CloudOnly" },
                 null),
         };
 

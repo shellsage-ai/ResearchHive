@@ -78,11 +78,14 @@ public class RepoIntelligenceJobRunner
             var telemetry = new ScanTelemetry();
             var totalSw = Stopwatch.StartNew();
 
-            // ── Phase 1: Metadata scan (GitHub API — no LLM yet) ──
+            // ── Phase 1: Metadata scan (GitHub API or local file system — no LLM yet) ──
             var phaseSw = Stopwatch.StartNew();
             job.State = JobState.Searching;
             db.SaveJob(job);
-            AddReplay(job, "scan", "Scanning Repository", "Fetching metadata, README, dependencies via GitHub API...");
+            var isLocal = RepoScannerService.IsLocalPath(repoUrl);
+            AddReplay(job, "scan", "Scanning Repository",
+                isLocal ? "Reading metadata, README, dependencies from local file system..."
+                        : "Fetching metadata, README, dependencies via GitHub API...");
 
             var profile = await _scanner.ScanAsync(repoUrl, ct);
             profile.SessionId = sessionId;
@@ -92,7 +95,8 @@ public class RepoIntelligenceJobRunner
             telemetry.GitHubApiCallCount += _scanner.LastScanApiCallCount;
 
             AddReplay(job, "scanned", "Metadata Collected",
-                $"Found: {profile.PrimaryLanguage} | {profile.Dependencies.Count} deps | {profile.Stars}★");
+                $"Found: {profile.PrimaryLanguage} | {profile.Dependencies.Count} deps" +
+                (isLocal ? "" : $" | {profile.Stars}★"));
 
             // ── Phase 2: Clone + deep index (chunks + embeddings) ──
             phaseSw = Stopwatch.StartNew();

@@ -403,6 +403,7 @@ public class FactSheetAndVerifierTests : IDisposable
     {
         var verifier = new PostScanVerifier();
         var profile = CreateTestProfile();
+        // Add NUnit (redundant) plus enough non-redundant complements to stay above floor
         profile.ComplementSuggestions.Add(new ComplementProject
         {
             Name = "NUnit",
@@ -410,6 +411,30 @@ public class FactSheetAndVerifierTests : IDisposable
             Purpose = "Unit testing framework for .NET",
             WhatItAdds = "Alternative test framework",
             Category = "Testing"
+        });
+        profile.ComplementSuggestions.Add(new ComplementProject
+        {
+            Name = "Serilog",
+            Url = "https://github.com/serilog/serilog",
+            Purpose = "Structured logging for .NET",
+            WhatItAdds = "Rich log output",
+            Category = "Logging"
+        });
+        profile.ComplementSuggestions.Add(new ComplementProject
+        {
+            Name = "Coverlet",
+            Url = "https://github.com/coverlet-coverage/coverlet",
+            Purpose = "Code coverage for .NET",
+            WhatItAdds = "Coverage reports",
+            Category = "Testing"
+        });
+        profile.ComplementSuggestions.Add(new ComplementProject
+        {
+            Name = "BenchmarkDotNet",
+            Url = "https://github.com/dotnet/BenchmarkDotNet",
+            Purpose = "Performance benchmarking",
+            WhatItAdds = "Benchmark suite",
+            Category = "Performance"
         });
 
         var factSheet = new RepoFactSheet { TestFramework = "xUnit", Ecosystem = ".NET/C#" };
@@ -1161,5 +1186,402 @@ public class Tracer
         var section = sheet.ToPromptSection();
         section.Should().Contain("Do NOT embellish");
         section.Should().Contain("cite the SPECIFIC class/service name");
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  Phase 21: Self-referential exclusion, complement floor,
+    //            local path detection, and local scanning tests
+    // ═══════════════════════════════════════════════════
+
+    // ── IsTestFile ──
+
+    [Theory]
+    [InlineData("tests/MyTests.cs", true)]
+    [InlineData("test/UnitTest.cs", true)]
+    [InlineData("__tests__/app.test.js", true)]
+    [InlineData("spec/widget_spec.rb", true)]
+    [InlineData("src/Tests/Integration/SomeTests.cs", true)]
+    [InlineData("SampleTests.cs", true)]
+    [InlineData("SampleTest.cs", true)]
+    [InlineData("sample_test.py", true)]
+    [InlineData("widget_spec.rb", true)]
+    [InlineData("component.test.ts", true)]
+    [InlineData("component.spec.js", true)]
+    [InlineData("src/Services/MyService.cs", false)]
+    [InlineData("src/Program.cs", false)]
+    [InlineData("README.md", false)]
+    [InlineData("src/Testing/Helpers.cs", false)]  // "Testing" folder != "test" or "tests"
+    public void IsTestFile_DetectsByPathConvention(string path, bool expected)
+    {
+        RepoFactSheetBuilder.IsTestFile(path).Should().Be(expected,
+            because: $"'{path}' should {(expected ? "" : "NOT ")}be detected as a test file");
+    }
+
+    // ── Self-referential exclusion ──
+
+    [Fact]
+    public void RepoFactSheetBuilder_Build_ExcludesScannerOwnFiles()
+    {
+        // Simulate scanning our own repo: scanner files contain fingerprint regex literals
+        CreateTempFile("Services/RepoFactSheetBuilder.cs", @"
+// This file contains regex patterns that literally mention ""CircuitState"", ""BenchmarkRunner"", etc.
+var patterns = new[] { @""CircuitState|CircuitBreaker"", @""BenchmarkRunner\.Run|BenchmarkDotNet"" };
+var otel = @""OpenTelemetry|TracerProvider"";
+");
+        CreateTempFile("Services/PostScanVerifier.cs", @"
+// Contains keywords like ""authentication"", ""opentelemetry"" as comparison strings
+if (text.Contains(""authentication"")) return false;
+if (text.Contains(""opentelemetry"")) return false;
+");
+        // Also a real source file that does NOT have these patterns
+        CreateTempFile("Services/RealService.cs", "public class RealService { }");
+
+        var profile = new RepoProfile { PrimaryLanguage = "C#" };
+        var builder = CreateFactSheetBuilder();
+        var sheet = builder.Build(profile, _tempDir);
+
+        // Scanner own files should NOT trigger false positive capabilities
+        sheet.ProvenCapabilities.Should().NotContain(c => c.Capability == "Circuit breaker",
+            "scanner's own regex strings should be excluded from detection");
+        sheet.ProvenCapabilities.Should().NotContain(c => c.Capability.Contains("Benchmark"),
+            "scanner's own regex strings should be excluded from detection");
+        sheet.ProvenCapabilities.Should().NotContain(c => c.Capability.Contains("OpenTelemetry"),
+            "scanner's own regex strings should be excluded from detection");
+        sheet.ProvenCapabilities.Should().NotContain(c => c.Capability.Contains("Authentication"),
+            "scanner's own comparison strings should be excluded from detection");
+    }
+
+    [Fact]
+    public void RepoFactSheetBuilder_Build_ExcludesTestFilesFromCapabilityDetection()
+    {
+        // Test files contain assertion data with keywords like "BenchmarkRunner", "OpenTelemetry"
+        CreateTempFile("tests/FactSheetTests.cs", @"
+using Xunit;
+public class FactSheetTests
+{
+    [Fact]
+    public void Detects_OpenTelemetry()
+    {
+        // This assertion string should NOT trigger OpenTelemetry detection
+        var expected = ""OpenTelemetry / Distributed Tracing"";
+        var patterns = new[] { ""TracerProvider"", ""AddOpenTelemetry"" };
+    }
+
+    [Fact]
+    public void Detects_Benchmark()
+    {
+        // Assertion data containing BenchmarkDotNet keywords
+        var expected = ""BenchmarkRunner.Run"";
+    }
+}
+");
+        // Only real source file
+        CreateTempFile("src/App.cs", "public class App { static void Main() { } }");
+
+        var profile = new RepoProfile { PrimaryLanguage = "C#" };
+        var builder = CreateFactSheetBuilder();
+        var sheet = builder.Build(profile, _tempDir);
+
+        sheet.ProvenCapabilities.Should().NotContain(c => c.Capability.Contains("OpenTelemetry"),
+            "test file assertion data should not trigger capability detection");
+        sheet.ProvenCapabilities.Should().NotContain(c => c.Capability.Contains("Benchmark"),
+            "test file assertion data should not trigger capability detection");
+    }
+
+    // ── Cloud provider fingerprint ──
+
+    [Fact]
+    public void RepoFactSheetBuilder_Build_DetectsMultipleCloudAiProviders()
+    {
+        CreateTempFile("Services/AiProviderRouter.cs", @"
+namespace MyApp.Services;
+
+public class AiProviderRouter
+{
+    public string SelectedPaidProvider { get; set; } = ""OpenAI"";
+    
+    public string[] Providers => new[] { ""OpenAI"", ""Anthropic"", ""Gemini"", ""Mistral"" };
+}
+");
+
+        var profile = new RepoProfile { PrimaryLanguage = "C#" };
+        var builder = CreateFactSheetBuilder();
+        var sheet = builder.Build(profile, _tempDir);
+
+        sheet.ProvenCapabilities.Should().Contain(c => c.Capability == "Multiple cloud AI providers",
+            "presence of SelectedPaidProvider + multiple provider names should trigger cloud AI fingerprint");
+    }
+
+    // ── IsLocalPath ──
+
+    [Theory]
+    [InlineData(@"C:\Users\dev\project", true)]
+    [InlineData(@"D:\repos\my-repo", true)]
+    [InlineData(@"C:/Users/dev/project", true)]
+    [InlineData(@"\\server\share\repo", true)]
+    [InlineData("/home/user/repo", true)]
+    [InlineData("/var/lib/project", true)]
+    [InlineData("./relative/path", true)]
+    [InlineData("../parent/path", true)]
+    [InlineData(@".\relative\path", true)]
+    [InlineData(@"..\parent\path", true)]
+    [InlineData("https://github.com/owner/repo", false)]
+    [InlineData("http://github.com/owner/repo", false)]
+    [InlineData("git://github.com/owner/repo.git", false)]
+    [InlineData("ssh://git@github.com/owner/repo.git", false)]
+    [InlineData("", false)]
+    [InlineData("   ", false)]
+    public void IsLocalPath_DetectsCorrectly(string input, bool expected)
+    {
+        RepoScannerService.IsLocalPath(input).Should().Be(expected,
+            because: $"'{input}' should {(expected ? "" : "NOT ")}be detected as a local path");
+    }
+
+    // ── Complement minimum floor enforcement ──
+
+    [Fact]
+    public async Task PostScanVerifier_EnforcesComplementMinimumFloor()
+    {
+        var verifier = new PostScanVerifier();
+        var profile = CreateTestProfile();
+
+        // Add 4 complements — some redundant with proven capabilities
+        profile.ComplementSuggestions.Add(new ComplementProject
+        {
+            Name = "Polly", Url = "https://github.com/App-vNext/Polly",
+            Purpose = "Resilience and fault-tolerance for .NET",
+            WhatItAdds = "Circuit breaker and retry policies",
+            Category = "Other"
+        });
+        profile.ComplementSuggestions.Add(new ComplementProject
+        {
+            Name = "Bogus", Url = "https://github.com/bchavez/Bogus",
+            Purpose = "Fake data generator for .NET",
+            WhatItAdds = "Realistic test data generation",
+            Category = "Testing"
+        });
+        profile.ComplementSuggestions.Add(new ComplementProject
+        {
+            Name = "BenchmarkDotNet", Url = "https://github.com/dotnet/BenchmarkDotNet",
+            Purpose = "Performance benchmarking toolkit",
+            WhatItAdds = "Accurate performance measurement",
+            Category = "Performance"
+        });
+        profile.ComplementSuggestions.Add(new ComplementProject
+        {
+            Name = "Serilog", Url = "https://github.com/serilog/serilog",
+            Purpose = "Structured logging for .NET",
+            WhatItAdds = "Enriched structured log output",
+            Category = "Logging"
+        });
+
+        // Fact sheet that makes Polly redundant (circuit breaker proven) and BenchmarkDotNet redundant
+        var factSheet = new RepoFactSheet { Ecosystem = ".NET/C#" };
+        factSheet.ProvenCapabilities.Add(new CapabilityFingerprint
+        {
+            Capability = "Circuit breaker",
+            Evidence = "found in LlmCircuitBreaker.cs"
+        });
+        factSheet.ProvenCapabilities.Add(new CapabilityFingerprint
+        {
+            Capability = "Retry logic with backoff",
+            Evidence = "found in RetryHelper.cs"
+        });
+
+        var result = await verifier.VerifyAsync(profile, factSheet);
+
+        // Even if Polly is redundant, minimum floor should keep at least 3
+        profile.ComplementSuggestions.Count.Should().BeGreaterOrEqualTo(PostScanVerifier.MinimumComplementFloor,
+            "complement count should not drop below the minimum floor");
+    }
+
+    [Fact]
+    public async Task PostScanVerifier_BackfillsFromSoftRejects_WhenBelowFloor()
+    {
+        var verifier = new PostScanVerifier();
+        var profile = CreateTestProfile();
+
+        // Only 2 complements, one is soft-rejected (redundant)
+        profile.ComplementSuggestions.Add(new ComplementProject
+        {
+            Name = "Polly", Url = "https://github.com/App-vNext/Polly",
+            Purpose = "Fault tolerance for .NET",
+            WhatItAdds = "Circuit breaker retry patterns",
+            Category = "Other"
+        });
+        profile.ComplementSuggestions.Add(new ComplementProject
+        {
+            Name = "Serilog", Url = "https://github.com/serilog/serilog",
+            Purpose = "Structured logging",
+            WhatItAdds = "Rich structured log output",
+            Category = "Logging"
+        });
+        profile.ComplementSuggestions.Add(new ComplementProject
+        {
+            Name = "Coverlet", Url = "https://github.com/coverlet-coverage/coverlet",
+            Purpose = "Code coverage for .NET",
+            WhatItAdds = "Code coverage reports",
+            Category = "Testing"
+        });
+
+        var factSheet = new RepoFactSheet { Ecosystem = ".NET/C#" };
+        factSheet.ProvenCapabilities.Add(new CapabilityFingerprint
+        {
+            Capability = "Circuit breaker",
+            Evidence = "found in CircuitBreaker.cs"
+        });
+        factSheet.ProvenCapabilities.Add(new CapabilityFingerprint
+        {
+            Capability = "Retry logic with backoff",
+            Evidence = "found in RetryHelper.cs"
+        });
+
+        var result = await verifier.VerifyAsync(profile, factSheet);
+
+        // Even though Polly is redundant, if dropping it goes below floor, it should be backfilled
+        profile.ComplementSuggestions.Count.Should().BeGreaterOrEqualTo(PostScanVerifier.MinimumComplementFloor,
+            "should backfill soft-rejected complements to maintain floor");
+    }
+
+    // ── Complement category diversity ──
+
+    [Theory]
+    [InlineData("Snyk", "security scanner", "vulnerability detection", "security")]
+    [InlineData("GitHub Actions", "CI/CD pipeline", "automated deployment", "ci-cd")]
+    [InlineData("Coverlet", "code coverage", "test coverage reports", "testing")]
+    [InlineData("Prometheus", "monitoring", "metrics and observability", "observability")]
+    [InlineData("DocFX", "documentation generator", "API documentation site", "documentation")]
+    [InlineData("StyleCop", "code analyzer", "lint and format enforcement", "code-quality")]
+    [InlineData("BenchmarkDotNet", "benchmarking", "performance profiling", "performance")]
+    [InlineData("Docker", "containerization", "docker container support", "containerization")]
+    [InlineData("Serilog", "structured logging", "rich log output", "logging")]
+    [InlineData("SomeLib", "utility library", "generic helper", "other")]
+    public void GetComplementCategory_CategorizesCorrectly(
+        string name, string purpose, string whatItAdds, string expectedCategory)
+    {
+        var comp = new ComplementProject
+        {
+            Name = name, Purpose = purpose, WhatItAdds = whatItAdds, Category = "Any"
+        };
+
+        PostScanVerifier.GetComplementCategory(comp).Should().Be(expectedCategory);
+    }
+
+    // ── Local directory scanning ──
+
+    [Fact]
+    public async Task RepoScannerService_ScanLocalAsync_PopulatesProfile()
+    {
+        // Create a temp directory with project structure
+        var localDir = Path.Combine(Path.GetTempPath(), $"scan_local_test_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(localDir);
+
+        try
+        {
+            // Create files to simulate a project
+            File.WriteAllText(Path.Combine(localDir, "README.md"), "# Test Project\nA test .NET project.");
+            var srcDir = Path.Combine(localDir, "src");
+            Directory.CreateDirectory(srcDir);
+            File.WriteAllText(Path.Combine(srcDir, "Program.cs"), "class Program { static void Main() { } }");
+            File.WriteAllText(Path.Combine(srcDir, "Helper.cs"), "class Helper { }");
+
+            // Need a scanner instance — use a minimal approach
+            // ScanLocalAsync is public; we can call it via ScanAsync since IsLocalPath returns true
+            var settings = new AppSettings { DataRootPath = Path.GetTempPath() };
+            var scanner = new RepoScannerService(settings, null!);
+
+            var profile = await scanner.ScanLocalAsync(localDir);
+
+            profile.Owner.Should().Be("local");
+            profile.Name.Should().NotBeEmpty();
+            profile.ReadmeContent.Should().Contain("Test Project");
+            profile.Languages.Should().Contain("C#");
+            profile.PrimaryLanguage.Should().Be("C#");
+            profile.TopLevelEntries.Should().NotBeEmpty();
+        }
+        finally
+        {
+            try { Directory.Delete(localDir, true); } catch { }
+        }
+    }
+
+    // ── Clone service local path passthrough ──
+
+    [Fact]
+    public void RepoCloneService_GetClonePath_ReturnsLocalPathAsIs()
+    {
+        var settings = new AppSettings { DataRootPath = Path.GetTempPath() };
+        var service = new RepoCloneService(settings);
+
+        var localDir = Path.Combine(Path.GetTempPath(), "some_project");
+        var result = service.GetClonePath(localDir);
+
+        result.Should().Be(Path.GetFullPath(localDir));
+    }
+
+    [Fact]
+    public async Task RepoCloneService_CloneOrUpdateAsync_SkipsCloningForLocalPaths()
+    {
+        var localDir = Path.Combine(Path.GetTempPath(), $"clone_test_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(localDir);
+
+        try
+        {
+            var settings = new AppSettings { DataRootPath = Path.GetTempPath() };
+            var service = new RepoCloneService(settings);
+
+            var result = await service.CloneOrUpdateAsync(localDir);
+
+            result.Should().Be(Path.GetFullPath(localDir));
+        }
+        finally
+        {
+            try { Directory.Delete(localDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task RepoCloneService_CloneOrUpdateAsync_ThrowsForNonExistentLocalPath()
+    {
+        var settings = new AppSettings { DataRootPath = Path.GetTempPath() };
+        var service = new RepoCloneService(settings);
+
+        var nonExistent = @"C:\definitely_does_not_exist_12345";
+
+        var act = () => service.CloneOrUpdateAsync(nonExistent);
+        await act.Should().ThrowAsync<DirectoryNotFoundException>();
+    }
+
+    // ── Diversity warning ──
+
+    [Fact]
+    public async Task PostScanVerifier_WarnsOnLowCategoryDiversity()
+    {
+        var verifier = new PostScanVerifier();
+        var profile = CreateTestProfile();
+
+        // All complements in same category (testing)
+        profile.ComplementSuggestions.Add(new ComplementProject
+        {
+            Name = "Coverlet", Url = "https://github.com/coverlet-coverage/coverlet",
+            Purpose = "Code coverage", WhatItAdds = "Test coverage reports", Category = "Testing"
+        });
+        profile.ComplementSuggestions.Add(new ComplementProject
+        {
+            Name = "Stryker", Url = "https://github.com/stryker-mutator/stryker-net",
+            Purpose = "Mutation testing", WhatItAdds = "Test quality assessment", Category = "Testing"
+        });
+        profile.ComplementSuggestions.Add(new ComplementProject
+        {
+            Name = "AutoFixture", Url = "https://github.com/AutoFixture/AutoFixture",
+            Purpose = "Test data generation", WhatItAdds = "Auto-generated test fixtures", Category = "Testing"
+        });
+
+        var factSheet = new RepoFactSheet { Ecosystem = ".NET/C#" };
+
+        var result = await verifier.VerifyAsync(profile, factSheet);
+
+        result.DiversityWarning.Should().NotBeNull("all complements are in the 'testing' category");
+        result.DiversityWarning.Should().Contain("testing");
     }
 }
