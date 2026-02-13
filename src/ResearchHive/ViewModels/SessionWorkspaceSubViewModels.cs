@@ -467,6 +467,9 @@ public class RepoProfileViewModel
     public string Forks => Profile.Forks.ToString("N0");
     public int DependencyCount => Profile.Dependencies.Count;
     public string Strengths => string.Join("\n", Profile.Strengths.Select(s => $"✅ {s}"));
+    public string? InfrastructureStrengths => Profile.InfrastructureStrengths.Count > 0
+        ? string.Join("\n", Profile.InfrastructureStrengths.Select(s => $"🔧 {s}"))
+        : null;
     public string Gaps => string.Join("\n", Profile.Gaps.Select(g => $"🔸 {g}"));
     public int ComplementCount => Profile.ComplementSuggestions.Count;
     public string Complements => string.Join("\n", Profile.ComplementSuggestions.Select(c => $"• {c.Name}: {c.Purpose}"));

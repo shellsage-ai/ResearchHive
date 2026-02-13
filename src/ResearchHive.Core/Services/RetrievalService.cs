@@ -27,13 +27,20 @@ public class RetrievalService : IRetrievalService
     }
 
     public async Task<List<RetrievalResult>> HybridSearchAsync(string sessionId, string query, int topK = 0, CancellationToken ct = default)
-        => await HybridSearchAsync(sessionId, query, sourceTypeFilter: null, topK, ct);
+        => await HybridSearchAsync(sessionId, query, sourceTypeFilter: null, sourceIdFilter: null, topK, ct);
 
     /// <summary>
     /// Hybrid search with optional source-type filter (e.g. "repo_code", "repo_doc").
     /// When a filter is set, only chunks matching one of the supplied source types are returned.
     /// </summary>
     public async Task<List<RetrievalResult>> HybridSearchAsync(string sessionId, string query, IReadOnlyList<string>? sourceTypeFilter, int topK = 0, CancellationToken ct = default)
+        => await HybridSearchAsync(sessionId, query, sourceTypeFilter, sourceIdFilter: null, topK, ct);
+
+    /// <summary>
+    /// Hybrid search with optional source-type AND source-id filters.
+    /// sourceIdFilter scopes retrieval to a single repo (e.g. "owner/name") — prevents cross-contamination in multi-repo sessions.
+    /// </summary>
+    public async Task<List<RetrievalResult>> HybridSearchAsync(string sessionId, string query, IReadOnlyList<string>? sourceTypeFilter, string? sourceIdFilter, int topK = 0, CancellationToken ct = default)
     {
         if (topK <= 0) topK = _settings.DefaultTopK;
         var db = _sessionManager.GetSessionDb(sessionId);
@@ -42,7 +49,7 @@ public class RetrievalService : IRetrievalService
         var bm25Results = new List<(Chunk chunk, float score)>();
         try
         {
-            var ftsHits = db.SearchChunksFtsBm25(query, topK * 4);
+            var ftsHits = db.SearchChunksFtsBm25(query, topK * 4, sourceIdFilter);
             // Normalize BM25 scores to 0-1 range
             var maxBm25 = ftsHits.Count > 0 ? ftsHits.Max(h => h.bm25Score) : 1f;
             if (maxBm25 <= 0) maxBm25 = 1f;
@@ -55,7 +62,7 @@ public class RetrievalService : IRetrievalService
             // FTS can fail on special characters; try legacy method
             try
             {
-                var ftsChunks = db.SearchChunksFts(query, topK * 2);
+                var ftsChunks = db.SearchChunksFts(query, topK * 2, sourceIdFilter);
                 for (int i = 0; i < ftsChunks.Count; i++)
                     bm25Results.Add((ftsChunks[i], 1.0f - (i / (float)(ftsChunks.Count + 1))));
                 if (sourceTypeFilter != null)
@@ -91,7 +98,10 @@ public class RetrievalService : IRetrievalService
             // If we have very few candidates, fall back to all chunks (small sessions)
             if (candidates.Count < topK * 2)
             {
-                candidates = db.GetAllChunks();
+                var allChunks = db.GetAllChunks();
+                if (sourceIdFilter != null)
+                    allChunks = allChunks.Where(c => c.SourceId == sourceIdFilter).ToList();
+                candidates = allChunks;
             }
 
             semanticResults = candidates

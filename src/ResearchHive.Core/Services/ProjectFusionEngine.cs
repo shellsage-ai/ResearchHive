@@ -605,8 +605,16 @@ RULES:
         // Strengths
         if (p.Strengths.Count > 0)
         {
-            sb.AppendLine("**Proven Strengths:**");
+            sb.AppendLine("**Proven Strengths (Product):**");
             foreach (var s in p.Strengths)
+                sb.AppendLine($"  - {s}");
+        }
+
+        // Infrastructure Strengths
+        if (p.InfrastructureStrengths.Count > 0)
+        {
+            sb.AppendLine("**Infrastructure Strengths (CI/CD, Testing, Tooling):**");
+            foreach (var s in p.InfrastructureStrengths)
                 sb.AppendLine($"  - {s}");
         }
 
@@ -704,7 +712,33 @@ RULES:
             }
         }
 
-        return text[startIdx..endIdx].Trim();
+        var content = text[startIdx..endIdx].Trim();
+
+        // Strip any leftover raw section headers the LLM may have echoed back
+        content = StripRawSectionHeaders(content);
+
+        return content;
+    }
+
+    /// <summary>
+    /// Remove echoed raw section headers from LLM output (e.g., "**PROJECTED_CAPABILITIES**", "GAPS_CLOSED:").
+    /// These occur when the LLM copies the prompt's section markers into its response.
+    /// </summary>
+    private static string StripRawSectionHeaders(string content)
+    {
+        foreach (var section in AllSections)
+        {
+            // Remove patterns like "**SECTION_NAME**", "SECTION_NAME:", "## SECTION_NAME"
+            content = content.Replace($"**{section}**", "", StringComparison.OrdinalIgnoreCase);
+            // Only remove "SECTION_NAME:" at the start of a line (not in the middle of text)
+            content = System.Text.RegularExpressions.Regex.Replace(
+                content, $@"(?m)^{System.Text.RegularExpressions.Regex.Escape(section)}:\s*$", "",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            content = content.Replace($"## {section}", "", StringComparison.OrdinalIgnoreCase);
+        }
+        // Clean up any resulting empty lines (more than 2 consecutive)
+        content = System.Text.RegularExpressions.Regex.Replace(content, @"\n{3,}", "\n\n");
+        return content.Trim();
     }
 
     private static Dictionary<string, string> ParseFeatureMatrix(string text)

@@ -50,6 +50,9 @@ public class PostScanVerifier
         // 2. Prune hallucinated strengths (capability confirmed absent)
         PruneHallucinatedStrengths(profile, factSheet, result);
 
+        // 2b. Verify project identity — ensure analysis summary doesn't describe a different project
+        VerifyProjectIdentity(profile, factSheet, result);
+
         // 3. Reject phantom frameworks listed as if active
         PrunePhantomFrameworks(profile, factSheet, result);
 
@@ -191,6 +194,82 @@ public class PostScanVerifier
 
         foreach (var strength in toRemove)
             profile.Strengths.Remove(strength);
+    }
+
+    /// <summary>
+    /// Cross-check the analysis summary against the identity scan results.
+    /// If the analysis summary describes a fundamentally different project (wrong language,
+    /// wrong frameworks), prefer the identity scan's ProjectSummary.
+    /// </summary>
+    private static void VerifyProjectIdentity(RepoProfile profile, RepoFactSheet factSheet, VerificationResult result)
+    {
+        // Skip if no identity scan was performed or no analysis summary to verify
+        if (string.IsNullOrWhiteSpace(profile.ProjectSummary) || string.IsNullOrWhiteSpace(profile.AnalysisSummary))
+            return;
+
+        // If identity scan and analysis produced the same value, no conflict
+        if (profile.ProjectSummary == profile.AnalysisSummary)
+            return;
+
+        var analysisLower = profile.AnalysisSummary.ToLowerInvariant();
+        var identityLower = profile.ProjectSummary.ToLowerInvariant();
+        var primaryLang = profile.PrimaryLanguage?.ToLowerInvariant() ?? "";
+
+        // Check if analysis summary mentions a wrong primary language
+        var wrongLanguageSignals = new Dictionary<string, string[]>
+        {
+            { "c#", new[] { "python library", "python framework", "java application", "javascript framework", "rust library", "go application" } },
+            { "python", new[] { "c# application", ".net application", "wpf", "java application", "rust library", "go application" } },
+            { "javascript", new[] { "c# application", ".net application", "wpf", "python library", "rust library" } },
+            { "typescript", new[] { "c# application", ".net application", "wpf", "python library", "rust library" } },
+            { "java", new[] { "c# application", ".net application", "wpf", "python library", "javascript framework" } },
+        };
+
+        bool identityContaminated = false;
+
+        if (wrongLanguageSignals.TryGetValue(primaryLang, out var wrongPhrases))
+        {
+            foreach (var phrase in wrongPhrases)
+            {
+                if (analysisLower.Contains(phrase))
+                {
+                    identityContaminated = true;
+                    result.IdentityWarnings.Add(
+                        $"CONTAMINATED: Analysis summary mentions '{phrase}' but project's primary language is {profile.PrimaryLanguage}");
+                    break;
+                }
+            }
+        }
+
+        // Check if analysis summary mentions frameworks from a different ecosystem
+        if (!identityContaminated && profile.Frameworks.Count > 0)
+        {
+            // If none of the known frameworks appear in the analysis summary but they appear in identity,
+            // the analysis may be confused
+            var frameworkKeywords = profile.Frameworks
+                .Select(f => f.Split(' ')[0].ToLowerInvariant())
+                .Where(f => f.Length >= 3)
+                .ToList();
+
+            bool identityMentionsFrameworks = frameworkKeywords.Any(kw => identityLower.Contains(kw));
+            bool analysisMentionsFrameworks = frameworkKeywords.Any(kw => analysisLower.Contains(kw));
+
+            if (identityMentionsFrameworks && !analysisMentionsFrameworks)
+            {
+                // Identity references our frameworks but analysis doesn't — suspicious but not definitive
+                result.IdentityWarnings.Add(
+                    $"DRIFT: Analysis summary doesn't mention any known frameworks ({string.Join(", ", profile.Frameworks.Take(3))})");
+            }
+        }
+
+        // If contamination detected, keep identity scan results and discard analysis summary
+        if (identityContaminated)
+        {
+            result.IdentityWarnings.Add(
+                $"RESTORED: Keeping identity scan ProjectSummary, discarding contaminated AnalysisSummary");
+            // ProjectSummary already has the correct identity scan value — no action needed
+            // AnalysisSummary keeps the contaminated value for debugging
+        }
     }
 
     /// <summary>Remove framework entries based on phantom packages or wrong technologies.</summary>
@@ -486,26 +565,97 @@ public class PostScanVerifier
         }
     }
 
-    /// <summary>Add proven capabilities as strengths if the LLM missed them.</summary>
+    /// <summary>Add proven capabilities as strengths if the LLM missed them. Categorizes as product vs infrastructure.</summary>
     private static void InjectProvenStrengths(RepoProfile profile, RepoFactSheet factSheet, VerificationResult result)
     {
         foreach (var proven in factSheet.ProvenCapabilities)
         {
             var keywords = ExtractKeywords(proven.Capability.ToLowerInvariant());
-            bool alreadyMentioned = profile.Strengths.Any(s =>
+            bool alreadyInStrengths = profile.Strengths.Any(s =>
+                keywords.Any(kw => s.Contains(kw, StringComparison.OrdinalIgnoreCase)));
+            bool alreadyInInfra = profile.InfrastructureStrengths.Any(s =>
                 keywords.Any(kw => s.Contains(kw, StringComparison.OrdinalIgnoreCase)));
 
-            if (!alreadyMentioned)
+            if (alreadyInStrengths || alreadyInInfra)
+                continue;
+
+            // Format cleanly: "Capability (verified in FileName.cs)" — no raw regex patterns
+            var cleanEvidence = FormatEvidenceForDisplay(proven.Evidence);
+            var strength = string.IsNullOrEmpty(cleanEvidence)
+                ? $"{proven.Capability} (verified by code analysis)"
+                : $"{proven.Capability} (verified in {cleanEvidence})";
+
+            if (IsInfrastructureCapability(proven.Capability))
             {
-                // Format cleanly: "Capability (verified in FileName.cs)" — no raw regex patterns
-                var cleanEvidence = FormatEvidenceForDisplay(proven.Evidence);
-                var strength = string.IsNullOrEmpty(cleanEvidence)
-                    ? $"{proven.Capability} (verified by code analysis)"
-                    : $"{proven.Capability} (verified in {cleanEvidence})";
+                profile.InfrastructureStrengths.Add(strength);
+                result.StrengthsAdded.Add($"INJECTED-INFRA: {strength}");
+            }
+            else
+            {
                 profile.Strengths.Add(strength);
                 result.StrengthsAdded.Add($"INJECTED: {strength}");
             }
         }
+
+        // Also re-categorize existing LLM-generated strengths
+        CategorizeExistingStrengths(profile);
+    }
+
+    /// <summary>
+    /// Move infrastructure-pattern strengths from the main list to InfrastructureStrengths.
+    /// Called after LLM analysis to split product vs infrastructure.
+    /// </summary>
+    private static void CategorizeExistingStrengths(RepoProfile profile)
+    {
+        var toMove = new List<string>();
+        foreach (var strength in profile.Strengths)
+        {
+            if (IsInfrastructureStrength(strength))
+                toMove.Add(strength);
+        }
+        foreach (var s in toMove)
+        {
+            profile.Strengths.Remove(s);
+            if (!profile.InfrastructureStrengths.Any(x => x.Equals(s, StringComparison.OrdinalIgnoreCase)))
+                profile.InfrastructureStrengths.Add(s);
+        }
+    }
+
+    /// <summary>Check if a proven capability name is infrastructure-level (not a product feature).</summary>
+    private static bool IsInfrastructureCapability(string capability)
+    {
+        var lower = capability.ToLowerInvariant();
+        var infraPatterns = new[]
+        {
+            "ci/cd", "continuous integration", "github actions", "docker",
+            "unit test", "integration test", "test coverage", "testing framework",
+            "logging", "structured logging", "monitoring", "health check",
+            "linting", "code analysis", "static analysis",
+            "build system", "makefile", "cmake",
+            "dependabot", "renovate", "dependency update",
+            "code formatting", "editorconfig"
+        };
+        return infraPatterns.Any(p => lower.Contains(p));
+    }
+
+    /// <summary>Check if an LLM-generated strength description is infrastructure-level.</summary>
+    private static bool IsInfrastructureStrength(string strength)
+    {
+        var lower = strength.ToLowerInvariant();
+        var infraSignals = new[]
+        {
+            "ci/cd", "continuous integration", "github actions", "azure pipelines",
+            "unit test", "integration test", "test suite", "test coverage", "597 test", "300+ test",
+            "docker", "dockerfile", "container",
+            "logging framework", "structured logging", "serilog", "nlog",
+            "health check", "monitoring",
+            "linting", "eslint", "prettier", "code style",
+            "editorconfig", ".editorconfig",
+            "dependabot", "renovate",
+            "build pipeline", "build system",
+            "code analysis", "static analysis", "sonar"
+        };
+        return infraSignals.Any(p => lower.Contains(p));
     }
 
     /// <summary>Extract a clean file reference from evidence text, stripping regex patterns.</summary>
@@ -709,25 +859,54 @@ public class PostScanVerifier
         var compText = $"{comp.Name} {comp.Purpose} {comp.WhatItAdds}".ToLowerInvariant();
         var compNameLower = comp.Name.ToLowerInvariant();
 
-        // Known infrastructure engines / platform repos that are NOT installable packages
+        // Known infrastructure engines / platform repos that are NOT installable packages.
+        // Format: (name-fragment, primary-lang) — blocked when the target ecosystem doesn't match.
         var knownMetaProjects = new[]
         {
+            // Dependency management platforms
             ("dependabot-core", "ruby"),      // Ruby engine: users configure YAML, not install as NuGet
             ("renovate", "node"),              // Node.js platform: users configure JSON, not install as NuGet
+            // Infrastructure-as-code
             ("terraform", "go"),               // Go binary infrastructure tool
+            ("pulumi", "go"),                  // Go infrastructure-as-code
             ("ansible", "python"),             // Python automation platform
-            ("pulumi", "go"),                  // Go infrastructure-as-code (has multi-lang SDKs but core is Go)
+            ("chef", "ruby"),                  // Ruby configuration management
+            ("puppet", "ruby"),                // Ruby configuration management
+            ("salt", "python"),                // Python infrastructure automation
+            // Container / orchestration
+            ("kubernetes", "go"),              // Go container orchestration
+            ("containerd", "go"),              // Go container runtime
+            ("podman", "go"),                  // Go container engine
+            ("helm", "go"),                    // Go package manager for K8s
+            // CI/CD engines
+            ("jenkins", "java"),               // Java CI server
+            ("gitea", "go"),                   // Go git forge
+            ("drone", "go"),                   // Go CI platform
+            ("woodpecker", "go"),              // Go CI fork of Drone
+            // Monitoring / observability platforms
+            ("prometheus", "go"),              // Go monitoring system
+            ("grafana", "go"),                 // Go dashboarding platform
+            ("jaeger", "go"),                  // Go distributed tracing
+            // Mega-frameworks / runtimes (not usable as a dependency)
+            ("dotnet/runtime", "*"),           // .NET runtime itself — not a complement
+            ("microsoft/powertoys", "*"),      // Desktop utility suite — not a library
+            ("nodejs/node", "*"),              // Node.js runtime
+            ("python/cpython", "*"),           // CPython runtime
+            ("rust-lang/rust", "*"),           // Rust compiler
         };
 
         foreach (var (name, lang) in knownMetaProjects)
         {
-            if (compNameLower.Contains(name) && !ecosystem.Contains(lang))
-                return true;
+            if (compNameLower.Contains(name) || (comp.Url?.ToLowerInvariant().Contains(name) ?? false))
+            {
+                if (lang == "*") return true; // Always block (runtimes, mega-repos)
+                if (!ecosystem.Contains(lang)) return true; // Cross-ecosystem meta project
+            }
         }
 
         // Heuristic: if the complement describes itself as a "platform", "engine", or "service"
         // and the URL points to a different-language repo, it's likely a meta-project
-        var metaKeywords = new[] { "platform", "engine", "infrastructure", "service runner", "orchestrator" };
+        var metaKeywords = new[] { "platform", "engine", "infrastructure", "service runner", "orchestrator", "runtime" };
         if (metaKeywords.Any(kw => compText.Contains(kw)))
         {
             // Check if the comp name / URL contain indicators of a different primary language
@@ -811,11 +990,12 @@ public class VerificationResult
     public List<string> ComplementsBackfilled { get; set; } = new();
     public List<string> StrengthsAdded { get; set; } = new();
     public List<string> GapsAdded { get; set; } = new();
+    public List<string> IdentityWarnings { get; set; } = new();
     public string? DiversityWarning { get; set; }
 
     public int TotalCorrections =>
         GapsRemoved.Count + StrengthsRemoved.Count + FrameworksRemoved.Count +
-        ComplementsRemoved.Count + StrengthsAdded.Count + GapsAdded.Count;
+        ComplementsRemoved.Count + StrengthsAdded.Count + GapsAdded.Count + IdentityWarnings.Count;
 
     public string Summary
     {
@@ -829,6 +1009,7 @@ public class VerificationResult
             if (ComplementsBackfilled.Count > 0) parts.Add($"{ComplementsBackfilled.Count} complements backfilled");
             if (StrengthsAdded.Count > 0) parts.Add($"{StrengthsAdded.Count} proven strengths injected");
             if (GapsAdded.Count > 0) parts.Add($"{GapsAdded.Count} confirmed gaps injected");
+            if (IdentityWarnings.Count > 0) parts.Add($"{IdentityWarnings.Count} identity issues detected");
             if (!string.IsNullOrEmpty(DiversityWarning)) parts.Add(DiversityWarning);
             return parts.Count > 0 ? string.Join(" | ", parts) : "No corrections needed";
         }

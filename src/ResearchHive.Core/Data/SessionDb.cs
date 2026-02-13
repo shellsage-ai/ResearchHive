@@ -464,14 +464,25 @@ public class SessionDb : IDisposable
         }
     }
 
-    public List<Chunk> SearchChunksFts(string query, int limit = 20)
+    public List<Chunk> SearchChunksFts(string query, int limit = 20, string? sourceIdFilter = null)
     {
         var list = new List<Chunk>();
         using var cmd = _conn.CreateCommand();
-        cmd.CommandText = @"SELECT c.* FROM chunks c 
-            JOIN fts_chunks f ON c.id = f.id
-            WHERE fts_chunks MATCH $q 
-            ORDER BY rank LIMIT $lim";
+        if (sourceIdFilter != null)
+        {
+            cmd.CommandText = @"SELECT c.* FROM chunks c 
+                JOIN fts_chunks f ON c.id = f.id
+                WHERE fts_chunks MATCH $q AND c.source_id = $sid
+                ORDER BY rank LIMIT $lim";
+            cmd.Parameters.AddWithValue("$sid", sourceIdFilter);
+        }
+        else
+        {
+            cmd.CommandText = @"SELECT c.* FROM chunks c 
+                JOIN fts_chunks f ON c.id = f.id
+                WHERE fts_chunks MATCH $q 
+                ORDER BY rank LIMIT $lim";
+        }
         cmd.Parameters.AddWithValue("$q", query);
         cmd.Parameters.AddWithValue("$lim", limit);
         using var r = cmd.ExecuteReader();
@@ -483,15 +494,27 @@ public class SessionDb : IDisposable
     /// FTS5 BM25-scored search. Returns chunks with their BM25 relevance scores
     /// (FTS5 rank is negative BM25, so we negate it for positive scores).
     /// </summary>
-    public List<(Chunk chunk, float bm25Score)> SearchChunksFtsBm25(string query, int limit = 40)
+    public List<(Chunk chunk, float bm25Score)> SearchChunksFtsBm25(string query, int limit = 40, string? sourceIdFilter = null)
     {
         var list = new List<(Chunk chunk, float bm25Score)>();
         using var cmd = _conn.CreateCommand();
-        cmd.CommandText = @"SELECT c.*, bm25(fts_chunks) as bm25_score 
-            FROM chunks c 
-            JOIN fts_chunks f ON c.id = f.id
-            WHERE fts_chunks MATCH $q 
-            ORDER BY bm25(fts_chunks) LIMIT $lim";
+        if (sourceIdFilter != null)
+        {
+            cmd.CommandText = @"SELECT c.*, bm25(fts_chunks) as bm25_score 
+                FROM chunks c 
+                JOIN fts_chunks f ON c.id = f.id
+                WHERE fts_chunks MATCH $q AND c.source_id = $sid
+                ORDER BY bm25(fts_chunks) LIMIT $lim";
+            cmd.Parameters.AddWithValue("$sid", sourceIdFilter);
+        }
+        else
+        {
+            cmd.CommandText = @"SELECT c.*, bm25(fts_chunks) as bm25_score 
+                FROM chunks c 
+                JOIN fts_chunks f ON c.id = f.id
+                WHERE fts_chunks MATCH $q 
+                ORDER BY bm25(fts_chunks) LIMIT $lim";
+        }
         cmd.Parameters.AddWithValue("$q", query);
         cmd.Parameters.AddWithValue("$lim", limit);
         using var r = cmd.ExecuteReader();

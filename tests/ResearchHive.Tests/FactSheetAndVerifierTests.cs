@@ -374,7 +374,8 @@ public class FactSheetAndVerifierTests : IDisposable
 
         var result = await verifier.VerifyAsync(profile, factSheet);
 
-        profile.Strengths.Should().Contain("Excellent test coverage with 439 tests");
+        // Test coverage is infrastructure, so it moves to InfrastructureStrengths
+        profile.InfrastructureStrengths.Should().Contain("Excellent test coverage with 439 tests");
     }
 
     [Fact]
@@ -1167,7 +1168,8 @@ public class MyService
 
         var result = await verifier.VerifyAsync(profile, factSheet);
 
-        var injected = profile.Strengths.First(s => s.Contains("logging"));
+        // "Structured logging" is infrastructure, so injected into InfrastructureStrengths
+        var injected = profile.InfrastructureStrengths.First(s => s.Contains("logging"));
         injected.Should().Contain("verified by code analysis");
     }
 

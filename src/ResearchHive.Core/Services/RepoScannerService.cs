@@ -730,6 +730,7 @@ public class RepoScannerService
         sb.AppendLine($"- Dependencies ({profile.Dependencies.Count}): {string.Join(", ", profile.Dependencies.Select(d => d.Name))}");
         sb.AppendLine($"- Indexed: {profile.IndexedFileCount} files, {profile.IndexedChunkCount} chunks");
         sb.AppendLine();
+        AppendIdentityContext(sb, profile);
         var factSection = profile.FactSheet?.ToPromptSection();
         if (!string.IsNullOrEmpty(factSection))
         {
@@ -803,6 +804,29 @@ public class RepoScannerService
         return sb.ToString();
     }
 
+    /// <summary>
+    /// Injects the identity scan results (ProjectSummary, ProductCategory, CoreCapabilities) into the prompt
+    /// so the LLM is anchored to the real project identity and doesn't hallucinate one.
+    /// </summary>
+    private static void AppendIdentityContext(System.Text.StringBuilder sb, RepoProfile profile)
+    {
+        bool hasIdentity = !string.IsNullOrWhiteSpace(profile.ProjectSummary) ||
+                           !string.IsNullOrWhiteSpace(profile.ProductCategory) ||
+                           profile.CoreCapabilities.Count > 0;
+
+        if (!hasIdentity) return;
+
+        sb.AppendLine("## ESTABLISHED PROJECT IDENTITY (from prior analysis — do NOT contradict)");
+        if (!string.IsNullOrWhiteSpace(profile.ProjectSummary))
+            sb.AppendLine($"Summary: {profile.ProjectSummary}");
+        if (!string.IsNullOrWhiteSpace(profile.ProductCategory))
+            sb.AppendLine($"Category: {profile.ProductCategory}");
+        if (profile.CoreCapabilities.Count > 0)
+            sb.AppendLine($"Core Capabilities: {string.Join(", ", profile.CoreCapabilities)}");
+        sb.AppendLine("Your Summary section MUST be consistent with this identity. Do not describe a different project.");
+        sb.AppendLine();
+    }
+
     private static void AppendFormatInstructions(System.Text.StringBuilder sb)
     {
         sb.AppendLine("Respond with EXACTLY this format:");
@@ -810,7 +834,7 @@ public class RepoScannerService
         sb.AppendLine("1-3 sentences describing what this project IS and DOES at its CORE. Describe the project's primary purpose — what problem it solves and for whom.");
         sb.AppendLine("Do NOT describe the analysis tool or code scanning features. Describe the PROJECT ITSELF.");
         sb.AppendLine("Example for a mapping library: 'AutoMapper is a convention-based object-object mapper for .NET that eliminates manual mapping code between DTOs and domain models. It supports projection, flattening, and custom value resolvers.'");
-        sb.AppendLine("Example for a research platform: 'ResearchHive is a WPF desktop application for conducting multi-source research with AI assistance. It manages research sessions, captures evidence from web sources, and generates grounded reports with citation verification.'");
+        sb.AppendLine("Example for a task runner: 'Taskfire is a distributed task scheduler for Python that manages job queues, retries, and cron-based scheduling across worker nodes.'");
         sb.AppendLine("## Frameworks");
         sb.AppendLine("- framework1");
         sb.AppendLine("- framework2");
@@ -871,7 +895,13 @@ public class RepoScannerService
         }
 
         if (summarySb.Length > 0)
-            profile.ProjectSummary = summarySb.ToString().Trim();
+        {
+            var analysisSummary = summarySb.ToString().Trim();
+            profile.AnalysisSummary = analysisSummary;
+            // Only set ProjectSummary if identity scan didn't already populate it
+            if (string.IsNullOrWhiteSpace(profile.ProjectSummary))
+                profile.ProjectSummary = analysisSummary;
+        }
     }
 
     private static List<RepoDependency> ParseDependencies(Dictionary<string, string> depFiles)
@@ -1129,6 +1159,7 @@ public class RepoScannerService
         sb.AppendLine($"- Dependencies ({profile.Dependencies.Count}): {string.Join(", ", profile.Dependencies.Select(d => d.Name))}");
         sb.AppendLine($"- Indexed: {profile.IndexedFileCount} files, {profile.IndexedChunkCount} chunks");
         sb.AppendLine();
+        AppendIdentityContext(sb, profile);
         var factSection = profile.FactSheet?.ToPromptSection();
         if (!string.IsNullOrEmpty(factSection))
         {
@@ -1150,7 +1181,7 @@ public class RepoScannerService
         sb.AppendLine();
         sb.AppendLine("## Summary");
         sb.AppendLine("1-3 sentences describing what this project IS and DOES at its CORE. Describe the project's primary purpose — what problem it solves and for whom.");
-        sb.AppendLine("Do NOT describe the analysis tool or scanning process. Describe the PROJECT ITSELF (e.g., 'AutoMapper is a convention-based object-object mapper...', 'ResearchHive is a WPF research platform...').");
+        sb.AppendLine("Do NOT describe the analysis tool or scanning process. Describe the PROJECT ITSELF (e.g., 'AutoMapper is a convention-based object-object mapper...', 'Taskfire is a distributed task scheduler...').");
         sb.AppendLine();
         sb.AppendLine("## CodeBook");
         sb.AppendLine("A concise architecture reference document (under 1500 words) covering:");
@@ -1277,6 +1308,7 @@ public class RepoScannerService
         sb.AppendLine($"- Dependencies ({profile.Dependencies.Count}): {string.Join(", ", profile.Dependencies.Select(d => d.Name))}");
         sb.AppendLine($"- Indexed: {profile.IndexedFileCount} files, {profile.IndexedChunkCount} chunks");
         sb.AppendLine();
+        AppendIdentityContext(sb, profile);
         var factSection2 = profile.FactSheet?.ToPromptSection();
         if (!string.IsNullOrEmpty(factSection2))
         {
@@ -1298,7 +1330,7 @@ public class RepoScannerService
         sb.AppendLine();
         sb.AppendLine("## Summary");
         sb.AppendLine("1-3 sentences describing what this project IS and DOES at its CORE. Describe the project's primary purpose — what problem it solves and for whom.");
-        sb.AppendLine("Do NOT describe the analysis tool or scanning process. Describe the PROJECT ITSELF (e.g., 'AutoMapper is a convention-based object-object mapper...', 'ResearchHive is a WPF research platform...').");
+        sb.AppendLine("Do NOT describe the analysis tool or scanning process. Describe the PROJECT ITSELF (e.g., 'AutoMapper is a convention-based object-object mapper...', 'Taskfire is a distributed task scheduler...').");
         sb.AppendLine();
         sb.AppendLine("## CodeBook");
         sb.AppendLine("A concise architecture reference document (under 1500 words) covering:");

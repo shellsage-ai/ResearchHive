@@ -2070,6 +2070,11 @@
                                             <TextBlock Text="Strengths" Style="{StaticResource SubHeader}" Margin="0,8,0,2"/>
                                             <TextBox Text="{Binding Strengths, Mode=OneWay}" Style="{StaticResource SelectableText}" FontSize="11"/>
 
+                                            <TextBlock Text="Infrastructure Strengths" Style="{StaticResource SubHeader}" Margin="0,6,0,2"
+                                                       Visibility="{Binding InfrastructureStrengths, Converter={StaticResource NullVis}}"/>
+                                            <TextBox Text="{Binding InfrastructureStrengths, Mode=OneWay}" Style="{StaticResource SelectableText}" FontSize="11"
+                                                     Visibility="{Binding InfrastructureStrengths, Converter={StaticResource NullVis}}"/>
+
                                             <TextBlock Text="Gaps" Style="{StaticResource SubHeader}" Margin="0,6,0,2"/>
                                             <TextBox Text="{Binding Gaps, Mode=OneWay}" Style="{StaticResource SelectableText}" FontSize="11"/>
 

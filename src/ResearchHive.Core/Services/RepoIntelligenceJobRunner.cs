@@ -454,6 +454,7 @@ public class RepoIntelligenceJobRunner
 
         var allQueries = architectureQueries.Concat(analysisQueries).ToArray();
         var repoFilter = new[] { "repo_code", "repo_doc" };
+        var repoSourceId = $"{profile.Owner}/{profile.Name}";
         var allChunks = new List<RetrievalResult>();
 
         // Parallel RAG retrieval — all 18 queries at once
@@ -461,7 +462,7 @@ public class RepoIntelligenceJobRunner
         {
             try
             {
-                var hits = await _retrievalService!.HybridSearchAsync(sessionId, q, repoFilter, topK: 5, ct);
+                var hits = await _retrievalService!.HybridSearchAsync(sessionId, q, repoFilter, repoSourceId, topK: 5, ct);
                 return (IReadOnlyList<RetrievalResult>)hits.ToList();
             }
             catch (Exception ex)
@@ -516,8 +517,13 @@ public class RepoIntelligenceJobRunner
         profile.CodeBook = $"# CodeBook: {profile.Owner}/{profile.Name}\n\n{codeBook}";
         profile.AnalysisModelUsed = _llmService.LastModelUsed;
 
+        // Store analysis summary separately — only fall back to it if identity scan left ProjectSummary empty
         if (!string.IsNullOrWhiteSpace(summary))
-            profile.ProjectSummary = summary;
+        {
+            profile.AnalysisSummary = summary;
+            if (string.IsNullOrWhiteSpace(profile.ProjectSummary))
+                profile.ProjectSummary = summary;
+        }
 
         // Add LLM-detected frameworks (dedup with deterministic ones)
         foreach (var fw in frameworks)
@@ -573,13 +579,14 @@ public class RepoIntelligenceJobRunner
 
         var allQueries = architectureQueries.Concat(analysisQueries).ToArray();
         var repoFilter = new[] { "repo_code", "repo_doc" };
+        var repoSourceId = $"{profile.Owner}/{profile.Name}";
         var allChunks = new List<RetrievalResult>();
 
         var retrievalTasks = allQueries.Select(async q =>
         {
             try
             {
-                var hits = await _retrievalService!.HybridSearchAsync(sessionId, q, repoFilter, topK: 5, ct);
+                var hits = await _retrievalService!.HybridSearchAsync(sessionId, q, repoFilter, repoSourceId, topK: 5, ct);
                 return (IReadOnlyList<RetrievalResult>)hits.ToList();
             }
             catch (Exception ex)
@@ -665,8 +672,13 @@ public class RepoIntelligenceJobRunner
         profile.CodeBook = $"# CodeBook: {profile.Owner}/{profile.Name}\n\n{codeBook}";
         profile.AnalysisModelUsed = _llmService.LastModelUsed;
 
+        // Store analysis summary separately — only fall back to it if identity scan left ProjectSummary empty
         if (!string.IsNullOrWhiteSpace(summary))
-            profile.ProjectSummary = summary;
+        {
+            profile.AnalysisSummary = summary;
+            if (string.IsNullOrWhiteSpace(profile.ProjectSummary))
+                profile.ProjectSummary = summary;
+        }
 
         // Dedup frameworks
         foreach (var fw in frameworks)
@@ -714,6 +726,7 @@ public class RepoIntelligenceJobRunner
         };
 
         var repoFilter = new[] { "repo_code", "repo_doc" };
+        var repoSourceId = $"{profile.Owner}/{profile.Name}";
         var allChunks = new List<RetrievalResult>();
 
         // Parallel RAG retrieval — queries are independent reads
@@ -721,7 +734,7 @@ public class RepoIntelligenceJobRunner
         {
             try
             {
-                var hits = await _retrievalService!.HybridSearchAsync(sessionId, q, repoFilter, topK: 5, ct);
+                var hits = await _retrievalService!.HybridSearchAsync(sessionId, q, repoFilter, repoSourceId, topK: 5, ct);
                 return (IReadOnlyList<RetrievalResult>)hits.ToList();
             }
             catch (Exception ex)
@@ -779,13 +792,14 @@ public class RepoIntelligenceJobRunner
     private async Task VerifyGapsViaRag(string sessionId, RepoProfile profile, ScanTelemetry telemetry, CancellationToken ct)
     {
         var repoFilter = new[] { "repo_code", "repo_doc" };
+        var repoSourceId = $"{profile.Owner}/{profile.Name}";
 
         // Parallel RAG retrieval for gap evidence
         var gapTasks = profile.Gaps.Select(async gap =>
         {
             try
             {
-                var hits = await _retrievalService!.HybridSearchAsync(sessionId, gap, repoFilter, topK: 3, ct);
+                var hits = await _retrievalService!.HybridSearchAsync(sessionId, gap, repoFilter, repoSourceId, topK: 3, ct);
                 var chunkTexts = hits.Select(h => h.Chunk.Text).ToList();
                 return (gap, chunks: (IReadOnlyList<string>)chunkTexts);
             }
@@ -944,6 +958,14 @@ public class RepoIntelligenceJobRunner
         foreach (var s in p.Strengths)
             sb.AppendLine($"- ✅ {s}");
         sb.AppendLine();
+
+        if (p.InfrastructureStrengths.Count > 0)
+        {
+            sb.AppendLine("## Infrastructure Strengths");
+            foreach (var s in p.InfrastructureStrengths)
+                sb.AppendLine($"- 🔧 {s}");
+            sb.AppendLine();
+        }
 
         sb.AppendLine("## Gaps & Improvement Opportunities");
         foreach (var g in p.Gaps)

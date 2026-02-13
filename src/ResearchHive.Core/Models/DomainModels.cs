@@ -150,6 +150,8 @@ public class RepoProfile
     public string Description { get; set; } = string.Empty;
     /// <summary>LLM-generated 2-4 sentence summary of what the project IS and DOES (from identity scan).</summary>
     public string ProjectSummary { get; set; } = string.Empty;
+    /// <summary>LLM-generated summary from the main analysis pass — kept separate to avoid overwriting identity scan results.</summary>
+    public string AnalysisSummary { get; set; } = string.Empty;
     /// <summary>Product-level category: e.g., "Object-Object Mapping Library", "WPF Desktop Research Platform".</summary>
     public string ProductCategory { get; set; } = string.Empty;
     /// <summary>User-facing core capabilities (from identity scan) — what users/developers can DO with this project.</summary>
@@ -165,6 +167,8 @@ public class RepoProfile
     public DateTime? LastCommitUtc { get; set; }
     public string ReadmeContent { get; set; } = string.Empty;
     public List<string> Strengths { get; set; } = new();
+    /// <summary>Infrastructure-level strengths (CI/CD, testing, tooling) — separated from product strengths.</summary>
+    public List<string> InfrastructureStrengths { get; set; } = new();
     public List<string> Gaps { get; set; } = new();
     public List<ComplementProject> ComplementSuggestions { get; set; } = new();
     /// <summary>First few files/folders from the repo root — proof of live scan.</summary>
