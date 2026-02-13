@@ -47,28 +47,32 @@ public class RepoIndexService
         // 3. Discover files
         var files = _cloneService.DiscoverFiles(clonePath);
 
-        // 4. Chunk all files
+        // 4. Chunk all files (parallel I/O for large repos)
         var sourceId = $"{profile.Owner}/{profile.Name}";
-        var allChunks = new List<Chunk>();
-        int filesIndexed = 0;
+        var chunksPerFile = new System.Collections.Concurrent.ConcurrentBag<List<Chunk>>();
+        int indexedCount = 0;
 
-        foreach (var (absPath, relPath) in files)
-        {
-            ct.ThrowIfCancellationRequested();
-            try
+        await Parallel.ForEachAsync(files,
+            new ParallelOptions { MaxDegreeOfParallelism = 8, CancellationToken = ct },
+            async (file, token) =>
             {
-                var content = await File.ReadAllTextAsync(absPath, ct);
-                if (string.IsNullOrWhiteSpace(content)) continue;
+                try
+                {
+                    var content = await File.ReadAllTextAsync(file.AbsolutePath, token);
+                    if (string.IsNullOrWhiteSpace(content)) return;
 
-                var chunks = _codeChunker.ChunkFile(relPath, content, sessionId, sourceId);
-                allChunks.AddRange(chunks);
-                filesIndexed++;
-            }
-            catch
-            {
-                // Skip files that can't be read (binary, encoding issues, etc.)
-            }
-        }
+                    var chunks = _codeChunker.ChunkFile(file.RelativePath, content, sessionId, sourceId);
+                    chunksPerFile.Add(chunks);
+                    Interlocked.Increment(ref indexedCount);
+                }
+                catch
+                {
+                    // Skip files that can't be read (binary, encoding issues, etc.)
+                }
+            });
+
+        var allChunks = chunksPerFile.SelectMany(c => c).ToList();
+        int filesIndexed = indexedCount;
 
         if (allChunks.Count == 0) return (0, 0);
 

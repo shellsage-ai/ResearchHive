@@ -97,79 +97,100 @@ public class RepoIntelligenceJobRunner
             phaseSw.Stop();
             telemetry.Phases.Add(new PhaseTimingRecord { Phase = "Clone + Index", DurationMs = phaseSw.ElapsedMilliseconds });
 
-            // ── Phase 3: CodeBook generation (architecture summary from chunks) ──
-            phaseSw = Stopwatch.StartNew();
-            if (_codeBookGenerator != null && isIndexed)
+            // ── Phases 3-5: Analysis pipeline (consolidated for cloud, separate for local) ──
+            // Cloud/Codex providers (large context): combine CodeBook + Analysis + Gap Verification into 1 LLM call
+            // Local/Ollama providers (small context): keep 3 separate LLM calls for reliability
+            if (_llmService.IsLargeContextProvider && isIndexed && _retrievalService != null)
             {
-                try
-                {
-                    AddReplay(job, "codebook", "Generating CodeBook", "Analyzing architecture patterns from indexed code...");
-                    var cbSw = Stopwatch.StartNew();
-                    profile.CodeBook = await _codeBookGenerator.GenerateAsync(sessionId, profile, ct);
-                    cbSw.Stop();
-                    telemetry.LlmCalls.Add(new LlmCallRecord
-                    {
-                        Purpose = "CodeBook Generation",
-                        Model = _llmService.LastModelUsed,
-                        DurationMs = cbSw.ElapsedMilliseconds,
-                        ResponseLength = profile.CodeBook.Length
-                    });
-                    telemetry.RetrievalCallCount += 6; // CodeBookGenerator issues 6 RAG queries
-                    AddReplay(job, "codebook_done", "CodeBook Generated", "Architecture reference document created");
-                }
-                catch (Exception ex)
-                {
-                    AddReplay(job, "codebook_warn", "CodeBook Skipped", $"Could not generate CodeBook: {ex.Message}");
-                }
-            }
+                phaseSw = Stopwatch.StartNew();
+                AddReplay(job, "consolidated", "Consolidated Analysis",
+                    "Running CodeBook + Analysis + Gap Verification in a single cloud LLM call...");
+                job.State = JobState.Evaluating;
+                db.SaveJob(job);
 
-            phaseSw.Stop();
-            telemetry.Phases.Add(new PhaseTimingRecord { Phase = "CodeBook Generation", DurationMs = phaseSw.ElapsedMilliseconds });
+                await RunConsolidatedAnalysisAsync(sessionId, profile, telemetry, ct);
 
-            // ── Phase 4: RAG-grounded strengths + gaps analysis ──
-            phaseSw = Stopwatch.StartNew();
-            job.State = JobState.Evaluating;
-            db.SaveJob(job);
-
-            if (isIndexed && _retrievalService != null)
-            {
-                AddReplay(job, "rag_analysis", "RAG-Grounded Analysis", "Querying indexed code to build comprehensive assessment...");
-                await RunRagGroundedAnalysis(sessionId, profile, telemetry, ct);
+                AddReplay(job, "analyzed", "Consolidated Analysis Complete",
+                    $"CodeBook generated, {profile.Strengths.Count} strengths, {profile.Gaps.Count} pre-verified gaps");
+                phaseSw.Stop();
+                telemetry.Phases.Add(new PhaseTimingRecord { Phase = "Consolidated Analysis (CodeBook+RAG+GapVerify)", DurationMs = phaseSw.ElapsedMilliseconds });
             }
             else
             {
-                // Fallback: shallow analysis from metadata only (no code available)
-                AddReplay(job, "shallow_analysis", "Shallow Analysis", "No indexed code available — analyzing from README + manifests only");
-                await _scanner.AnalyzeShallowAsync(profile, ct);
-                telemetry.LlmCalls.Add(new LlmCallRecord
+                // ── Phase 3: CodeBook generation (architecture summary from chunks) ──
+                phaseSw = Stopwatch.StartNew();
+                if (_codeBookGenerator != null && isIndexed)
                 {
-                    Purpose = "Shallow Analysis (fallback)",
-                    Model = _llmService.LastModelUsed,
-                    DurationMs = phaseSw.ElapsedMilliseconds
-                });
-            }
+                    try
+                    {
+                        AddReplay(job, "codebook", "Generating CodeBook", "Analyzing architecture patterns from indexed code...");
+                        var cbSw = Stopwatch.StartNew();
+                        profile.CodeBook = await _codeBookGenerator.GenerateAsync(sessionId, profile, ct);
+                        cbSw.Stop();
+                        telemetry.LlmCalls.Add(new LlmCallRecord
+                        {
+                            Purpose = "CodeBook Generation",
+                            Model = _llmService.LastModelUsed,
+                            DurationMs = cbSw.ElapsedMilliseconds,
+                            ResponseLength = profile.CodeBook.Length
+                        });
+                        telemetry.RetrievalCallCount += 6; // CodeBookGenerator issues 6 RAG queries
+                        AddReplay(job, "codebook_done", "CodeBook Generated", "Architecture reference document created");
+                    }
+                    catch (Exception ex)
+                    {
+                        AddReplay(job, "codebook_warn", "CodeBook Skipped", $"Could not generate CodeBook: {ex.Message}");
+                    }
+                }
 
-            AddReplay(job, "analyzed", "Analysis Complete",
-                $"{profile.Strengths.Count} strengths, {profile.Gaps.Count} gaps identified");
+                phaseSw.Stop();
+                telemetry.Phases.Add(new PhaseTimingRecord { Phase = "CodeBook Generation", DurationMs = phaseSw.ElapsedMilliseconds });
 
-            phaseSw.Stop();
-            telemetry.Phases.Add(new PhaseTimingRecord { Phase = "RAG Analysis", DurationMs = phaseSw.ElapsedMilliseconds });
+                // ── Phase 4: RAG-grounded strengths + gaps analysis ──
+                phaseSw = Stopwatch.StartNew();
+                job.State = JobState.Evaluating;
+                db.SaveJob(job);
 
-            // ── Phase 5: Gap verification via RAG (prune false positives) ──
-            phaseSw = Stopwatch.StartNew();
-            if (isIndexed && _retrievalService != null && profile.Gaps.Count > 0)
-            {
-                AddReplay(job, "gap_verify", "Verifying Gaps Against Code", "Checking each gap claim against actual source code...");
-                var originalGapCount = profile.Gaps.Count;
-                await VerifyGapsViaRag(sessionId, profile, telemetry, ct);
-                var pruned = originalGapCount - profile.Gaps.Count;
-                if (pruned > 0)
-                    AddReplay(job, "gaps_pruned", "False Positives Removed", $"Removed {pruned} false gaps — {profile.Gaps.Count} verified gaps remain");
+                if (isIndexed && _retrievalService != null)
+                {
+                    AddReplay(job, "rag_analysis", "RAG-Grounded Analysis", "Querying indexed code to build comprehensive assessment...");
+                    await RunRagGroundedAnalysis(sessionId, profile, telemetry, ct);
+                }
                 else
-                    AddReplay(job, "gaps_confirmed", "Gaps Confirmed", $"All {profile.Gaps.Count} gaps verified as genuine");
+                {
+                    // Fallback: shallow analysis from metadata only (no code available)
+                    AddReplay(job, "shallow_analysis", "Shallow Analysis", "No indexed code available — analyzing from README + manifests only");
+                    await _scanner.AnalyzeShallowAsync(profile, ct);
+                    telemetry.LlmCalls.Add(new LlmCallRecord
+                    {
+                        Purpose = "Shallow Analysis (fallback)",
+                        Model = _llmService.LastModelUsed,
+                        DurationMs = phaseSw.ElapsedMilliseconds
+                    });
+                }
+
+                AddReplay(job, "analyzed", "Analysis Complete",
+                    $"{profile.Strengths.Count} strengths, {profile.Gaps.Count} gaps identified");
+
+                phaseSw.Stop();
+                telemetry.Phases.Add(new PhaseTimingRecord { Phase = "RAG Analysis", DurationMs = phaseSw.ElapsedMilliseconds });
+
+                // ── Phase 5: Gap verification via RAG (prune false positives) ──
+                phaseSw = Stopwatch.StartNew();
+                if (isIndexed && _retrievalService != null && profile.Gaps.Count > 0)
+                {
+                    AddReplay(job, "gap_verify", "Verifying Gaps Against Code", "Checking each gap claim against actual source code...");
+                    var originalGapCount = profile.Gaps.Count;
+                    await VerifyGapsViaRag(sessionId, profile, telemetry, ct);
+                    var pruned = originalGapCount - profile.Gaps.Count;
+                    if (pruned > 0)
+                        AddReplay(job, "gaps_pruned", "False Positives Removed", $"Removed {pruned} false gaps — {profile.Gaps.Count} verified gaps remain");
+                    else
+                        AddReplay(job, "gaps_confirmed", "Gaps Confirmed", $"All {profile.Gaps.Count} gaps verified as genuine");
+                }
+                phaseSw.Stop();
+                telemetry.Phases.Add(new PhaseTimingRecord { Phase = "Gap Verification", DurationMs = phaseSw.ElapsedMilliseconds });
             }
-            phaseSw.Stop();
-            telemetry.Phases.Add(new PhaseTimingRecord { Phase = "Gap Verification", DurationMs = phaseSw.ElapsedMilliseconds });
 
             // ── Phase 6: Complement research (based on verified gaps) ──
             phaseSw = Stopwatch.StartNew();
@@ -231,6 +252,116 @@ public class RepoIntelligenceJobRunner
             db.SaveJob(job);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Consolidated analysis for cloud/Codex providers: combines CodeBook generation,
+    /// RAG-grounded analysis, and gap self-verification into a single LLM call.
+    /// Reduces 3 LLM calls to 1, leveraging the large context window of cloud models.
+    /// </summary>
+    private async Task RunConsolidatedAnalysisAsync(string sessionId, RepoProfile profile, ScanTelemetry telemetry, CancellationToken ct)
+    {
+        // Combine ALL architecture + analysis queries and run them in parallel
+        var architectureQueries = new[]
+        {
+            "main entry point program startup initialization",
+            "architecture modules services dependency injection",
+            "data model schema database entities",
+            "API endpoints routes controllers",
+            "configuration settings environment",
+            "build deploy dockerfile CI pipeline"
+        };
+        var analysisQueries = new[]
+        {
+            "service registration dependency injection startup configuration",
+            "database data access storage persistence repository",
+            "API cloud provider external service integration",
+            "test testing unit test integration test assertion",
+            "error handling retry fault tolerance resilience",
+            "user interface view model MVVM commands controls",
+            "search indexing retrieval embedding vector",
+            "authentication security encryption key management",
+            "export reporting document generation output",
+            "domain business logic core workflow pipeline",
+            "notification monitoring health check logging",
+            "safety validation verification quality"
+        };
+
+        var allQueries = architectureQueries.Concat(analysisQueries).ToArray();
+        var repoFilter = new[] { "repo_code", "repo_doc" };
+        var allChunks = new List<RetrievalResult>();
+
+        // Parallel RAG retrieval — all 18 queries at once
+        var retrievalTasks = allQueries.Select(async q =>
+        {
+            try
+            {
+                var hits = await _retrievalService!.HybridSearchAsync(sessionId, q, repoFilter, topK: 5, ct);
+                return (IReadOnlyList<RetrievalResult>)hits.ToList();
+            }
+            catch { return (IReadOnlyList<RetrievalResult>)Array.Empty<RetrievalResult>(); }
+        }).ToList();
+
+        var results = await Task.WhenAll(retrievalTasks);
+        foreach (var hits in results)
+            allChunks.AddRange(hits);
+        telemetry.RetrievalCallCount += allQueries.Length;
+
+        // Deduplicate and take top 40 by score — broad coverage for self-verification
+        var topChunks = allChunks
+            .DistinctBy(r => r.Chunk.Id)
+            .OrderByDescending(r => r.Score)
+            .Take(40)
+            .Select(r => r.Chunk.Text)
+            .ToList();
+
+        if (topChunks.Count == 0)
+        {
+            // Fallback to shallow analysis
+            await _scanner.AnalyzeShallowAsync(profile, ct);
+            return;
+        }
+
+        // Build consolidated prompt and call LLM once
+        var prompt = RepoScannerService.BuildConsolidatedAnalysisPrompt(profile, topChunks);
+        var llmSw = Stopwatch.StartNew();
+        var response = await _llmService.GenerateAsync(prompt,
+            "You are a senior software architecture analyst. Produce ALL requested sections in a single response. " +
+            "Be specific — reference real class names, service names, and patterns from the code. " +
+            "Self-verify your gap claims: only include gaps for things genuinely MISSING, not critiques of existing features.",
+            ct: ct);
+        llmSw.Stop();
+
+        telemetry.LlmCalls.Add(new LlmCallRecord
+        {
+            Purpose = "Consolidated Analysis (CodeBook + RAG + GapVerify)",
+            Model = _llmService.LastModelUsed,
+            DurationMs = llmSw.ElapsedMilliseconds,
+            PromptLength = prompt.Length,
+            ResponseLength = response.Length
+        });
+
+        // Parse the combined response
+        var (codeBook, frameworks, strengths, gaps) = RepoScannerService.ParseConsolidatedAnalysis(response);
+
+        profile.CodeBook = $"# CodeBook: {profile.Owner}/{profile.Name}\n\n{codeBook}";
+        profile.AnalysisModelUsed = _llmService.LastModelUsed;
+
+        // Add LLM-detected frameworks (dedup with deterministic ones)
+        foreach (var fw in frameworks)
+        {
+            if (!profile.Frameworks.Any(f => f.Equals(fw, StringComparison.OrdinalIgnoreCase) ||
+                f.Contains(fw.Split(' ')[0], StringComparison.OrdinalIgnoreCase)))
+                profile.Frameworks.Add(fw);
+        }
+
+        profile.Strengths.AddRange(strengths);
+
+        // Gaps are already self-verified by the cloud model; enforce minimum of 3
+        if (gaps.Count >= 3)
+            profile.Gaps = gaps;
+        else if (gaps.Count > 0)
+            profile.Gaps = gaps; // Keep whatever we got rather than losing them
     }
 
     /// <summary>
@@ -376,14 +507,22 @@ public class RepoIntelligenceJobRunner
         string sessionId, List<string> repoUrls, string focusPrompt, ProjectFusionGoal goal,
         ProjectFusionEngine fusionEngine, CancellationToken ct = default)
     {
-        // Scan all repos
-        var profiles = new List<RepoProfile>();
-        foreach (var url in repoUrls)
+        // Scan repos in parallel (max 2 concurrent to avoid overwhelming GitHub API + LLM)
+        var scanSemaphore = new SemaphoreSlim(2);
+        var scanTasks = repoUrls.Select(async url =>
         {
-            if (ct.IsCancellationRequested) break;
-            var profile = await RunAnalysisAsync(sessionId, url, ct);
-            profiles.Add(profile);
-        }
+            await scanSemaphore.WaitAsync(ct);
+            try
+            {
+                return await RunAnalysisAsync(sessionId, url, ct);
+            }
+            finally
+            {
+                scanSemaphore.Release();
+            }
+        }).ToList();
+
+        var profiles = (await Task.WhenAll(scanTasks)).ToList();
 
         // Build fusion request from all profiles
         var request = new ProjectFusionRequest

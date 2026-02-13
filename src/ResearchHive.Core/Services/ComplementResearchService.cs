@@ -75,82 +75,63 @@ public class ComplementResearchService
 
         if (searchTopics.Count == 0) return complements;
 
-        var searchResults = new List<(string topic, List<string> urls)>();
-        foreach (var topic in searchTopics)
+        // Parallel web searches — each topic is an independent web query
+        var searchSemaphore = new SemaphoreSlim(4); // Limit concurrent web searches for courtesy
+        var searchTasks = searchTopics.Select(async topic =>
         {
-            if (ct.IsCancellationRequested) break;
-            var query = $"{profile.PrimaryLanguage} {topic} library github stars:>100";
+            if (ct.IsCancellationRequested) return ((string topic, List<string> urls)?)null;
+            await searchSemaphore.WaitAsync(ct);
             try
             {
-                LastSearchCallCount++;
+                var query = $"{profile.PrimaryLanguage} {topic} library github stars:>100";
                 var urls = await _searchService.SearchAsync(query, "DuckDuckGo",
                     "https://duckduckgo.com/?q={query}", ct: ct);
-                searchResults.Add((topic, urls.Take(5).ToList()));
+                return ((string, List<string>)?)(topic, urls.Take(5).ToList());
             }
             catch
             {
-                // Fall through — search failures are non-fatal
+                return null; // Fall through — search failures are non-fatal
             }
-        }
+            finally
+            {
+                searchSemaphore.Release();
+            }
+        }).ToList();
+
+        var searchTaskResults = await Task.WhenAll(searchTasks);
+        var searchResults = searchTaskResults.Where(r => r != null).Select(r => r!.Value).ToList();
+        LastSearchCallCount = searchResults.Count;
 
         if (searchResults.Count == 0) return complements;
 
-        // Enrich GitHub URLs with real descriptions before LLM evaluation (parallel per topic)
-        var enrichedResults = new List<(string topic, List<(string url, string description)> entries)>();
-        foreach (var (topic, urls) in searchResults)
+        // Enrich GitHub URLs with real descriptions before LLM evaluation (all topics in parallel)
+        var enrichTasks = searchResults.Select(async sr =>
         {
-            LastEnrichCallCount += urls.Count;
-            var enrichTasks = urls.Select(async url => (url, desc: await EnrichGitHubUrlAsync(url, ct))).ToList();
-            var entries = (await Task.WhenAll(enrichTasks)).ToList();
-            enrichedResults.Add((topic, entries));
-        }
+            var urlTasks = sr.Item2.Select(async url => (url, desc: await EnrichGitHubUrlAsync(url, ct))).ToList();
+            var entries = (await Task.WhenAll(urlTasks)).ToList();
+            return (topic: sr.Item1, entries);
+        }).ToList();
 
-        // Build LLM prompt to evaluate the discovered projects
-        var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"I'm analyzing the GitHub repo **{profile.Owner}/{profile.Name}** ({profile.PrimaryLanguage}).");
-        sb.AppendLine($"Purpose: {profile.Description}");
-        sb.AppendLine();
-        sb.AppendLine("I found these potential complementary projects from web search.");
-        sb.AppendLine("Each URL includes a description where available — use these descriptions for accuracy.");
-        sb.AppendLine("Do NOT invent or hallucinate project names or descriptions. Only use information provided here.");
-        sb.AppendLine();
-        foreach (var (topic, entries) in enrichedResults)
-        {
-            sb.AppendLine($"### Topic: {topic}");
-            foreach (var (url, desc) in entries)
-            {
-                if (!string.IsNullOrEmpty(desc))
-                    sb.AppendLine($"  - {url} — {desc}");
-                else
-                    sb.AppendLine($"  - {url}");
-            }
-            sb.AppendLine();
-        }
-        sb.AppendLine($"Identify at least {MinimumComplements} complementary projects from the URLs above, ranked by relevance.");
-        sb.AppendLine("Pick the BEST option per topic. If multiple topics yield the same project, pick additional alternatives.");
-        sb.AppendLine("For each, respond in this exact format:");
-        sb.AppendLine();
-        sb.AppendLine("## Complement");
-        sb.AppendLine("- Name: <project name>");
-        sb.AppendLine("- Url: <project url>");
-        sb.AppendLine("- Purpose: <one sentence>");
-        sb.AppendLine("- WhatItAdds: <what it specifically adds to the target repo>");
-        sb.AppendLine("- Category: <Testing|Performance|Security|Documentation|Monitoring|DevOps|UI|DataAccess|Other>");
-        sb.AppendLine("- License: <license if known, else Unknown>");
-        sb.AppendLine("- Maturity: <Mature|Growing|Early|Unknown>");
+        var enrichedResults = (await Task.WhenAll(enrichTasks)).ToList();
+        LastEnrichCallCount = enrichedResults.Sum(r => r.entries.Count);
+
+        // Use JSON-structured prompt for reliable parsing (especially helps Ollama)
+        var jsonPrompt = RepoScannerService.BuildJsonComplementPrompt(profile, enrichedResults, MinimumComplements);
 
         var llmSw = Stopwatch.StartNew();
-        var response = await _llmService.GenerateAsync(sb.ToString(),
-            $"You are a software ecosystem analyst. Identify at least {MinimumComplements} complementary projects ranked by relevance. " +
-            "Be specific about what each adds. Ensure diversity across categories. " +
-            "IMPORTANT: Use ONLY the project names and descriptions provided in the search results. " +
-            "Do NOT invent project names that don't appear in the URLs. " +
-            "If a URL is from GitHub, derive the project name from the URL path (e.g., github.com/owner/repo → repo).",
+        var response = await _llmService.GenerateJsonAsync(jsonPrompt,
+            $"You are a software ecosystem analyst. Return a valid JSON object with a 'complements' array. " +
+            $"Include at least {MinimumComplements} complementary projects ranked by relevance. " +
+            "Ensure diversity across categories. Use ONLY projects from the URLs provided.",
             ct: ct);
         llmSw.Stop();
         LastLlmDurationMs = llmSw.ElapsedMilliseconds;
 
-        complements = ParseComplements(response);
+        // Try JSON parsing first (preferred), fall back to markdown parsing
+        complements = RepoScannerService.ParseJsonComplements(response);
+        if (complements.Count == 0)
+            complements = ParseComplements(response);
+
         return complements;
     }
 

@@ -3,6 +3,32 @@
 All changes are tracked in `CAPABILITY_MAP.md` (Change Log section) for granular file-level detail.
 This file provides a high-level summary per milestone.
 
+## 2026-02-13 — Phase 16: Smart Pipeline — Codex Consolidation, Ollama JSON Output, Parallelism
+### Codex Call Consolidation (4 → 2 LLM calls for cloud providers)
+- **Consolidated analysis**: For cloud/Codex providers (`IsLargeContextProvider`), CodeBook + RAG Analysis + Gap Verification combined into 1 LLM call with self-verification, reducing 3 calls to 1
+- **Intelligent routing**: `LlmService.IsLargeContextProvider` property determines pipeline mode — CloudOnly and CloudPrimary use consolidated, LocalOnly and LocalWithCloudFallback use separate calls
+- **Consolidated prompt**: `BuildConsolidatedAnalysisPrompt` sends all 40 deduplicated chunks (18 RAG queries: 6 architecture + 12 analysis) in one prompt requesting CodeBook + Frameworks + Strengths + self-verified Gaps
+- **Consolidated parser**: `ParseConsolidatedAnalysis` extracts all four sections from a single response, preserving ### subheadings within the CodeBook section
+- **Separate pipeline preserved**: Ollama/local models still use 3 separate calls (CodeBook → Analysis → Gap Verification) optimized for small context windows
+
+### Ollama Structured Output (JSON format enforcement)
+- **`GenerateJsonAsync` method**: New LlmService method that adds `format: "json"` to Ollama API requests, enforcing valid JSON output from smaller models
+- **JSON complement evaluation**: Complement prompts now request JSON output with explicit schema, parsed by `ParseJsonComplements` — eliminates the "5 logging libraries" problem
+- **Fallback parsing**: JSON parsing attempted first; if it fails, falls back to existing markdown `ParseComplements` parser — backward compatible
+- **Diversity enforcement**: JSON complement prompt explicitly requires category diversity and derives project names from URLs only
+
+### Parallelism (5 sequential operations fixed)
+- **Web search parallelism** (HIGH): `ComplementResearchService` web searches now parallel with `SemaphoreSlim(4)` — saves 24-64s for 10 topics
+- **Web enrichment parallelism**: GitHub URL enrichment flattened to single `Task.WhenAll` across all topics (was sequential per topic)
+- **CodeBook RAG parallelism**: 6 architecture queries now parallel via `Task.WhenAll` — saves 3-6s
+- **Metadata scan parallelism**: 4 initial GitHub API calls (repo, languages, readme, root contents) now parallel — saves 2-3s
+- **File indexing parallelism**: `RepoIndexService` file reading uses `Parallel.ForEachAsync` (max 8 threads) with `ConcurrentBag` — handles 100+ file repos efficiently
+- **Multi-scan parallelism**: `RunMultiScanFusionAsync` scans repos in parallel with `SemaphoreSlim(2)` concurrency limit — N×60s → ~60s
+
+### Tests
+- 22 new tests: consolidated prompt builder (4), consolidated parser (5), JSON complement prompt/parser (5), IsLargeContextProvider routing (4), backward compatibility (3), real-world response (1)
+- **Tests**: 391 → 413 (411 passed, 2 skipped, 0 failed)
+
 ## 2026-02-12 — Phase 15: Pipeline Telemetry, Framework Detection & Parallelism
 - **LLM call tracking**: Full `ScanTelemetry` model — tracks every LLM call (purpose, model, duration, prompt/response length), phase timing, RAG query count, web search count, GitHub API call count
 - **Pipeline instrumentation**: Every phase in `RepoIntelligenceJobRunner.RunAnalysisAsync` wrapped with `Stopwatch` timing; all 4 LLM calls individually timed

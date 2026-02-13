@@ -46,6 +46,15 @@ public class LlmService
     /// <summary>The model name used in the most recent LLM call. Null if no call has been made yet.</summary>
     public string? LastModelUsed { get; private set; }
 
+    /// <summary>
+    /// True when the active routing strategy targets a cloud/Codex provider with large context windows (&gt;32K).
+    /// Used by the scan pipeline to decide whether to consolidate multiple LLM calls into one.
+    /// </summary>
+    public bool IsLargeContextProvider =>
+        IsCodexOAuthActive ||
+        _settings.Routing == RoutingStrategy.CloudOnly ||
+        _settings.Routing == RoutingStrategy.CloudPrimary;
+
     /// <summary>Notify subscribers of Codex events from the last call.</summary>
     private void RaiseCodexActivity()
     {
@@ -85,7 +94,26 @@ public class LlmService
         return result;
     }
 
-    private async Task<LlmResponse> RouteGenerationAsync(string prompt, string? systemPrompt, int? maxTokens, CancellationToken ct)
+    /// <summary>
+    /// Generate with JSON format enforcement. For Ollama, this adds the <c>format: "json"</c>
+    /// parameter to ensure valid JSON output. Cloud providers handle JSON naturally via prompt instructions.
+    /// Use this when the prompt requests structured JSON output (e.g., complement evaluation, analysis).
+    /// </summary>
+    public async Task<string> GenerateJsonAsync(string prompt, string? systemPrompt = null, int? maxTokens = null, CancellationToken ct = default)
+    {
+        var result = await RouteGenerationAsync(prompt, systemPrompt, maxTokens, ct, useJsonFormat: true);
+
+        if (result.WasTruncated && !maxTokens.HasValue)
+        {
+            var retryTokens = Math.Min(8000, (maxTokens ?? 4000) * 2);
+            result = await RouteGenerationAsync(prompt, systemPrompt, retryTokens, ct, useJsonFormat: true);
+        }
+
+        LastModelUsed = result.ModelName;
+        return result.Text;
+    }
+
+    private async Task<LlmResponse> RouteGenerationAsync(string prompt, string? systemPrompt, int? maxTokens, CancellationToken ct, bool useJsonFormat = false)
     {
         var routing = _settings.Routing;
 
@@ -103,7 +131,7 @@ public class LlmService
         {
             case RoutingStrategy.LocalOnly:
             {
-                var localResult = await TryOllamaWithMetadata(prompt, systemPrompt, maxTokens, ct);
+                var localResult = await TryOllamaWithMetadata(prompt, systemPrompt, maxTokens, ct, useJsonFormat);
                 if (localResult != null) return localResult;
                 return unavailable("[LLM_UNAVAILABLE] Ollama is not running or did not respond. " +
                        "Start Ollama with a model loaded, or switch to a cloud provider in Settings.");
@@ -120,7 +148,7 @@ public class LlmService
             case RoutingStrategy.CloudPrimary:
             {
                 var cpResult = await TryCloudWithMetadata(prompt, systemPrompt, maxTokens, ct)
-                    ?? await TryOllamaWithMetadata(prompt, systemPrompt, maxTokens, ct);
+                    ?? await TryOllamaWithMetadata(prompt, systemPrompt, maxTokens, ct, useJsonFormat);
                 if (cpResult != null) return cpResult;
                 return unavailable("[LLM_UNAVAILABLE] Neither cloud provider nor Ollama responded. " +
                        $"Cloud: {_settings.PaidProvider}, Auth: {_settings.ChatGptPlusAuth}. Check both connections.");
@@ -129,7 +157,7 @@ public class LlmService
             case RoutingStrategy.LocalWithCloudFallback:
             default:
             {
-                var lcResult = await TryOllamaWithMetadata(prompt, systemPrompt, maxTokens, ct)
+                var lcResult = await TryOllamaWithMetadata(prompt, systemPrompt, maxTokens, ct, useJsonFormat)
                     ?? await TryCloudWithMetadata(prompt, systemPrompt, maxTokens, ct);
                 if (lcResult != null) return lcResult;
                 return unavailable("[LLM_UNAVAILABLE] Neither Ollama nor cloud provider responded. " +
@@ -404,7 +432,7 @@ public class LlmService
 
     #region Routing helpers
 
-    private async Task<LlmResponse?> TryOllamaWithMetadata(string prompt, string? systemPrompt, int? maxTokens, CancellationToken ct)
+    private async Task<LlmResponse?> TryOllamaWithMetadata(string prompt, string? systemPrompt, int? maxTokens, CancellationToken ct, bool useJsonFormat = false)
     {
         if (!_ollamaAvailable) return null;
 
@@ -412,7 +440,7 @@ public class LlmService
         {
             try
             {
-                var result = await CallOllamaWithMetadataAsync(prompt, systemPrompt, maxTokens, ct);
+                var result = await CallOllamaWithMetadataAsync(prompt, systemPrompt, maxTokens, ct, useJsonFormat);
                 if (result != null) return result;
                 break;
             }
@@ -618,8 +646,8 @@ public class LlmService
         return doc.RootElement.TryGetProperty("response", out var resp) ? resp.GetString() : null;
     }
 
-    /// <summary>Ollama call with truncation detection via done_reason.</summary>
-    private async Task<LlmResponse?> CallOllamaWithMetadataAsync(string prompt, string? systemPrompt, int? maxTokens, CancellationToken ct)
+    /// <summary>Ollama call with truncation detection via done_reason. Supports JSON format enforcement.</summary>
+    private async Task<LlmResponse?> CallOllamaWithMetadataAsync(string prompt, string? systemPrompt, int? maxTokens, CancellationToken ct, bool useJsonFormat = false)
     {
         var options = new Dictionary<string, object>
         {
@@ -629,17 +657,22 @@ public class LlmService
         if (maxTokens.HasValue)
             options["num_predict"] = maxTokens.Value;
 
-        var request = new
+        // Build request body — use dictionary to conditionally add 'format' field for JSON mode
+        var requestBody = new Dictionary<string, object>
         {
-            model = _settings.SynthesisModel,
-            prompt = prompt,
-            system = systemPrompt ?? "You are a research assistant. Provide thorough, evidence-based answers with clear citations.",
-            stream = false,
-            options
+            ["model"] = _settings.SynthesisModel,
+            ["prompt"] = prompt,
+            ["system"] = systemPrompt ?? "You are a research assistant. Provide thorough, evidence-based answers with clear citations.",
+            ["stream"] = false,
+            ["options"] = options
         };
 
+        // Ollama JSON format mode: ensures model output is valid JSON (helps smaller models produce reliable structured output)
+        if (useJsonFormat)
+            requestBody["format"] = "json";
+
         var response = await _httpClient.PostAsJsonAsync(
-            $"{_settings.OllamaBaseUrl}/api/generate", request, ct);
+            $"{_settings.OllamaBaseUrl}/api/generate", requestBody, ct);
 
         if (!response.IsSuccessStatusCode)
         {

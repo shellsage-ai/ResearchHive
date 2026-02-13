@@ -46,8 +46,16 @@ public class RepoScannerService
         var (owner, repo) = ParseRepoUrl(repoUrl);
         var profile = new RepoProfile { RepoUrl = repoUrl, Owner = owner, Name = repo };
 
-        // 1. Fetch repo metadata
-        var repoJson = await FetchJsonAsync($"https://api.github.com/repos/{owner}/{repo}", ct);
+        // Parallel initial API calls — repo metadata, languages, readme, root contents are all independent
+        var repoJsonTask = FetchJsonAsync($"https://api.github.com/repos/{owner}/{repo}", ct);
+        var langsJsonTask = FetchJsonAsync($"https://api.github.com/repos/{owner}/{repo}/languages", ct);
+        var readmeJsonTask = FetchJsonAsync($"https://api.github.com/repos/{owner}/{repo}/readme", ct);
+        var rootContentsTask = FetchJsonArrayAsync($"https://api.github.com/repos/{owner}/{repo}/contents/", ct);
+
+        await Task.WhenAll(repoJsonTask, langsJsonTask, readmeJsonTask, rootContentsTask);
+
+        // 1. Process repo metadata
+        var repoJson = await repoJsonTask;
         if (repoJson != null)
         {
             var rj = repoJson.Value;
@@ -62,13 +70,13 @@ public class RepoScannerService
                 profile.Topics = topics.EnumerateArray().Select(t => t.GetString() ?? "").Where(t => t.Length > 0).ToList();
         }
 
-        // 2. Fetch languages
-        var langsJson = await FetchJsonAsync($"https://api.github.com/repos/{owner}/{repo}/languages", ct);
+        // 2. Process languages
+        var langsJson = await langsJsonTask;
         if (langsJson != null)
             profile.Languages = langsJson.Value.EnumerateObject().Select(p => p.Name).ToList();
 
-        // 3. Fetch README
-        var readmeJson = await FetchJsonAsync($"https://api.github.com/repos/{owner}/{repo}/readme", ct);
+        // 3. Process README
+        var readmeJson = await readmeJsonTask;
         if (readmeJson != null)
         {
             var content = GetString(readmeJson, "content");
@@ -78,7 +86,7 @@ public class RepoScannerService
         }
 
         // 4. Detect and fetch dependency files
-        var rootContents = await FetchJsonArrayAsync($"https://api.github.com/repos/{owner}/{repo}/contents/", ct);
+        var rootContents = await rootContentsTask;
         var depFiles = new Dictionary<string, string>();
         var knownManifests = new[] { "package.json", "requirements.txt", "Cargo.toml", "go.mod", "Gemfile", "pom.xml", "build.gradle", "pubspec.yaml", "composer.json" };
 
@@ -608,5 +616,236 @@ public class RepoScannerService
                 gaps.Add(line[2..].Trim());
         }
         return gaps;
+    }
+
+    // ─── Consolidated Analysis (Cloud/Codex — single call for CodeBook + Analysis + Gap Verification) ───
+
+    /// <summary>
+    /// Build a consolidated prompt that combines CodeBook generation, strengths/gaps analysis,
+    /// and gap self-verification into a single LLM call. For use with large-context cloud models
+    /// (Codex, GPT-4, Claude, etc.) to reduce 3 LLM calls to 1.
+    /// </summary>
+    public static string BuildConsolidatedAnalysisPrompt(RepoProfile profile, IReadOnlyList<string> retrievedChunks)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("You are a senior software architect performing a comprehensive analysis of a GitHub repository.");
+        sb.AppendLine("Analyze the ACTUAL SOURCE CODE provided below and produce ALL sections in a single response.");
+        sb.AppendLine();
+        sb.AppendLine($"## Repository: {profile.Owner}/{profile.Name}");
+        sb.AppendLine($"- Description: {profile.Description}");
+        sb.AppendLine($"- Primary Language: {profile.PrimaryLanguage}");
+        sb.AppendLine($"- Languages: {string.Join(", ", profile.Languages)}");
+        sb.AppendLine($"- Dependencies ({profile.Dependencies.Count}): {string.Join(", ", profile.Dependencies.Select(d => d.Name))}");
+        sb.AppendLine($"- Indexed: {profile.IndexedFileCount} files, {profile.IndexedChunkCount} chunks");
+        sb.AppendLine();
+
+        sb.AppendLine("## Source Code Excerpts:");
+        sb.AppendLine();
+        for (int i = 0; i < retrievedChunks.Count; i++)
+        {
+            sb.AppendLine($"### Excerpt {i + 1}:");
+            sb.AppendLine(retrievedChunks[i]);
+            sb.AppendLine("---");
+        }
+        sb.AppendLine();
+
+        sb.AppendLine("=== PRODUCE ALL FOUR SECTIONS BELOW ===");
+        sb.AppendLine();
+        sb.AppendLine("## CodeBook");
+        sb.AppendLine("A concise architecture reference document (under 1500 words) covering:");
+        sb.AppendLine("1. **Purpose** — What the project does");
+        sb.AppendLine("2. **Architecture Overview** — Layers, modules, key patterns (MVC, CQRS, etc.)");
+        sb.AppendLine("3. **Key Abstractions** — Important classes, interfaces with one-line descriptions");
+        sb.AppendLine("4. **Data Flow** — How data moves through the system");
+        sb.AppendLine("5. **Extension Points** — How a developer would add features");
+        sb.AppendLine("6. **Build & Run** — Commands or steps to build and run");
+        sb.AppendLine("7. **Notable Design Decisions**");
+        sb.AppendLine("Reference actual class/function names from the code excerpts.");
+        sb.AppendLine();
+        sb.AppendLine("## Frameworks");
+        sb.AppendLine("- framework1");
+        sb.AppendLine("- framework2");
+        sb.AppendLine();
+        sb.AppendLine("## Strengths");
+        sb.AppendLine("- strength1 (cite specific code evidence: class names, patterns, services)");
+        sb.AppendLine("(list at least 5 specific strengths based on what the code actually implements)");
+        sb.AppendLine();
+        sb.AppendLine("## Gaps");
+        sb.AppendLine("- gap1 (self-verified: explain why this is genuinely missing from the code)");
+        sb.AppendLine("(list at least 5 gaps — only MISSING capabilities, not critiques of existing features)");
+        sb.AppendLine();
+        sb.AppendLine("CRITICAL RULES:");
+        sb.AppendLine("- Be specific — reference real class names, service names, and patterns from the code");
+        sb.AppendLine("- Strengths MUST cite specific code evidence (e.g., 'LlmService supports 9 providers')");
+        sb.AppendLine("- Gaps MUST be MISSING things (no tests, no CI, no docs) — NOT critiques of existing features");
+        sb.AppendLine("  Bad gap: 'The search engine assumes X which limits Y' — this critiques something that EXISTS");
+        sb.AppendLine("  Good gap: 'No CI/CD pipeline configuration files found' — this identifies something ABSENT");
+        sb.AppendLine("- Self-verify each gap: if the code excerpts show the feature exists, REMOVE that gap");
+        sb.AppendLine("- Keep at least 5 verified gaps after self-verification");
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Parse the consolidated analysis response into CodeBook, Frameworks, Strengths, and Gaps.
+    /// The response contains all four sections: ## CodeBook, ## Frameworks, ## Strengths, ## Gaps.
+    /// </summary>
+    public static (string codeBook, List<string> frameworks, List<string> strengths, List<string> gaps) ParseConsolidatedAnalysis(string response)
+    {
+        var lines = response.Split('\n');
+        string? currentSection = null;
+        var codeBookSb = new System.Text.StringBuilder();
+        var frameworks = new List<string>();
+        var strengths = new List<string>();
+        var gaps = new List<string>();
+
+        foreach (var rawLine in lines)
+        {
+            var trimmed = rawLine.Trim();
+
+            // Detect ## level headers (not ### subheadings within CodeBook)
+            if (trimmed.StartsWith("## ") && !trimmed.StartsWith("### "))
+            {
+                if (trimmed.StartsWith("## CodeBook", StringComparison.OrdinalIgnoreCase))
+                    currentSection = "codebook";
+                else if (trimmed.StartsWith("## Frameworks", StringComparison.OrdinalIgnoreCase))
+                    currentSection = "frameworks";
+                else if (trimmed.StartsWith("## Strengths", StringComparison.OrdinalIgnoreCase))
+                    currentSection = "strengths";
+                else if (trimmed.StartsWith("## Gaps", StringComparison.OrdinalIgnoreCase))
+                    currentSection = "gaps";
+                else
+                    currentSection = null;
+                continue;
+            }
+
+            switch (currentSection)
+            {
+                case "codebook":
+                    codeBookSb.AppendLine(rawLine);
+                    break;
+                case "frameworks":
+                    if (trimmed.StartsWith("- ") && trimmed.Length > 2)
+                        frameworks.Add(trimmed[2..].Trim());
+                    break;
+                case "strengths":
+                    if (trimmed.StartsWith("- ") && trimmed.Length > 2)
+                        strengths.Add(trimmed[2..].Trim());
+                    break;
+                case "gaps":
+                    if (trimmed.StartsWith("- ") && trimmed.Length > 2)
+                        gaps.Add(trimmed[2..].Trim());
+                    break;
+            }
+        }
+
+        return (codeBookSb.ToString().Trim(), frameworks, strengths, gaps);
+    }
+
+    // ─── JSON-structured prompts for Ollama (smaller models benefit from format enforcement) ───
+
+    /// <summary>
+    /// Build a complement evaluation prompt that requests JSON output.
+    /// Used with <see cref="LlmService.GenerateJsonAsync"/> to enforce structured output from Ollama.
+    /// Cloud models also produce cleaner output with explicit JSON schema requests.
+    /// </summary>
+    public static string BuildJsonComplementPrompt(RepoProfile profile, IReadOnlyList<(string topic, List<(string url, string description)> entries)> enrichedResults, int minimumComplements)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"Analyze the GitHub repo **{profile.Owner}/{profile.Name}** ({profile.PrimaryLanguage}).");
+        sb.AppendLine($"Purpose: {profile.Description}");
+        sb.AppendLine();
+        sb.AppendLine("Below are potential complementary projects found via web search.");
+        sb.AppendLine("Select the BEST complementary projects that fill different gaps/needs.");
+        sb.AppendLine("IMPORTANT: Use ONLY projects from the URLs provided. Do NOT invent project names.");
+        sb.AppendLine("Ensure DIVERSITY — pick projects from different categories (Testing, Security, DevOps, etc.).");
+        sb.AppendLine();
+
+        foreach (var (topic, entries) in enrichedResults)
+        {
+            sb.AppendLine($"### Topic: {topic}");
+            foreach (var (url, desc) in entries)
+            {
+                if (!string.IsNullOrEmpty(desc))
+                    sb.AppendLine($"  - {url} — {desc}");
+                else
+                    sb.AppendLine($"  - {url}");
+            }
+            sb.AppendLine();
+        }
+
+        sb.AppendLine($"Return a JSON object with exactly this structure (at least {minimumComplements} complements):");
+        sb.AppendLine(@"{
+  ""complements"": [
+    {
+      ""name"": ""project-name (from URL path)"",
+      ""url"": ""https://github.com/owner/repo"",
+      ""purpose"": ""one sentence description"",
+      ""what_it_adds"": ""what it specifically adds to the target repo"",
+      ""category"": ""Testing|Performance|Security|Documentation|Monitoring|DevOps|UI|DataAccess|Other"",
+      ""license"": ""MIT|Apache-2.0|Unknown"",
+      ""maturity"": ""Mature|Growing|Early|Unknown""
+    }
+  ]
+}");
+        sb.AppendLine();
+        sb.AppendLine("RULES:");
+        sb.AppendLine("- Pick the BEST option per topic. If multiple topics yield the same project, pick alternatives.");
+        sb.AppendLine("- Ensure category diversity — do NOT suggest multiple projects in the same category.");
+        sb.AppendLine("- Derive project names from URL paths (github.com/owner/repo → repo).");
+        sb.AppendLine("- Return ONLY valid JSON, no additional text.");
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Parse complement projects from JSON output (produced by GenerateJsonAsync).
+    /// Falls back to empty list if JSON parsing fails.
+    /// </summary>
+    public static List<ComplementProject> ParseJsonComplements(string json)
+    {
+        try
+        {
+            // Handle potential markdown code block wrapping
+            var cleaned = json.Trim();
+            if (cleaned.StartsWith("```")) cleaned = cleaned.Split('\n', 2).Length > 1 ? cleaned.Split('\n', 2)[1] : cleaned;
+            if (cleaned.EndsWith("```")) cleaned = cleaned[..cleaned.LastIndexOf("```")];
+            cleaned = cleaned.Trim();
+
+            using var doc = System.Text.Json.JsonDocument.Parse(cleaned);
+            var root = doc.RootElement;
+
+            if (!root.TryGetProperty("complements", out var arr) || arr.ValueKind != System.Text.Json.JsonValueKind.Array)
+                return new List<ComplementProject>();
+
+            var results = new List<ComplementProject>();
+            foreach (var item in arr.EnumerateArray())
+            {
+                var c = new ComplementProject
+                {
+                    Name = GetJsonString(item, "name"),
+                    Url = GetJsonString(item, "url"),
+                    Purpose = GetJsonString(item, "purpose"),
+                    WhatItAdds = GetJsonString(item, "what_it_adds"),
+                    Category = GetJsonString(item, "category"),
+                    License = GetJsonString(item, "license"),
+                    Maturity = GetJsonString(item, "maturity")
+                };
+                if (!string.IsNullOrEmpty(c.Name))
+                    results.Add(c);
+            }
+            return results;
+        }
+        catch
+        {
+            return new List<ComplementProject>();
+        }
+    }
+
+    private static string GetJsonString(System.Text.Json.JsonElement elem, string prop)
+    {
+        if (elem.TryGetProperty(prop, out var val) && val.ValueKind == System.Text.Json.JsonValueKind.String)
+            return val.GetString() ?? "";
+        return "";
     }
 }

@@ -37,15 +37,23 @@ public class CodeBookGenerator
     /// </summary>
     public async Task<string> GenerateAsync(string sessionId, RepoProfile profile, CancellationToken ct = default)
     {
-        // Pull top architecture-relevant chunks via hybrid search
+        // Pull top architecture-relevant chunks via parallel hybrid search
         var repoFilter = new[] { "repo_code", "repo_doc" };
         var allChunks = new List<RetrievalResult>();
 
-        foreach (var q in ArchitectureQueries)
+        // Parallel RAG retrieval — architecture queries are independent reads
+        var retrievalTasks = ArchitectureQueries.Select(async q =>
         {
-            var hits = await _retrieval.HybridSearchAsync(sessionId, q, repoFilter, topK: 5, ct);
+            try
+            {
+                return await _retrieval.HybridSearchAsync(sessionId, q, repoFilter, topK: 5, ct);
+            }
+            catch { return new List<RetrievalResult>(); }
+        }).ToList();
+
+        var retrievalResults = await Task.WhenAll(retrievalTasks);
+        foreach (var hits in retrievalResults)
             allChunks.AddRange(hits);
-        }
 
         // Deduplicate and take top 20 by score
         var topChunks = allChunks
