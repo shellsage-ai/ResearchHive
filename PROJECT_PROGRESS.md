@@ -1,11 +1,11 @@
 # ResearchHive — Project Progress
 
 ## Status
-- Current milestone: All milestones (1-9) + Phases 10-15 complete
+- Current milestone: All milestones (1-9) + Phases 10-25 complete
 - Build status: ✅ PASSING (0 errors)
-- Test baseline: 391 total — 389 passed, 2 skipped, 0 failures
-- Services: 37 registered (35 core + PdfIngestionService + NotificationService)
-- Last verified: Full test suite green
+- Test baseline: 597 total — 597 passed, 2 skipped, 0 failures
+- Services: 42 DI registrations (38 unique concrete services incl. interfaces + App.xaml.cs)
+- Last verified: Full test suite green (Phase 25 commit `fadf193`)
 
 ## Build / Run Commands
 ```
@@ -141,6 +141,96 @@ dotnet publish src/ResearchHive/ResearchHive.csproj -c Release -o publish/Resear
 - SearchEngineHealthEntry: Idle, Healthy, Degraded, Failed, Skipped states (5)
 - PdfExtractionResult model shape (1)
 - DeleteChunk with FTS cleanup (1)
+
+### Phase 12 — RAG-Grounded Repo Analysis ✅
+- Pipeline redesign: Scan(metadata only) → Clone+Index → CodeBook → RAG analysis(12 queries, 30 chunks) → Gap verification → Complements
+- Zero truncation: Removed all README/manifest truncation; full content preserved via chunked retrieval
+- Gap verification: Each gap claim checked against actual codebase via per-gap RAG queries; false positives pruned by LLM
+- 16 new tests (RagGroundedAnalysisTests.cs) — 357 total
+
+### Phase 13 — Model Attribution + Complement Enforcement ✅
+- Model attribution: Every AI-generated output tracks which LLM model produced it (`LlmResponse.ModelName`, domain model fields, DB persistence)
+- Full provider coverage: Ollama, Anthropic, Gemini, OpenAI-compat (5 providers), Codex CLI
+- Minimum 5 complements enforced with fallback categories
+- 23 new tests (ModelAttributionTests.cs) — 378 total
+
+### Phase 14 — Repo Scan Quality Fixes ✅
+- Deep .csproj discovery: Recurse 2 levels into `src/` and `tests/` directories
+- Gap quality enforcement: Explicit prompt instructions distinguishing REAL (missing capability) from FALSE (critique of existing) gaps
+- Minimum 3-gap rule, verification system prompt fix, GitHub URL enrichment, anti-hallucination prompts
+- 380 total tests
+
+### Phase 15 — Pipeline Telemetry, Framework Detection & Parallelism ✅
+- Full `ScanTelemetry` model tracking every LLM call, phase timing, RAG/web/API counts
+- Deterministic framework detection (`DetectFrameworkHints`): ~40 known packages → human-readable labels
+- RAG retrieval parallelism, GitHub enrichment parallelism
+- 11 new tests — 391 total
+
+### Phase 16 — Smart Pipeline: Codex Consolidation, JSON Output, Parallelism ✅
+- Codex call consolidation (4→2 LLM calls for cloud providers)
+- Ollama structured JSON output (`GenerateJsonAsync`)
+- 5 parallelism fixes (web search, enrichment, CodeBook RAG, metadata scan, multi-scan)
+- 22 new tests — 413 total
+
+### Phase 17 — Model Tiering, Agentic Codex, Infrastructure Hardening ✅
+- `ModelTier` enum (Default/Mini/Full) with `MiniModelMap` per provider
+- `GenerateAgenticAsync`: Single Codex call with web search for full analysis
+- `ILlmService`, `IRetrievalService`, `IBrowserSearchService` interfaces
+- `LlmCircuitBreaker`: Open/closed/half-open state machine with exponential backoff + jitter
+- Structured logging (`ILogger<T>`) + Microsoft.Extensions.Logging
+- 26 new tests — 439 total
+
+### Phase 18 — Agentic Timeout Fix, Cascade Removal, Ctrl+F Search ✅
+- Timeout forwarding fix for CodexCliService; remove cascade fallback (root cause of 9-min scans)
+- 3-way agentic result handling with graceful fallback
+- Ctrl+F Find overlay: floating search bar with match counter, prev/next, visual tree walk
+- 439 total tests
+
+### Phase 19 — Deterministic Fact Sheet Pipeline ✅
+- 7-layer pre-analysis pipeline: Package classification → Capability fingerprinting → Diagnostics → Type inference → Post-scan verification
+- `RepoFactSheetBuilder.cs` (~790 lines), `PostScanVerifier.cs` (~363 lines)
+- `RepoFactSheet`, `PackageEvidence`, `CapabilityFingerprint` models
+- 44 new tests — 485 total
+
+### Phase 20 — Tighten Fingerprints, Filter Docs, Fix Evidence Formatting ✅
+- Source-file filtering: Exclude .md/.txt/.yml/.json/.xml/.csproj from fingerprint scanning
+- Tightened ~15 fingerprint patterns to require specific usage, not generic mentions
+- Clean evidence formatting + anti-embellishment prompt rules
+- 7 new tests — 492 total
+
+### Phase 21 — Self-Referential Fix, Complement Diversity, Local Path Scanning ✅
+- Exclude scanner's own source files + test files from fingerprint detection
+- `MinimumComplementFloor(3)` with HARD/SOFT severity + category diversity enforcement
+- `IsLocalPath` multi-heuristic + `ScanLocalAsync` for local directory scanning
+- 51 new tests — 543 total
+
+### Phase 22 — App-Type Gap Pruning, Active-Package Rejection, Domain-Aware Search ✅
+- `PruneAppTypeInappropriateGaps`: Desktop→prune auth/Docker/middleware; DB contradiction→prune ORM
+- Active package + wrong-DB hard rejection for complements
+- `InferDomainSearchTopics()` derives queries from proven capabilities and app type
+- `BuildJsonComplementPrompt` injects PROJECT CONTEXT block + 4 anti-hallucination rules
+- 14 new tests — 557 total
+
+### Phase 23 — Dockerfile Gap Fix, Meta-Project Filter, Project Discovery ✅
+- `InjectConfirmedGaps` checks `GapsRemoved` before re-injecting
+- `IsMetaProjectNotUsableDirectly` filter for infrastructure engines
+- MinimumComplements 5→8, MinimumComplementFloor 3→5
+- `GitHubDiscoveryService` + Project Discovery UI panel (search/filter/batch scan)
+- Session navigation fix (clear SelectedSession on Settings/Home)
+- 12 new tests — 567 total
+
+### Phase 24 — Dynamic Anti-Hallucination Pipeline (4-Layer Filtering) ✅
+- Layer 1: Expanded models + 5 dynamic inference methods
+- Layer 2: Structured enrichment + 7 deterministic complement checks
+- Layer 3: LLM relevance check
+- Layer 4: Dynamic search topics (17 rules) + diverse categories
+- 30 new + 7 updated tests — 597 total
+
+### Phase 25 — Research Report Quality + Readability Overhaul ✅
+- Fix 6 root causes of shallow reports: iteration cap (1→2), citation label collisions, early-exit thresholds, sufficiency skip in sectional mode, expert-level search queries, target sources (5→8)
+- Report readability: All prompts instruct LLM to use **bold**, tables, blockquotes, `code`, structured lists
+- `ReportTemplateService` section instructions updated with per-section formatting guidance
+- 597 tests passing, 0 failures
 
 ## End-to-End Demo Checklist
 

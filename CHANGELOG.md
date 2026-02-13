@@ -3,8 +3,95 @@
 All changes are tracked in `CAPABILITY_MAP.md` (Change Log section) for granular file-level detail.
 This file provides a high-level summary per milestone.
 
-## 2026-02-13 — Phase 16: Smart Pipeline — Codex Consolidation, Ollama JSON Output, Parallelism
-### Codex Call Consolidation (4 → 2 LLM calls for cloud providers)
+## 2026-02-13 — Phase 25: Research Report Quality + Readability Overhaul
+### 6 Pipeline Bug Fixes (root causes of shallow, poorly-cited reports)
+- **Iteration cap raised**: Was force-capped at 1, now allows 2 — gap-focused refinement pass adds 3-6 high-value sources
+- **Sectional citation label collision fix** (HIGHEST IMPACT): `GetTargetedEvidenceForSectionAsync` was creating fresh `[1],[2]` labels per section, causing label collisions across sections (grounding would drop 60%→15%). Now reuses master labels via SourceId fallback + offsets truly-new labels beyond master count
+- **Tighter early-exit thresholds**: Coverage must reach ≥0.85 with all sub-questions answered, or ≥0.6 with target sources met + no unanswered sub-Qs (was ≥0.7 or sources≥target + 0.4)
+- **Sufficiency check runs in sectional mode**: Pre-grounding skip was based on monolithic draft, but sectional mode regenerates text differently — now always runs sufficiency when `SectionalReports = true`
+- **Expert-level search queries**: 5 targeted angles (comparative/architectural, quantitative/benchmark, decision-framework, case-study, expert/academic) instead of generic "5 diverse queries" prompt
+- **Default target sources 5→8**: Richer evidence base for complex topics
+
+### Report Readability Improvements
+- All prompts (monolithic `BuildSynthesisPrompt`, sectional per-section, executive summary) now instruct LLM to use **bold** for key terms, tables for comparisons, `>` blockquotes for takeaways, `` `code` `` formatting for technical terms, structured lists
+- `ReportTemplateService` section instructions updated with per-section formatting guidance (bold findings, comparison tables, blockquote conclusions)
+- All formatting renders natively via existing `MarkdownViewer` (bold, italic, tables, blockquotes, code inline all supported)
+- **Tests**: 597 passing, 0 failures
+
+## 2026-02-13 — Phase 24: Dynamic Anti-Hallucination Pipeline (4-Layer Filtering)
+### Layer 1 — Expanded Models + Dynamic Inference
+- `RepoFactSheet`: +DeploymentTarget, ArchitectureStyle, DomainTags, ProjectScale, InapplicableConcepts
+- `ComplementProject`: +Stars, IsArchived, LastPushed, RepoLanguage
+- `GitHubEnrichmentResult` class with `ToDescriptionString()`
+- 5 new inference methods in `RepoFactSheetBuilder` (all table-driven/deterministic)
+
+### Layer 2 — Structured Enrichment + 7 Deterministic Complement Checks
+- `EnrichGitHubUrlAsync` refactored to return `GitHubEnrichmentResult`
+- URL dedup via `NormalizeGitHubUrl` + seenUrls HashSet
+- `PostScanVerifier`: 7 new complement checks (archived, staleness 2yr/3yr, stars <10/<50, repo language vs ecosystem, inapplicable concepts)
+- `IsRepoLanguageCompatible` with 12 ecosystem language tables
+- `PruneAppTypeInappropriateGaps` rewritten with InapplicableConcepts matching
+
+### Layer 3 — LLM Relevance Check
+- `LlmRelevanceCheckAsync` sends full project identity + complements for verdict
+- Non-fatal (try/catch), respects MinimumComplementFloor
+
+### Layer 4 — Dynamic Search Topics
+- `InferDomainSearchTopics`: 17-rule table-driven (was 6 hardcoded if-blocks)
+- `InferDiverseCategories`: 9 categories filtered by inapplicable concepts
+- `BuildJsonComplementPrompt`: passes 8 additional fact sheet fields
+- **Tests**: 30 new, 7 updated — 597 total (597 pass, 2 skip)
+
+## 2026-02-13 — Phase 23: Dockerfile Gap Fix, Meta-Project Filter, Project Discovery
+- **Dockerfile gap re-injection fix**: `InjectConfirmedGaps` now checks `GapsRemoved` for deliberately-pruned items before re-injecting
+- **Meta-project filter**: `IsMetaProjectNotUsableDirectly` rejects infrastructure engines (dependabot-core/Ruby, renovate/Node) that aren't installable packages
+- **Complement tuning**: MinimumComplements 5→8, MinimumComplementFloor 3→5
+- **Project Discovery panel**: `GitHubDiscoveryService` (GitHub Search API), search/language-filter/min-stars UI, checkbox selection, one-click batch scan
+- **Session nav fix** (commit `341a145`): Clear `SelectedSession` on Settings/Home navigation so re-clicking a session works
+- **Tests**: 567 total (567 pass, 2 skip)
+
+## 2026-02-13 — Phase 22: App-Type Gap Pruning, Active-Package Rejection, Domain-Aware Search
+- **App-type gap pruning**: Desktop/WPF: prune auth/JWT/OAuth gaps; Desktop/console: prune Docker/K8s gaps; Desktop: prune middleware/API gateway gaps; DB contradiction: prune ORM/EF Core when using raw SQLite
+- **Active package rejection**: Hard-reject complements matching already-installed packages or suggesting contradicted DB tech
+- **Domain-aware search**: `InferDomainSearchTopics()` derives queries from proven capabilities (AI/LLM, RAG, Research, WPF, Resilience, Logging domains)
+- **Context-enhanced prompts**: `BuildJsonComplementPrompt` now injects PROJECT CONTEXT block + 4 new anti-hallucination rules
+- **Tests**: 14 new — 557 total (555 pass, 2 skip)
+
+## 2026-02-13 — Phase 21: Self-Referential Fix, Complement Diversity, Local Path Scanning
+- **Self-referential exclusion**: Scanner's own source files + test files excluded from fingerprint detection and `GetSourceCodeOnly`
+- **Complement floor + diversity**: `MinimumComplementFloor(3)` with HARD/SOFT severity; `GetComplementCategory` for 10-category classification; backfill from soft-reject pool
+- **Local directory scanning**: `IsLocalPath` multi-heuristic; `ScanLocalAsync` reads README/languages/manifests/git dates; `CloneOrUpdateAsync` passes through local paths
+- **UI update**: Placeholders show 'GitHub URL or C:\path\to\project'
+- **Tests**: 51 new — 543 total (541 pass, 2 skip)
+
+## 2026-02-13 — Phase 20: Tighten Fingerprints, Filter Docs, Fix Evidence Formatting
+- **Source-file filtering**: `DetectCapabilities` excludes .md, .txt, .yml, .json, .xml, .csproj, and 20+ non-source extensions
+- **Tightened ~15 fingerprint patterns**: OpenTelemetry, Benchmark, Plugin, Authentication, Integration tests, Circuit breaker, Retry logic, Rate limiting, RAG, Embedding, FTS, DPAPI, Citation, Logging, Swagger — all require specific usage patterns
+- **Clean evidence formatting**: `InjectProvenStrengths` produces 'Capability (verified in FileName.cs)' instead of raw regex
+- **Anti-embellishment prompt rules**: 3 new LLM rules preventing embellishment, unlisted capability claims, and vague evidence
+- **Tests**: 7 new — 492 total (490 pass, 2 skip)
+
+## 2026-02-13 — Phase 19: Deterministic Fact Sheet Pipeline (Zero-Hallucination Repo Scans)
+- **7-layer pre-analysis pipeline**: Package classification (active vs phantom, 30+ rules) → Capability fingerprinting (15+ regex patterns) → Diagnostic file checks → Type inference (app type, DB tech, test framework, ecosystem) → Post-scan verification (prune hallucinated gaps/strengths, inject proven ones, validate complement URLs)
+- **New files**: `RepoFactSheetBuilder.cs` (~790 lines), `PostScanVerifier.cs` (~363 lines)
+- **New models**: `RepoFactSheet`, `PackageEvidence`, `CapabilityFingerprint`
+- **Prompt injection**: All 4 prompt builders include VERIFIED GROUND TRUTH section
+- **Tests**: 44 new — 485 total (483 pass, 2 skip)
+
+## 2026-02-13 — Phase 18: Agentic Timeout Fix, Cascade Removal, Ctrl+F Search
+- **Timing fixes**: CodexCliService forwards `timeoutSeconds`; LlmService returns empty on agentic failure instead of cascading to 3 more 180s attempts
+- **3-way agentic fallback**: Agentic → consolidated analysis → separate calls
+- **Ctrl+F Find overlay**: Floating search bar with match counter, prev/next navigation, walks visual tree across TextBox + MarkdownViewer
+- **Tests**: 439 total (437 pass, 2 skip)
+
+## 2026-02-13 — Phase 17: Model Tiering, Agentic Codex, Infrastructure Hardening
+- **ModelTier enum** (Default/Mini/Full) with provider-specific MiniModelMap
+- **CodexMiniModel** (gpt-5.1-codex-mini) for routine tasks: CodeBook, gap verify, complements
+- **GenerateAgenticAsync**: Single Codex 5.3 call with web search for full analysis
+- **ILlmService, IRetrievalService, IBrowserSearchService** interfaces for testability
+- **LlmCircuitBreaker**: Open/closed/half-open state machine per provider with exponential backoff + jitter
+- **Structured logging**: `ILogger<T>` in pipeline-critical paths, Microsoft.Extensions.Logging added
+- **Tests**: 26 new — 439 total (437 pass, 2 skip)
 - **Consolidated analysis**: For cloud/Codex providers (`IsLargeContextProvider`), CodeBook + RAG Analysis + Gap Verification combined into 1 LLM call with self-verification, reducing 3 calls to 1
 - **Intelligent routing**: `LlmService.IsLargeContextProvider` property determines pipeline mode — CloudOnly and CloudPrimary use consolidated, LocalOnly and LocalWithCloudFallback use separate calls
 - **Consolidated prompt**: `BuildConsolidatedAnalysisPrompt` sends all 40 deduplicated chunks (18 RAG queries: 6 architecture + 12 analysis) in one prompt requesting CodeBook + Frameworks + Strengths + self-verified Gaps

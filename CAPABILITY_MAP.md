@@ -4,7 +4,7 @@
 > This file is the single source of truth for "what exists, where, and why."
 >
 > **Maintenance rule**: Updated after every implementation step per `agents/orchestrator.agent.md` enforcement rules.
-> **Last verified**: 2026-02-12 — 378 tests (378 passed, 0 failed), 0 build errors.
+> **Last verified**: 2026-02-13 — 597 tests (597 passed, 2 skipped), 0 build errors. Phase 25 commit `fadf193`.
 
 ---
 
@@ -128,6 +128,26 @@ Status: `[x]` = implemented + tested | `[~]` = implemented, untested or partial 
   WHY: Alternative LLM path via OpenAI Codex CLI with OAuth
   CONFIG: AppSettings.CodexNodePath, CodexScriptPath, CodexModel, StreamlinedCodexMode
 
+- [x] Model tiering (Default/Mini/Full) — LlmService.cs (ModelTier enum, MiniModelMap)
+  WHY: Use cheaper/faster mini models for routine tasks (CodeBook, gap verify, complements); full models for analysis
+  CONFIG: AppSettings.CodexMiniModel (gpt-5.1-codex-mini)
+  TESTS: Phase17AgenticTests.cs
+
+- [x] Agentic Codex full analysis — LlmService.cs (GenerateAgenticAsync), RepoIntelligenceJobRunner.cs (RunAgenticFullAnalysisAsync)
+  WHY: Single Codex call with web search for complete repo analysis in one shot; 3-tier fallback (agentic → consolidated → separate)
+  TESTS: Phase17AgenticTests.cs
+
+- [x] LLM circuit breaker — LlmCircuitBreaker.cs
+  WHY: Open/closed/half-open state machine per provider with exponential backoff + jitter (1s base, 2x factor, 8s cap, ±25%)
+  TESTS: Phase17AgenticTests.cs
+
+- [x] Structured logging — ILogger<T> across pipeline-critical paths
+  WHY: Diagnostic visibility into LLM calls, failures, and circuit breaker state changes
+  DEPENDS: Microsoft.Extensions.Logging
+
+- [x] Service interfaces — ILlmService.cs, IRetrievalService.cs, IBrowserSearchService.cs
+  WHY: Testability — mock LLM/retrieval/search in unit tests without real API calls
+
 - [x] Secure API key storage (DPAPI-encrypted) — SecureKeyStore.cs
   WHY: Never store API keys in plaintext; DPAPI ties encryption to the Windows user
   CONFIG: AppSettings.KeySource (Direct | EnvironmentVariable), KeyEnvironmentVariable
@@ -171,6 +191,20 @@ Status: `[x]` = implemented + tested | `[~]` = implemented, untested or partial 
 
 - [x] "Most Supported View" + "Credible Alternatives" synthesis — ResearchJobRunner.cs
   WHY: Reports show consensus AND dissenting views with citations, not just majority opinion
+
+- [x] Sectional report generation (template-based, per-section LLM) — ResearchJobRunner.cs (GenerateSectionalReportAsync), ReportTemplateService.cs
+  WHY: Each section gets targeted evidence retrieval and focused prompt; parallel generation of independent sections
+  CONFIG: AppSettings.SectionalReports (default: true)
+
+- [x] Report formatting & highlighting — ResearchJobRunner.cs (BuildSynthesisPrompt, section prompts), ReportTemplateService.cs
+  WHY: LLM instructed to use **bold** for key terms, tables for comparisons, blockquotes for takeaways, `code` for technical terms — all render natively in MarkdownViewer
+  DEPENDS: MarkdownViewer.cs (supports bold, italic, tables, blockquotes, code inline)
+
+- [x] Expert-level search query generation — ResearchJobRunner.cs (planPrompt)
+  WHY: 5 targeted angles (comparative/architectural, quantitative/benchmark, decision-framework, case-study, expert/academic) instead of generic "diverse queries"
+
+- [x] Stable sectional citation labels — ResearchJobRunner.cs (GetTargetedEvidenceForSectionAsync)
+  WHY: Section-targeted search reuses master citation labels via SourceId fallback + offsets for truly-new sources; prevents label collisions across sections
 
 - [x] Strategy extraction on job completion (fire-and-forget) — ResearchJobRunner.cs (TryExtractStrategyAsync)
   WHY: Learn from each research run — distill "what worked / what to avoid" for Hive Mind
@@ -228,6 +262,32 @@ Status: `[x]` = implemented + tested | `[~]` = implemented, untested or partial 
 
 - [x] RAG-powered repo Q&A (hybrid search with source type filter) — RepoIntelligenceJobRunner.cs (AskAboutRepoAsync)
   WHY: Answer questions about any repo using indexed code + CodeBook as context
+
+- [x] Deterministic fact sheet pipeline (7-layer, zero-hallucination) — RepoFactSheetBuilder.cs (~790 lines)
+  WHY: Builds verified ground truth BEFORE LLM analysis: active vs phantom package classification (30+ rules), capability fingerprinting (15+ regex patterns), diagnostic file checks, type inference (app type, DB tech, test framework, ecosystem)
+  TESTS: FactSheetAndVerifierTests.cs (44+)
+
+- [x] Post-scan verification — PostScanVerifier.cs (~363 lines)
+  WHY: Prunes hallucinated gaps/strengths contradicting fact sheet; validates complement URLs; injects proven strengths; prunes app-type-inappropriate gaps (desktop→auth/Docker/middleware, DB contradiction→ORM); rejects active-package complements
+  TESTS: FactSheetAndVerifierTests.cs
+
+- [x] Dynamic anti-hallucination pipeline (4-layer complement filtering) — ComplementResearchService.cs, PostScanVerifier.cs, RepoIntelligenceJobRunner.cs
+  WHY: Layer 1 (expanded models + 5 inference methods) → Layer 2 (7 deterministic checks: archived, stale, low-stars, language mismatch, inapplicable concepts) → Layer 3 (LLM relevance check) → Layer 4 (17-rule dynamic search topics + 9 diverse categories)
+  TESTS: FactSheetAndVerifierTests.cs
+
+- [x] GitHub Project Discovery — GitHubDiscoveryService.cs, SessionWorkspaceViewModel.ProjectDiscovery.cs
+  WHY: GitHub Search API integration for discovering relevant repos; search/language-filter/min-stars UI with batch scan
+  TESTS: Phase 23 tests
+
+- [x] Local directory scanning — RepoCloneService.cs (IsLocalPath, ScanLocalAsync)
+  WHY: Scan local projects (C:\path\to\project) without GitHub; reads README, detects languages, finds manifests
+  TESTS: Phase 21 tests
+
+- [x] Pipeline telemetry — ScanTelemetry model, RepoIntelligenceJobRunner.cs
+  WHY: Tracks every LLM call (purpose, model, duration), phase timing, RAG/web/API counts; displayed in reports and UI
+
+- [x] Deterministic framework detection — RepoScannerService.cs (DetectFrameworkHints)
+  WHY: Maps ~40 known packages → human-readable labels; runs before LLM analysis so frameworks appear even with weak models
 
 - [x] Project Fusion (4 goals: Merge, Extend, Compare, Architect × 6 templates) — ProjectFusionEngine.cs
   WHY: Fuse multiple scanned repos into unified architecture documents with provenance
@@ -299,8 +359,16 @@ Status: `[x]` = implemented + tested | `[~]` = implemented, untested or partial 
 - [x] Settings panel (all config editing, API keys, model listing) — SettingsView.xaml, SettingsViewModel.cs
 - [x] Welcome screen — WelcomeView.xaml, WelcomeViewModel.cs
 - [x] Markdown rendering control — MarkdownViewer.cs
+  WHY: Custom FlowDocument-based Markdown renderer using Markdig; supports headings, bold, italic, tables, code blocks, blockquotes, links, code inline, thematic breaks
 - [x] Value converters — ValueConverters.cs
 - [x] Global styles — Styles.xaml
+
+- [x] Ctrl+F Find overlay — FindOverlay.cs, SessionWorkspaceView.xaml
+  WHY: Floating search bar with match counter, prev/next navigation; walks visual tree across TextBox + MarkdownViewer
+  KEYBIND: Ctrl+F to open, Enter/Shift+Enter to cycle, Escape to close
+
+- [x] Analysis model display — SessionWorkspaceView.xaml (RepoScan tab)
+  WHY: Blue-bordered banner with bold 16px model name shown in each repo profile card
 
 - [x] Job completion notifications (taskbar flash + system sound) — NotificationService.cs
   WHY: P/Invoke FlashWindowEx to flash taskbar + SystemSounds when research/discovery/repo-scan completes while app is unfocused
@@ -426,49 +494,57 @@ SessionWorkspaceViewModel decomposed from 2578 lines into 12 files using partial
 
 ---
 
-## 13. DI Registrations (ServiceRegistration.cs)
+## 13. DI Registrations (ServiceRegistration.cs + App.xaml.cs)
 
-37 singleton services registered via `AddResearchHiveCore()` + App.xaml.cs:
+42 DI registrations (38 unique concrete services) via `AddResearchHiveCore()` + App.xaml.cs:
 
 | # | Service | Registration | Notes |
 |---|---------|-------------|-------|
 | 1 | AppSettings | Direct | |
-| 2 | SecureKeyStore | Direct | |
+| 2 | SecureKeyStore | Factory lambda | Depends on AppSettings.DataRootPath |
 | 3 | SessionManager | Direct | |
 | 4 | CourtesyPolicy | Direct | |
 | 5 | EmbeddingService | Direct | |
 | 6 | CodexCliService | Direct | |
-| 7 | LlmService | Factory lambda | Depends on AppSettings, SecureKeyStore, CodexCliService |
-| 8 | ArtifactStore | Factory lambda | Depends on AppSettings |
-| 9 | SnapshotService | Direct | |
-| 10 | OcrService | Direct | |
-| 11 | IndexService | Direct | |
-| 12 | RetrievalService | Direct | |
-| 13 | BrowserSearchService | Factory lambda | Depends on CourtesyPolicy, AppSettings |
-| 14 | GoogleSearchService | Direct | |
-| 15 | ResearchJobRunner | Factory lambda | 9 constructor params + GlobalMemory property injection |
-| 16 | DiscoveryJobRunner | Direct | |
-| 17 | ProgrammingJobRunner | Direct | |
-| 18 | MaterialsJobRunner | Direct | |
-| 19 | FusionJobRunner | Direct | |
-| 20 | RepoScannerService | Direct | |
-| 21 | ComplementResearchService | Direct | |
-| 22 | RepoCloneService | Direct | |
-| 23 | CodeChunker | Direct | |
-| 24 | RepoIndexService | Direct | |
-| 25 | CodeBookGenerator | Direct | |
-| 26 | GlobalDb | Factory lambda | Depends on AppSettings.GlobalDbPath |
-| 27 | GlobalMemoryService | Direct | |
-| 28 | RepoIntelligenceJobRunner | Factory lambda | 7 constructor params + GlobalMemory property injection |
-| 29 | ProjectFusionEngine | Direct | |
-| 30 | ExportService | Direct | |
-| 31 | InboxWatcher | Direct | |
-| 32 | CrossSessionSearchService | Direct | |
-| 33 | CitationVerificationService | Direct | |
-| 34 | ContradictionDetector | Direct | |
-| 35 | ResearchComparisonService | Direct | |
-| 36 | PdfIngestionService | Direct | PDF text extraction + OCR fallback |
-| 37 | NotificationService | App.xaml.cs | Taskbar flash + sound via P/Invoke |
+| 7 | LlmCircuitBreaker | Factory lambda | Phase 17: per-provider circuit breaker |
+| 8 | LlmService | Factory lambda | Depends on AppSettings, SecureKeyStore, CodexCliService, LlmCircuitBreaker |
+| 9 | ILlmService | Interface alias | → LlmService (Phase 17) |
+| 10 | ArtifactStore | Factory lambda | Depends on AppSettings |
+| 11 | SnapshotService | Direct | |
+| 12 | OcrService | Direct | |
+| 13 | PdfIngestionService | Direct | PDF text extraction + OCR fallback |
+| 14 | IndexService | Direct | |
+| 15 | RetrievalService | Direct | |
+| 16 | IRetrievalService | Interface alias | → RetrievalService (Phase 17) |
+| 17 | BrowserSearchService | Factory lambda | Depends on CourtesyPolicy, AppSettings |
+| 18 | IBrowserSearchService | Interface alias | → BrowserSearchService (Phase 17) |
+| 19 | GoogleSearchService | Direct | |
+| 20 | ResearchJobRunner | Factory lambda | 9 constructor params + GlobalMemory property injection |
+| 21 | DiscoveryJobRunner | Direct | |
+| 22 | ProgrammingJobRunner | Direct | |
+| 23 | MaterialsJobRunner | Direct | |
+| 24 | FusionJobRunner | Direct | |
+| 25 | RepoScannerService | Direct | |
+| 26 | ComplementResearchService | Factory lambda | Phase 24: depends on LlmService, AppSettings, LlmCircuitBreaker, ILogger |
+| 27 | RepoCloneService | Direct | |
+| 28 | CodeChunker | Direct | |
+| 29 | RepoIndexService | Direct | |
+| 30 | CodeBookGenerator | Factory lambda | Depends on LlmService, RetrievalService, AppSettings |
+| 31 | RepoFactSheetBuilder | Direct | Phase 19: deterministic fact sheet pipeline |
+| 32 | PostScanVerifier | Factory lambda | Phase 19: depends on LlmService, ComplementResearchService, AppSettings |
+| 33 | GlobalDb | Factory lambda | Depends on AppSettings.GlobalDbPath |
+| 34 | GlobalMemoryService | Direct | |
+| 35 | RepoIntelligenceJobRunner | Factory lambda | 7+ constructor params + GlobalMemory property injection |
+| 36 | ProjectFusionEngine | Direct | |
+| 37 | ExportService | Direct | |
+| 38 | InboxWatcher | Direct | |
+| 39 | CrossSessionSearchService | Direct | |
+| 40 | CitationVerificationService | Direct | |
+| 41 | ContradictionDetector | Direct | |
+| 42 | ResearchComparisonService | Direct | |
+| — | **App.xaml.cs registrations:** | | |
+| 43 | NotificationService | App.xaml.cs | Taskbar flash + sound via P/Invoke |
+| 44 | GitHubDiscoveryService | App.xaml.cs | Phase 23: GitHub Search API |
 
 ---
 
@@ -480,24 +556,28 @@ SessionWorkspaceViewModel decomposed from 2578 lines into 12 files using partial
 | AppSettingsTests.cs | — | AppSettings serialization + defaults |
 | CodeChunkerTests.cs | 7 | C# / Markdown / Python / JSON chunking, empty/small files, index ordering |
 | ExportServiceTests.cs | 7 | ZIP export, Markdown export, HTML export, research packet, blocked snapshot exclusion |
+| FactSheetAndVerifierTests.cs | 130+ | RepoFactSheet models, package classification, capability fingerprinting, source-file filtering, post-scan verification, gap pruning, complement rejection, domain search topics, anti-hallucination layers 1-4, dynamic inference |
 | FeatureTests.cs | — | Snapshot capture, inbox watcher, artifact store |
 | GlobalDbTests.cs | 8 | Save, batch save, FTS search, source type filter, strategies, delete, session delete, embeddings |
 | LlmTruncationTests.cs | 5 | LlmResponse record, equality, deconstruction, GlobalChunk defaults, MemoryScope enum |
+| ModelAttributionTests.cs | 23 | LlmResponse.ModelName (all providers), domain model fields, DB persistence, migration safety, complement parsing |
 | ModelTests.cs | — | Core model classes |
 | NewFeatureTests.cs | — | Verification summary, new features |
-| PipelineVsDirectComparisonTest.cs | — | Pipeline vs direct LLM comparison |
+| Phase11FeatureTests.cs | 14 | GlobalDb curation (7), SearchEngineHealthEntry states (5), PdfExtractionResult, DeleteChunk |
+| Phase17AgenticTests.cs | 26 | ModelTier enum, MiniModelMap, agentic prompt building/parsing, circuit breaker, interface registrations, ILogger |
+| PipelineVsDirectComparisonTest.cs | 2 (skip) | Pipeline vs direct LLM comparison (requires live Ollama) |
 | PolishFeatureTests.cs | — | UI polish features |
+| RagGroundedAnalysisTests.cs | 16 | RAG analysis prompt building, gap verification parsing, self-scan simulation, false positive detection |
 | RepoIntelligenceTests.cs | 12 | RepoProfile CRUD, ProjectFusion CRUD, DomainPack enum, serialization |
 | ResearchPipelineTests.cs | — | Full pipeline integration |
 | SearchResultExtractorTests.cs | — | HTML extraction for all 6 search engines |
 | SessionDbDeleteTests.cs | — | Cascade delete operations |
 | SessionDbRepoProfileTests.cs | 3 | New repo profile fields round-trip, null defaults, update existing |
 | SessionManagerTests.cs | — | Session CRUD operations |
+| SmartPipelineTests.cs | 22 | Consolidated prompt builder/parser, JSON complement prompt/parser, IsLargeContextProvider routing |
 | StreamlinedCodexTests.cs | — | Codex CLI integration |
-| RagGroundedAnalysisTests.cs | 16 | RAG analysis prompt building (no truncation, all chunks/deps), gap verification parsing, self-scan simulation (cloud providers, tests, Hive Mind, notifications captured), false positive detection |
-| ModelAttributionTests.cs | 23 | LlmResponse.ModelName (all providers), domain model fields (ResearchJob/Report/QaMessage/RepoProfile), DB persistence round-trip (4 tables), migration safety, complement parsing (≥5), deconstruction |
 
-**Total: 378 tests — 378 passed, 0 failed**
+**Total: 597 tests — 597 passed, 2 skipped, 0 failed**
 
 ---
 
@@ -518,8 +598,13 @@ src/
       Jobs.cs                  ← JobType, JobState, ResearchJob, JobStep, JobProgressEventArgs
       Session.cs               ← Session, SessionStatus, DomainPack enums
     Services/
-      PdfIngestionService.cs       ← NEW Phase 11: PDF text extraction + OCR fallback
-      (36 service classes — see DI Registrations above)
+      PdfIngestionService.cs       ← Phase 11: PDF text extraction + OCR fallback
+      RepoFactSheetBuilder.cs      ← Phase 19: deterministic fact sheet pipeline (~790 lines)
+      PostScanVerifier.cs          ← Phase 19: LLM output validation against fact sheet (~363 lines)
+      LlmCircuitBreaker.cs        ← Phase 17: per-provider circuit breaker
+      GitHubDiscoveryService.cs    ← Phase 23: GitHub Search API for project discovery
+      ReportTemplateService.cs     ← Phase 25: section templates with formatting guidance
+      (38+ service classes — see DI Registrations above)
   ResearchHive/                ← WPF app (.NET 8, net8.0-windows)
     Controls/
       MarkdownViewer.cs
@@ -542,6 +627,7 @@ src/
       SessionWorkspaceViewModel.Export.cs
       SessionWorkspaceViewModel.HiveMind.cs
       SessionWorkspaceViewModel.Verification.cs
+      SessionWorkspaceViewModel.ProjectDiscovery.cs  ← Phase 23: GitHub project discovery
       SessionWorkspaceSubViewModels.cs
       SettingsViewModel.cs
       ViewModelFactory.cs
@@ -553,7 +639,7 @@ src/
       WelcomeView.xaml
 tests/
   ResearchHive.Tests/          ← xUnit + FluentAssertions + Moq
-    (20 test files — see Test Coverage above)
+    (23 test files — see Test Coverage above)
 ```
 
 ---
@@ -562,6 +648,18 @@ tests/
 
 | Date | Change | Files |
 |------|--------|-------|
+| 2026-02-13 | Phase 25: Research report quality + readability overhaul — 6 pipeline bug fixes (iteration cap, citation label collisions, early-exit thresholds, sufficiency skip, expert search queries, target sources 5→8) + formatting/highlighting in all prompts | ResearchJobRunner.cs, ReportTemplateService.cs, SessionWorkspaceViewModel.cs |
+| 2026-02-13 | Phase 24: Dynamic anti-hallucination pipeline — 4-layer complement filtering (expanded models, 7 deterministic checks, LLM relevance, 17-rule dynamic search) | RepoFactSheetBuilder.cs, PostScanVerifier.cs, ComplementResearchService.cs, RepoIntelligenceJobRunner.cs, DomainModels.cs, ServiceRegistration.cs |
+| 2026-02-13 | Phase 23: Dockerfile gap fix, meta-project filter, Project Discovery panel, session nav fix | PostScanVerifier.cs, GitHubDiscoveryService.cs, SessionWorkspaceViewModel.ProjectDiscovery.cs, SessionWorkspaceView.xaml, MainViewModel.cs |
+| 2026-02-13 | Phase 22: App-type gap pruning, active-package rejection, domain-aware search | PostScanVerifier.cs, ComplementResearchService.cs, RepoScannerService.cs |
+| 2026-02-13 | Phase 21: Self-referential fix, complement diversity, local path scanning | RepoFactSheetBuilder.cs, PostScanVerifier.cs, ComplementResearchService.cs, RepoCloneService.cs, SessionWorkspaceViewModel.RepoIntelligence.cs |
+| 2026-02-13 | Phase 20: Tighten fingerprints, filter docs, fix evidence formatting | RepoFactSheetBuilder.cs, PostScanVerifier.cs, RepoScannerService.cs |
+| 2026-02-13 | Phase 19: Deterministic fact sheet pipeline — RepoFactSheetBuilder + PostScanVerifier + 44 tests | RepoFactSheetBuilder.cs, PostScanVerifier.cs, DomainModels.cs, RepoIntelligenceJobRunner.cs, RepoScannerService.cs, ServiceRegistration.cs, FactSheetAndVerifierTests.cs |
+| 2026-02-13 | Phase 18: Agentic timeout fix, cascade removal, Ctrl+F Find overlay | CodexCliService.cs, LlmService.cs, RepoIntelligenceJobRunner.cs, FindOverlay.cs, SessionWorkspaceView.xaml |
+| 2026-02-13 | Phase 17: Model tiering, agentic Codex, infrastructure hardening — interfaces, circuit breaker, structured logging | LlmService.cs, LlmCircuitBreaker.cs, ILlmService.cs, IRetrievalService.cs, IBrowserSearchService.cs, ServiceRegistration.cs, Phase17AgenticTests.cs |
+| 2026-02-13 | Phase 16: Smart Pipeline — Codex consolidation (4→2 calls), Ollama JSON format, 5 parallelism fixes | LlmService.cs, ResearchJobRunner.cs, RepoScannerService.cs, ComplementResearchService.cs, SmartPipelineTests.cs |
+| 2026-02-13 | Phase 15: Pipeline telemetry, framework detection, RAG parallelism | RepoIntelligenceJobRunner.cs, RepoScannerService.cs, DomainModels.cs |
+| 2026-02-13 | Phase 14: Repo scan quality fixes — deep .csproj, gap quality, GitHub enrichment | RepoScannerService.cs, ComplementResearchService.cs, RepoIntelligenceJobRunner.cs |
 | 2026-02-12 | Phase 13: Model attribution + complement enforcement — LlmResponse.ModelName, LastModelUsed, domain model fields, DB migration, ≥5 complements | Artifacts.cs, LlmService.cs, Jobs.cs, DomainModels.cs, SessionDb.cs, ResearchJobRunner.cs, RepoIntelligenceJobRunner.cs, ProjectFusionEngine.cs, ComplementResearchService.cs, SessionWorkspaceViewModel.NotebookQa.cs, SessionWorkspaceSubViewModels.cs |
 | 2026-02-12 | 23 new tests: ModelAttributionTests (LlmResponse model, domain fields, DB persistence, complement parsing) | ModelAttributionTests.cs |
 | 2026-02-12 | CAPABILITY_MAP.md created; enforcement rules added to orchestrator agent | CAPABILITY_MAP.md, orchestrator.agent.md |
