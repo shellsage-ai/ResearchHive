@@ -3,6 +3,14 @@
 All changes are tracked in `CAPABILITY_MAP.md` (Change Log section) for granular file-level detail.
 This file provides a high-level summary per milestone.
 
+## 2026-02-12 — Phase 12: RAG-Grounded Repo Analysis
+- **Pipeline redesign**: Scan(metadata only) → Clone+Index → CodeBook → RAG analysis(12 queries, 30 chunks) → Gap verification → Complements
+- **Zero truncation**: Removed all README/manifest truncation; full content preserved and used via chunked retrieval
+- **Gap verification**: Each gap claim checked against actual codebase via per-gap RAG queries; false positives pruned by LLM
+- **RepoScannerService**: Split into metadata-only scan + shallow fallback; LLM analysis moved to runner post-indexing
+- **Tests**: 16 new (RagGroundedAnalysisTests.cs) including self-scan simulation proving cloud providers, Hive Mind, notifications all captured
+- **Tests**: 341 → 357 (355 passed, 2 skipped)
+
 ## 2026-02-12 — Phase 11: Polish, Curation & Health Monitoring
 - **Step 1 PDF Ingestion**: PdfPig-based text extraction + per-page OCR fallback (< 50 char threshold); replaces broken BT/ET regex parser
 - **Step 2 ViewModel Decomposition**: Refactored 2578-line SessionWorkspaceViewModel into 12 partial class files (~550-line root + 9 partials + SubViewModels)

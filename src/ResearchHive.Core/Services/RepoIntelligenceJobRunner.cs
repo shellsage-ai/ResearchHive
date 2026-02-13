@@ -38,7 +38,7 @@ public class RepoIntelligenceJobRunner
         _retrievalService = retrievalService;
     }
 
-    /// <summary>Scan a single repo: metadata + LLM analysis + complement research.</summary>
+    /// <summary>Scan a single repo: metadata → clone+index → RAG-grounded analysis → gap verification → complements.</summary>
     public async Task<RepoProfile> RunAnalysisAsync(string sessionId, string repoUrl, CancellationToken ct = default)
     {
         var db = _sessionManager.GetSessionDb(sessionId);
@@ -55,7 +55,7 @@ public class RepoIntelligenceJobRunner
 
         try
         {
-            // 1. Scan repo via GitHub API + LLM analysis
+            // ── Phase 1: Metadata scan (GitHub API — no LLM yet) ──
             job.State = JobState.Searching;
             db.SaveJob(job);
             AddReplay(job, "scan", "Scanning Repository", "Fetching metadata, README, dependencies via GitHub API...");
@@ -63,26 +63,18 @@ public class RepoIntelligenceJobRunner
             var profile = await _scanner.ScanAsync(repoUrl, ct);
             profile.SessionId = sessionId;
 
-            AddReplay(job, "scanned", "Repository Scanned",
-                $"Found: {profile.PrimaryLanguage} | {profile.Dependencies.Count} deps | {profile.Stars}★ | {profile.Strengths.Count} strengths | {profile.Gaps.Count} gaps");
+            AddReplay(job, "scanned", "Metadata Collected",
+                $"Found: {profile.PrimaryLanguage} | {profile.Dependencies.Count} deps | {profile.Stars}★");
 
-            // 2. Research complements for identified gaps
-            job.State = JobState.Evaluating;
-            db.SaveJob(job);
-            AddReplay(job, "complement", "Researching Complements", $"Searching for projects to fill {profile.Gaps.Count} identified gaps...");
-
-            var complements = await _complementService.ResearchAsync(profile, ct);
-            profile.ComplementSuggestions = complements;
-
-            AddReplay(job, "complements_done", "Complements Found", $"Found {complements.Count} complementary projects");
-
-            // 3. Clone + index repo code (if RepoIndexService is available)
+            // ── Phase 2: Clone + deep index (chunks + embeddings) ──
+            bool isIndexed = false;
             if (_repoIndexService != null)
             {
                 try
                 {
-                    AddReplay(job, "indexing", "Indexing Repository Code", "Cloning repo and building vector index of source files...");
+                    AddReplay(job, "indexing", "Indexing Repository Code", "Cloning repo and building vector index of all source files...");
                     await _repoIndexService.IndexRepoAsync(sessionId, profile, ct);
+                    isIndexed = profile.IndexedChunkCount > 0;
                     AddReplay(job, "indexed", "Code Indexed",
                         $"Indexed {profile.IndexedFileCount} files → {profile.IndexedChunkCount} chunks");
                 }
@@ -92,12 +84,12 @@ public class RepoIntelligenceJobRunner
                 }
             }
 
-            // 4. Generate CodeBook (if available and indexed)
-            if (_codeBookGenerator != null && profile.IndexedChunkCount > 0)
+            // ── Phase 3: CodeBook generation (architecture summary from chunks) ──
+            if (_codeBookGenerator != null && isIndexed)
             {
                 try
                 {
-                    AddReplay(job, "codebook", "Generating CodeBook", "Analyzing architecture patterns...");
+                    AddReplay(job, "codebook", "Generating CodeBook", "Analyzing architecture patterns from indexed code...");
                     profile.CodeBook = await _codeBookGenerator.GenerateAsync(sessionId, profile, ct);
                     AddReplay(job, "codebook_done", "CodeBook Generated", "Architecture reference document created");
                 }
@@ -107,10 +99,47 @@ public class RepoIntelligenceJobRunner
                 }
             }
 
-            // 5. Save profile
+            // ── Phase 4: RAG-grounded strengths + gaps analysis ──
+            job.State = JobState.Evaluating;
+            db.SaveJob(job);
+
+            if (isIndexed && _retrievalService != null)
+            {
+                AddReplay(job, "rag_analysis", "RAG-Grounded Analysis", "Querying indexed code to build comprehensive assessment...");
+                await RunRagGroundedAnalysis(sessionId, profile, ct);
+            }
+            else
+            {
+                // Fallback: shallow analysis from metadata only (no code available)
+                AddReplay(job, "shallow_analysis", "Shallow Analysis", "No indexed code available — analyzing from README + manifests only");
+                await _scanner.AnalyzeShallowAsync(profile, ct);
+            }
+
+            AddReplay(job, "analyzed", "Analysis Complete",
+                $"{profile.Strengths.Count} strengths, {profile.Gaps.Count} gaps identified");
+
+            // ── Phase 5: Gap verification via RAG (prune false positives) ──
+            if (isIndexed && _retrievalService != null && profile.Gaps.Count > 0)
+            {
+                AddReplay(job, "gap_verify", "Verifying Gaps Against Code", "Checking each gap claim against actual source code...");
+                var originalGapCount = profile.Gaps.Count;
+                await VerifyGapsViaRag(sessionId, profile, ct);
+                var pruned = originalGapCount - profile.Gaps.Count;
+                if (pruned > 0)
+                    AddReplay(job, "gaps_pruned", "False Positives Removed", $"Removed {pruned} false gaps — {profile.Gaps.Count} verified gaps remain");
+                else
+                    AddReplay(job, "gaps_confirmed", "Gaps Confirmed", $"All {profile.Gaps.Count} gaps verified as genuine");
+            }
+
+            // ── Phase 6: Complement research (based on verified gaps) ──
+            AddReplay(job, "complement", "Researching Complements", $"Searching for projects to fill {profile.Gaps.Count} verified gaps...");
+            var complements = await _complementService.ResearchAsync(profile, ct);
+            profile.ComplementSuggestions = complements;
+            AddReplay(job, "complements_done", "Complements Found", $"Found {complements.Count} complementary projects");
+
+            // ── Phase 7: Save + report ──
             db.SaveRepoProfile(profile);
 
-            // 6. Generate report
             job.State = JobState.Reporting;
             db.SaveJob(job);
 
@@ -128,7 +157,7 @@ public class RepoIntelligenceJobRunner
 
             job.State = JobState.Completed;
             job.FullReport = report;
-            job.ExecutiveSummary = $"Analyzed {profile.Owner}/{profile.Name}: {profile.PrimaryLanguage}, {profile.Dependencies.Count} dependencies, {profile.Strengths.Count} strengths, {profile.Gaps.Count} gaps, {complements.Count} complement suggestions.";
+            job.ExecutiveSummary = $"Analyzed {profile.Owner}/{profile.Name}: {profile.PrimaryLanguage}, {profile.Dependencies.Count} dependencies, {profile.IndexedChunkCount} chunks indexed, {profile.Strengths.Count} strengths, {profile.Gaps.Count} verified gaps, {complements.Count} complement suggestions.";
             db.SaveJob(job);
             AddReplay(job, "complete", "Analysis Complete", job.ExecutiveSummary);
             db.SaveJob(job);
@@ -142,6 +171,104 @@ public class RepoIntelligenceJobRunner
             db.SaveJob(job);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Multi-query RAG analysis: issue diverse queries against the indexed codebase,
+    /// gather top chunks, and ask the LLM to assess strengths/gaps from actual code.
+    /// </summary>
+    private async Task RunRagGroundedAnalysis(string sessionId, RepoProfile profile, CancellationToken ct)
+    {
+        // Diverse queries to explore the full codebase — not just architecture
+        var analysisQueries = new[]
+        {
+            "service registration dependency injection startup configuration",
+            "database data access storage persistence repository",
+            "API cloud provider external service integration",
+            "test testing unit test integration test assertion",
+            "error handling retry fault tolerance resilience",
+            "user interface view model MVVM commands controls",
+            "search indexing retrieval embedding vector",
+            "authentication security encryption key management",
+            "export reporting document generation output",
+            "domain business logic core workflow pipeline",
+            "notification monitoring health check logging",
+            "safety validation verification quality"
+        };
+
+        var repoFilter = new[] { "repo_code", "repo_doc" };
+        var allChunks = new List<RetrievalResult>();
+
+        foreach (var q in analysisQueries)
+        {
+            try
+            {
+                var hits = await _retrievalService!.HybridSearchAsync(sessionId, q, repoFilter, topK: 5, ct);
+                allChunks.AddRange(hits);
+            }
+            catch { /* individual query failures are non-fatal */ }
+        }
+
+        // Deduplicate and take top 30 by score — broader coverage than CodeBook's 20
+        var topChunks = allChunks
+            .DistinctBy(r => r.Chunk.Id)
+            .OrderByDescending(r => r.Score)
+            .Take(30)
+            .Select(r => r.Chunk.Text)
+            .ToList();
+
+        if (topChunks.Count == 0)
+        {
+            // Fallback to shallow
+            await _scanner.AnalyzeShallowAsync(profile, ct);
+            return;
+        }
+
+        var prompt = RepoScannerService.BuildRagAnalysisPrompt(profile, profile.CodeBook, topChunks);
+        var analysis = await _llmService.GenerateAsync(prompt,
+            "You are a senior software architecture analyst. Analyze the ACTUAL SOURCE CODE provided. " +
+            "Be specific — reference real class names, service names, and patterns you see in the code. " +
+            "Do NOT make generic assumptions. If the code shows cloud providers, say so. If it has 300+ tests, say so.",
+            ct: ct);
+        RepoScannerService.ParseAnalysis(analysis, profile);
+    }
+
+    /// <summary>
+    /// For each proposed gap, query the index with gap-related terms.
+    /// If relevant code is found, the gap might be a false positive.
+    /// Send all evidence to LLM for final verification.
+    /// </summary>
+    private async Task VerifyGapsViaRag(string sessionId, RepoProfile profile, CancellationToken ct)
+    {
+        var repoFilter = new[] { "repo_code", "repo_doc" };
+        var gapEvidence = new List<(string gap, IReadOnlyList<string> chunks)>();
+
+        foreach (var gap in profile.Gaps)
+        {
+            try
+            {
+                // Search the indexed codebase for evidence related to this gap
+                var hits = await _retrievalService!.HybridSearchAsync(sessionId, gap, repoFilter, topK: 3, ct);
+                var chunkTexts = hits.Select(h => h.Chunk.Text).ToList();
+                gapEvidence.Add((gap, chunkTexts));
+            }
+            catch
+            {
+                gapEvidence.Add((gap, Array.Empty<string>()));
+            }
+        }
+
+        var verificationPrompt = RepoScannerService.BuildGapVerificationPrompt(profile, gapEvidence);
+        var response = await _llmService.GenerateAsync(verificationPrompt,
+            "You are a code auditor. Compare each gap claim against the actual source code evidence. " +
+            "Be strict: if the code clearly already handles something, mark it as a false positive. " +
+            "Only keep gaps that are genuinely missing from the codebase.",
+            ct: ct);
+
+        var verifiedGaps = RepoScannerService.ParseVerifiedGaps(response);
+        if (verifiedGaps.Count > 0)
+            profile.Gaps = verifiedGaps;
+        // If parsing returned empty (LLM format issue), keep original gaps rather than losing them all
     }
 
     /// <summary>Scan multiple repos and immediately fuse them.</summary>
@@ -301,8 +428,7 @@ public class RepoIntelligenceJobRunner
         // Include CodeBook if available
         if (!string.IsNullOrEmpty(profile.CodeBook))
         {
-            var codeBook = profile.CodeBook.Length > 4000 ? profile.CodeBook[..4000] : profile.CodeBook;
-            context.AppendLine($"\n--- CODEBOOK SUMMARY ---\n{codeBook}");
+            context.AppendLine($"\n--- CODEBOOK SUMMARY ---\n{profile.CodeBook}");
         }
 
         // RAG: retrieve relevant code chunks if indexed
@@ -324,8 +450,7 @@ public class RepoIntelligenceJobRunner
         else if (!string.IsNullOrEmpty(profile.ReadmeContent))
         {
             // Fallback: include README if no code is indexed
-            var readme = profile.ReadmeContent.Length > 6000 ? profile.ReadmeContent[..6000] : profile.ReadmeContent;
-            context.AppendLine($"\nREADME:\n{readme}");
+            context.AppendLine($"\nREADME:\n{profile.ReadmeContent}");
         }
 
         var systemPrompt = @"You are a senior software engineer and open-source analyst.

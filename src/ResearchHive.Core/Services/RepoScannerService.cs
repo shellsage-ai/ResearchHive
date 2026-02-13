@@ -6,8 +6,9 @@ using System.Text.Json;
 namespace ResearchHive.Core.Services;
 
 /// <summary>
-/// Scans GitHub repos via REST API to build a RepoProfile: metadata, README, dependencies,
-/// then uses LLM to analyze strengths, gaps, and frameworks.
+/// Scans GitHub repos via REST API to build a RepoProfile: metadata, README, dependencies.
+/// Does NOT perform LLM analysis — that happens after indexing in RepoIntelligenceJobRunner
+/// so the analysis is grounded against the full codebase via RAG.
 /// </summary>
 public class RepoScannerService
 {
@@ -121,17 +122,25 @@ public class RepoScannerService
         }
 
         profile.Dependencies = ParseDependencies(depFiles);
-
-        // 5. LLM analysis — strengths, gaps, frameworks
-        var analysisPrompt = BuildAnalysisPrompt(profile, depFiles);
-        var analysis = await _llmService.GenerateAsync(analysisPrompt,
-            "You are a software architecture analyst. Respond in the exact format requested. Be specific and actionable.", ct: ct);
-        ParseAnalysis(analysis, profile);
+        profile.ManifestContents = depFiles; // Preserve full manifest contents for downstream analysis
 
         return profile;
     }
 
-    private string BuildAnalysisPrompt(RepoProfile profile, Dictionary<string, string> depFiles)
+    /// <summary>
+    /// Perform a shallow LLM analysis using only metadata + README + manifests.
+    /// Used as fallback when code indexing is unavailable.
+    /// </summary>
+    public async Task<RepoProfile> AnalyzeShallowAsync(RepoProfile profile, CancellationToken ct = default)
+    {
+        var analysisPrompt = BuildAnalysisPrompt(profile);
+        var analysis = await _llmService.GenerateAsync(analysisPrompt,
+            "You are a software architecture analyst. Respond in the exact format requested. Be specific and actionable.", ct: ct);
+        ParseAnalysis(analysis, profile);
+        return profile;
+    }
+
+    private string BuildAnalysisPrompt(RepoProfile profile)
     {
         var sb = new System.Text.StringBuilder();
         sb.AppendLine("Analyze this GitHub repository and provide a structured assessment.");
@@ -145,16 +154,100 @@ public class RepoScannerService
         sb.AppendLine();
         if (!string.IsNullOrEmpty(profile.ReadmeContent))
         {
-            sb.AppendLine("## README (truncated):");
-            sb.AppendLine(profile.ReadmeContent.Length > 3000 ? profile.ReadmeContent[..3000] + "\n[truncated]" : profile.ReadmeContent);
+            sb.AppendLine("## README:");
+            sb.AppendLine(profile.ReadmeContent);
             sb.AppendLine();
         }
-        foreach (var (file, content) in depFiles)
+        foreach (var (file, content) in profile.ManifestContents)
         {
-            sb.AppendLine($"## {file} (truncated):");
-            sb.AppendLine(content.Length > 1500 ? content[..1500] + "\n[truncated]" : content);
+            sb.AppendLine($"## {file}:");
+            sb.AppendLine(content);
             sb.AppendLine();
         }
+        AppendFormatInstructions(sb);
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Build a RAG-grounded analysis prompt using indexed code chunks + CodeBook.
+    /// Called by RepoIntelligenceJobRunner after indexing.
+    /// </summary>
+    public static string BuildRagAnalysisPrompt(RepoProfile profile, string? codeBook, IReadOnlyList<string> retrievedChunks)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("Analyze this GitHub repository using the ACTUAL SOURCE CODE provided below.");
+        sb.AppendLine("Base your assessment on what the code actually does, not surface-level assumptions.");
+        sb.AppendLine();
+        sb.AppendLine($"## Repository: {profile.Owner}/{profile.Name}");
+        sb.AppendLine($"- Description: {profile.Description}");
+        sb.AppendLine($"- Primary Language: {profile.PrimaryLanguage}");
+        sb.AppendLine($"- Languages: {string.Join(", ", profile.Languages)}");
+        sb.AppendLine($"- Dependencies ({profile.Dependencies.Count}): {string.Join(", ", profile.Dependencies.Select(d => d.Name))}");
+        sb.AppendLine($"- Indexed: {profile.IndexedFileCount} files, {profile.IndexedChunkCount} chunks");
+        sb.AppendLine();
+
+        if (!string.IsNullOrEmpty(codeBook))
+        {
+            sb.AppendLine("## Architecture Summary (CodeBook):");
+            sb.AppendLine(codeBook);
+            sb.AppendLine();
+        }
+
+        sb.AppendLine("## Source Code Excerpts (retrieved via semantic + keyword search):");
+        sb.AppendLine();
+        for (int i = 0; i < retrievedChunks.Count; i++)
+        {
+            sb.AppendLine($"### Excerpt {i + 1}:");
+            sb.AppendLine(retrievedChunks[i]);
+            sb.AppendLine("---");
+        }
+        sb.AppendLine();
+        AppendFormatInstructions(sb);
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Build a gap verification prompt: for each proposed gap, we provide the relevant
+    /// code chunks so the LLM can determine if the gap is real or already addressed.
+    /// </summary>
+    public static string BuildGapVerificationPrompt(RepoProfile profile, IReadOnlyList<(string gap, IReadOnlyList<string> chunks)> gapEvidence)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"You are verifying gap claims about the repository {profile.Owner}/{profile.Name}.");
+        sb.AppendLine("For each proposed gap, I provide the most relevant source code from the actual codebase.");
+        sb.AppendLine("Determine if each gap is REAL (the codebase truly lacks this) or FALSE (the codebase already addresses it).");
+        sb.AppendLine("Only keep gaps that are genuinely missing. Remove false positives.");
+        sb.AppendLine();
+
+        foreach (var (gap, chunks) in gapEvidence)
+        {
+            sb.AppendLine($"### Gap Claim: {gap}");
+            if (chunks.Count == 0)
+            {
+                sb.AppendLine("(No relevant code found — gap is likely real)");
+            }
+            else
+            {
+                sb.AppendLine("Relevant code found:");
+                foreach (var chunk in chunks)
+                {
+                    sb.AppendLine(chunk);
+                    sb.AppendLine("---");
+                }
+            }
+            sb.AppendLine();
+        }
+
+        sb.AppendLine("Respond with EXACTLY this format:");
+        sb.AppendLine("## Verified Gaps");
+        sb.AppendLine("- gap description (only gaps that are genuinely missing)");
+        sb.AppendLine("## False Positives Removed");
+        sb.AppendLine("- gap description: REASON it's already addressed in code");
+        return sb.ToString();
+    }
+
+    private static void AppendFormatInstructions(System.Text.StringBuilder sb)
+    {
         sb.AppendLine("Respond with EXACTLY this format:");
         sb.AppendLine("## Frameworks");
         sb.AppendLine("- framework1");
@@ -162,15 +255,14 @@ public class RepoScannerService
         sb.AppendLine("## Strengths");
         sb.AppendLine("- strength1");
         sb.AppendLine("- strength2");
-        sb.AppendLine("(list at least 5 specific strengths)");
+        sb.AppendLine("(list at least 5 specific strengths based on what the code actually implements)");
         sb.AppendLine("## Gaps");
         sb.AppendLine("- gap1");
         sb.AppendLine("- gap2");
-        sb.AppendLine("(list at least 5 specific weaknesses, missing features, or improvement opportunities)");
-        return sb.ToString();
+        sb.AppendLine("(list at least 5 specific weaknesses, missing features, or improvement opportunities — based on code evidence, not assumptions)");
     }
 
-    private static void ParseAnalysis(string analysis, RepoProfile profile)
+    public static void ParseAnalysis(string analysis, RepoProfile profile)
     {
         var lines = analysis.Split('\n').Select(l => l.Trim()).ToList();
         string? currentSection = null;
@@ -329,5 +421,21 @@ public class RepoScannerService
         if (elem?.TryGetProperty(prop, out var val) == true && val.ValueKind == JsonValueKind.Number)
             return val.GetInt32();
         return 0;
+    }
+
+    /// <summary>Parse verified gaps from the gap verification LLM response.</summary>
+    public static List<string> ParseVerifiedGaps(string response)
+    {
+        var gaps = new List<string>();
+        bool inVerifiedSection = false;
+        foreach (var rawLine in response.Split('\n'))
+        {
+            var line = rawLine.Trim();
+            if (line.StartsWith("## Verified Gaps", StringComparison.OrdinalIgnoreCase)) { inVerifiedSection = true; continue; }
+            if (line.StartsWith("## ")) { inVerifiedSection = false; continue; }
+            if (inVerifiedSection && line.StartsWith("- ") && line.Length > 2)
+                gaps.Add(line[2..].Trim());
+        }
+        return gaps;
     }
 }

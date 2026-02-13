@@ -4,7 +4,7 @@
 > This file is the single source of truth for "what exists, where, and why."
 >
 > **Maintenance rule**: Updated after every implementation step per `agents/orchestrator.agent.md` enforcement rules.
-> **Last verified**: 2026-02-12 — 341 tests (339 passed, 2 skipped), 0 build errors.
+> **Last verified**: 2026-02-12 — 357 tests (355 passed, 2 skipped), 0 build errors.
 
 ---
 
@@ -192,8 +192,12 @@ Status: `[x]` = implemented + tested | `[~]` = implemented, untested or partial 
 
 ## 7. Repo Intelligence
 
-- [x] GitHub repo scanning (metadata, README, deps, languages, LLM analysis) — RepoScannerService.cs
-  WHY: Parse actual manifests (package.json, .csproj, Cargo.toml, etc.) for ground-truth dependency data
+- [x] GitHub repo scanning (metadata, README, deps, languages) — RepoScannerService.cs
+  WHY: Parse actual manifests (package.json, .csproj, Cargo.toml, etc.) for ground-truth dependency data; no LLM analysis here — metadata only
+
+- [x] RAG-grounded repo analysis (index-first, multi-query retrieval, gap verification) — RepoIntelligenceJobRunner.cs
+  WHY: Strengths/gaps assessed AFTER deep indexing — 12 diverse RAG queries retrieve 30 top chunks, LLM analyzes actual code not truncated README; verified gaps checked per-gap against codebase
+  TESTS: RagGroundedAnalysisTests.cs (16)
 
 - [x] Complement research (find projects that fill gaps) — ComplementResearchService.cs
   WHY: After identifying a repo's gaps, automatically suggest complementary OSS projects
@@ -485,9 +489,9 @@ SessionWorkspaceViewModel decomposed from 2578 lines into 12 files using partial
 | SessionDbRepoProfileTests.cs | 3 | New repo profile fields round-trip, null defaults, update existing |
 | SessionManagerTests.cs | — | Session CRUD operations |
 | StreamlinedCodexTests.cs | — | Codex CLI integration |
-| Phase11FeatureTests.cs | 14 | GlobalDb curation (GetChunks pagination, filters, ordering, GetDistinctSourceTypes), SearchEngineHealthEntry (5 states), DeleteChunk, PdfExtractionResult model |
+| RagGroundedAnalysisTests.cs | 16 | RAG analysis prompt building (no truncation, all chunks/deps), gap verification parsing, self-scan simulation (cloud providers, tests, Hive Mind, notifications captured), false positive detection |
 
-**Total: 341 tests — 339 passed, 2 skipped, 0 failures**
+**Total: 357 tests — 355 passed, 2 skipped, 0 failures**
 
 ---
 

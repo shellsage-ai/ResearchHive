@@ -174,6 +174,9 @@ public class RepoProfile
     public int IndexedFileCount { get; set; }
     /// <summary>Total chunks created from source files.</summary>
     public int IndexedChunkCount { get; set; }
+    /// <summary>Full contents of manifest files (package.json, .csproj, etc.) — not persisted, used during analysis.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public Dictionary<string, string> ManifestContents { get; set; } = new();
 }
 
 /// <summary>A single file or directory entry in a repo, used as scan-proof.</summary>
