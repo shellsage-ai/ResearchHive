@@ -40,6 +40,8 @@ public partial class SessionWorkspaceViewModel : ObservableObject
     private readonly NotificationService _notificationService;
     private readonly GitHubDiscoveryService _discoveryService;
     private CancellationTokenSource? _jobCts;
+    private CancellationTokenSource? _repoScanCts;
+    private CancellationTokenSource? _fusionCts;
     private readonly DispatcherTimer _autoSaveTimer;
     private bool _notebookDirty;
 

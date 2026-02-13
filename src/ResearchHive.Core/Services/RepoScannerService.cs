@@ -533,8 +533,10 @@ public class RepoScannerService
     {
         sb.AppendLine("Respond with EXACTLY this format:");
         sb.AppendLine("## Summary");
-        sb.AppendLine("1-3 sentences describing what this project IS and DOES. Focus on the project's own purpose and functionality.");
-        sb.AppendLine("Example: 'AutoMapper is a convention-based object-object mapper for .NET that eliminates manual mapping code between DTOs 	and domain models. It supports projection, flattening, and custom value resolvers.'");
+        sb.AppendLine("1-3 sentences describing what this project IS and DOES at its CORE. Describe the project's primary purpose — what problem it solves and for whom.");
+        sb.AppendLine("Do NOT describe the analysis tool or code scanning features. Describe the PROJECT ITSELF.");
+        sb.AppendLine("Example for a mapping library: 'AutoMapper is a convention-based object-object mapper for .NET that eliminates manual mapping code between DTOs and domain models. It supports projection, flattening, and custom value resolvers.'");
+        sb.AppendLine("Example for a research platform: 'ResearchHive is a WPF desktop application for conducting multi-source research with AI assistance. It manages research sessions, captures evidence from web sources, and generates grounded reports with citation verification.'");
         sb.AppendLine("## Frameworks");
         sb.AppendLine("- framework1");
         sb.AppendLine("- framework2");
@@ -547,6 +549,7 @@ public class RepoScannerService
         sb.AppendLine("- gap2");
         sb.AppendLine("(list at least 5 specific weaknesses, missing features, or improvement opportunities — based on code evidence, not assumptions)");
         sb.AppendLine("IMPORTANT RULES:");
+        sb.AppendLine("- The Summary must describe what the project IS (e.g., 'a mapping library', 'a research platform', 'a web framework'), not what techniques were used to analyze it.");
         sb.AppendLine("- Gaps must be MISSING capabilities, not critiques of existing features.");
         sb.AppendLine("  Bad gap example: 'The search engine assumes X which limits Y' — this critiques something that EXISTS.");
         sb.AppendLine("  Good gap example: 'No CI/CD pipeline configuration' — this identifies something ABSENT.");
@@ -872,7 +875,8 @@ public class RepoScannerService
         sb.AppendLine("=== PRODUCE ALL FIVE SECTIONS BELOW ===");
         sb.AppendLine();
         sb.AppendLine("## Summary");
-        sb.AppendLine("1-3 sentences describing what this project IS and DOES. Focus on the project's own purpose and functionality — not the analysis tool used to scan it.");
+        sb.AppendLine("1-3 sentences describing what this project IS and DOES at its CORE. Describe the project's primary purpose — what problem it solves and for whom.");
+        sb.AppendLine("Do NOT describe the analysis tool or scanning process. Describe the PROJECT ITSELF (e.g., 'AutoMapper is a convention-based object-object mapper...', 'ResearchHive is a WPF research platform...').");
         sb.AppendLine();
         sb.AppendLine("## CodeBook");
         sb.AppendLine("A concise architecture reference document (under 1500 words) covering:");
@@ -1019,7 +1023,8 @@ public class RepoScannerService
         sb.AppendLine("=== PRODUCE ALL SIX SECTIONS BELOW ===");
         sb.AppendLine();
         sb.AppendLine("## Summary");
-        sb.AppendLine("1-3 sentences describing what this project IS and DOES. Focus on the project's own purpose and functionality — not the analysis tool used to scan it.");
+        sb.AppendLine("1-3 sentences describing what this project IS and DOES at its CORE. Describe the project's primary purpose — what problem it solves and for whom.");
+        sb.AppendLine("Do NOT describe the analysis tool or scanning process. Describe the PROJECT ITSELF (e.g., 'AutoMapper is a convention-based object-object mapper...', 'ResearchHive is a WPF research platform...').");
         sb.AppendLine();
         sb.AppendLine("## CodeBook");
         sb.AppendLine("A concise architecture reference document (under 1500 words) covering:");

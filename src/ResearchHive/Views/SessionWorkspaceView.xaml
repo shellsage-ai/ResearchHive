@@ -1974,8 +1974,14 @@
                         </StackPanel>
                     </Border>
 
-                    <ProgressBar Style="{StaticResource BusyIndicator}" Margin="0,4"
-                                 Visibility="{Binding IsRepoScanning, Converter={StaticResource BoolVis}}"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,4">
+                        <ProgressBar Style="{StaticResource BusyIndicator}" Width="200"
+                                     Visibility="{Binding IsRepoScanning, Converter={StaticResource BoolVis}}"/>
+                        <Button Content="✕ Cancel Scan" Style="{StaticResource DangerButton}" 
+                                Command="{Binding CancelRepoScanCommand}" Margin="12,0,0,0"
+                                Padding="10,3" FontSize="12"
+                                Visibility="{Binding IsRepoScanning, Converter={StaticResource BoolVis}}"/>
+                    </StackPanel>
                     <TextBox Text="{Binding RepoScanStatus, Mode=OneWay}" Style="{StaticResource SelectableText}"
                              Foreground="{StaticResource TextSecondaryBrush}" 
                                FontSize="12" Margin="0,4,0,8"/>
@@ -2145,8 +2151,14 @@
                         </StackPanel>
                     </Border>
 
-                    <ProgressBar Style="{StaticResource BusyIndicator}" Margin="0,4"
-                                 Visibility="{Binding IsProjectFusing, Converter={StaticResource BoolVis}}"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,4">
+                        <ProgressBar Style="{StaticResource BusyIndicator}" Width="200"
+                                     Visibility="{Binding IsProjectFusing, Converter={StaticResource BoolVis}}"/>
+                        <Button Content="✕ Cancel Fusion" Style="{StaticResource DangerButton}" 
+                                Command="{Binding CancelProjectFusionCommand}" Margin="12,0,0,0"
+                                Padding="10,3" FontSize="12"
+                                Visibility="{Binding IsProjectFusing, Converter={StaticResource BoolVis}}"/>
+                    </StackPanel>
                     <TextBox Text="{Binding RepoScanStatus, Mode=OneWay}" Style="{StaticResource SelectableText}"
                              Foreground="{StaticResource TextSecondaryBrush}" 
                                FontSize="12" Margin="0,4,0,8"

@@ -128,15 +128,37 @@ public class ProjectFusionEngine
 
             AddReplay(job, "fuse", "Generating Fusion Outline", $"Sending {inputBlocks.Count} inputs to LLM for section outline");
 
+            // --- Build compact identity reminder (injected into every section expansion call) ---
+            var identityReminder = new StringBuilder();
+            identityReminder.AppendLine("PROJECT IDENTITY REMINDER (do NOT confuse these):");
+            for (int i = 0; i < inputBlocks.Count; i++)
+            {
+                var desc = request.Inputs.Count > i ? inputTitles[i] : $"Input {i + 1}";
+                // Extract description and summary from the formatted block
+                var block = inputBlocks[i];
+                var descLine = block.Split('\n').FirstOrDefault(l => l.StartsWith("**Description:"));
+                var summLine = block.Split('\n').FirstOrDefault(l => l.StartsWith("**Project Summary:"));
+                identityReminder.AppendLine($"- **{desc}**: {descLine?.Replace("**Description:** ", "")?.Trim()}");
+                if (summLine != null)
+                    identityReminder.AppendLine($"  Summary: {summLine.Replace("**Project Summary:** ", "").Trim()}");
+            }
+            var identityStr = identityReminder.ToString();
+
             // --- Outline-then-expand: Call 1 — get a structured outline, Call 2-9 — expand each section ---
             var outlinePrompt = new StringBuilder();
             outlinePrompt.AppendLine(userPrompt.ToString());
             outlinePrompt.AppendLine();
-            outlinePrompt.AppendLine("IMPORTANT: For now, produce ONLY a bullet-point outline of each section (3-6 bullets per section).");
+            outlinePrompt.AppendLine("STEP 1 — IDENTITY CHECK (do this first):");
+            outlinePrompt.AppendLine("Before generating section outlines, write a one-sentence identity for EACH input project based on their Description and Summary fields.");
+            outlinePrompt.AppendLine("Verify you understand what each project IS and what it DOES. A mapping library is NOT a research tool. A research platform is NOT an object mapper.");
+            outlinePrompt.AppendLine();
+            outlinePrompt.AppendLine("STEP 2 — SECTION OUTLINES:");
+            outlinePrompt.AppendLine("Produce ONLY a bullet-point outline of each section (3-6 bullets per section).");
             outlinePrompt.AppendLine("Do NOT write full prose yet. Just key points, decisions, and items for each section.");
             outlinePrompt.AppendLine("Label each section clearly. Reference specific project names and technologies from the input data.");
+            outlinePrompt.AppendLine("Do NOT attribute one project's features or capabilities to the other project.");
 
-            var outlineResponse = await _llmService.GenerateAsync(outlinePrompt.ToString(), systemPrompt, 2000, ct: ct);
+            var outlineResponse = await _llmService.GenerateAsync(outlinePrompt.ToString(), systemPrompt, 2500, ct: ct);
             AddReplay(job, "outline", "Outline Generated", "Expanding individual sections...");
 
             // Build shared context block (compact version of inputs for section calls)
@@ -154,7 +176,7 @@ public class ProjectFusionEngine
                 {
                     var sectionName = AllSections[j];
                     tasks.Add(ExpandSectionAsync(sectionName, request.Goal, outlineResponse, contextStr,
-                        goalInstruction, systemPrompt, ct));
+                        goalInstruction, systemPrompt, identityStr, ct));
                 }
 
                 var results = await Task.WhenAll(tasks);
@@ -254,7 +276,9 @@ CRITICAL GROUNDING RULES — follow these exactly:
 7. When listing technologies, ONLY list ones that appear in the Dependencies, Frameworks, or Languages fields of the input data.
 8. Read each project's Description and Summary carefully — understand what each project IS before analyzing. Do not confuse one project's purpose with another's.
 9. For IP_NOTES: report the license EXACTLY as stated in the input data. If no license is listed, say 'License: Not specified in scan data'. Do NOT guess or invent licenses.
-10. A gap in Project A is only 'resolved' by Project B if Project B's strengths or capabilities explicitly address that gap. Do not claim a gap is resolved by the same project that has it.";
+10. A gap in Project A is only 'resolved' by Project B if Project B's strengths or capabilities explicitly address that gap. Do not claim a gap is resolved by the same project that has it.
+11. Do NOT attribute Project A's capabilities to Project B. If the CodeBook or Architecture Summary describes features of Project X, those features belong ONLY to Project X.
+12. Each project has a DISTINCT purpose stated in its Description and Summary. A library (e.g., object mapper) is fundamentally different from an application (e.g., research platform). Do not conflate them.";
 
     // ─────────────── Goal Instructions (detailed per mode) ───────────────
 
@@ -442,11 +466,13 @@ DECISION: <decision> | FROM: <project name(s)>");
     /// <summary>Expand a single fusion section from the outline, with truncation retry.</summary>
     private async Task<(string name, string content)> ExpandSectionAsync(
         string sectionName, ProjectFusionGoal goal, string outline, string inputContext,
-        string goalInstruction, string systemPrompt, CancellationToken ct)
+        string goalInstruction, string systemPrompt, string identityReminder, CancellationToken ct)
     {
         var sectionGuidance = GetSectionGuidance(sectionName, goal);
 
         var prompt = $@"You are expanding ONE section of a project fusion document.
+
+{identityReminder}
 
 Goal: {goalInstruction}
 
@@ -464,6 +490,7 @@ RULES:
 - Output the section content directly — do NOT repeat the section name as a header.
 - ONLY reference technologies, libraries, and capabilities that appear in the input data above.
 - If you are unsure whether a technology is used, do NOT mention it.
+- Do NOT attribute one project's features to the other project. Refer to the identity reminder above.
 - Be specific and concrete. No filler or generic statements.
 - Use **bold** for key terms, markdown tables where comparing items, bullet points for lists.";
 
@@ -532,11 +559,15 @@ RULES:
     private static string FormatProfileForLlm(RepoProfile p)
     {
         var sb = new StringBuilder();
+        // Prominent identity block — LLM must read this first
+        sb.AppendLine($"╔══ PROJECT: {p.Owner}/{p.Name} ══╗");
         sb.AppendLine($"**Source:** {p.RepoUrl}");
         sb.AppendLine($"**Description:** {p.Description}");
         if (!string.IsNullOrWhiteSpace(p.ProjectSummary))
             sb.AppendLine($"**Project Summary:** {p.ProjectSummary}");
         sb.AppendLine($"**Primary Language:** {p.PrimaryLanguage} | **All Languages:** {string.Join(", ", p.Languages)}");
+        if (!string.IsNullOrWhiteSpace(p.AnalysisModelUsed))
+            sb.AppendLine($"**Scanned By:** {p.AnalysisModelUsed}");
 
         if (p.Frameworks.Count > 0)
             sb.AppendLine($"**Frameworks:** {string.Join(", ", p.Frameworks)}");
@@ -595,16 +626,17 @@ RULES:
                 sb.AppendLine($"  - {e.DisplayIcon} {e.Name}");
         }
 
-        // CodeBook (architecture summary from scan) — truncate to keep prompt reasonable
+        // CodeBook (architecture summary from scan) — increased limit to retain more context
         if (!string.IsNullOrWhiteSpace(p.CodeBook))
         {
-            var codebook = p.CodeBook.Length > 2500
-                ? p.CodeBook[..2500] + "\n  ...(truncated)"
+            var codebook = p.CodeBook.Length > 4000
+                ? p.CodeBook[..4000] + "\n  ...(truncated)"
                 : p.CodeBook;
-            sb.AppendLine("**Architecture Summary (from code analysis):**");
+            sb.AppendLine($"**Architecture Summary (from code analysis of {p.Owner}/{p.Name} — these are capabilities of THIS project only):**");
             sb.AppendLine(codebook);
         }
 
+        sb.AppendLine($"╚══ END: {p.Owner}/{p.Name} ══╝");
         return sb.ToString();
     }
 

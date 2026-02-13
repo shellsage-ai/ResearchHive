@@ -22,13 +22,18 @@ public partial class SessionWorkspaceViewModel
         if (string.IsNullOrWhiteSpace(RepoUrl)) return;
         IsRepoScanning = true;
         RepoScanStatus = "Scanning repository…";
+        _repoScanCts = new CancellationTokenSource();
         try
         {
-            await _repoRunner.RunAnalysisAsync(_sessionId, RepoUrl.Trim());
+            await _repoRunner.RunAnalysisAsync(_sessionId, RepoUrl.Trim(), _repoScanCts.Token);
             RepoScanStatus = "Scan complete.";
             _notificationService.NotifyRepoScanComplete(RepoUrl.Trim());
             RepoUrl = "";
             LoadSessionData();
+        }
+        catch (OperationCanceledException)
+        {
+            RepoScanStatus = "Scan cancelled.";
         }
         catch (Exception ex)
         {
@@ -37,6 +42,7 @@ public partial class SessionWorkspaceViewModel
         finally
         {
             IsRepoScanning = false;
+            _repoScanCts = null;
         }
     }
 
@@ -50,16 +56,23 @@ public partial class SessionWorkspaceViewModel
 
         IsRepoScanning = true;
         RepoScanStatus = $"Scanning {urls.Count} repos…";
+        _repoScanCts = new CancellationTokenSource();
         try
         {
-            foreach (var url in urls)
+            for (int i = 0; i < urls.Count; i++)
             {
-                RepoScanStatus = $"Scanning {url}…";
-                await _repoRunner.RunAnalysisAsync(_sessionId, url);
+                _repoScanCts.Token.ThrowIfCancellationRequested();
+                RepoScanStatus = $"Scanning {urls[i]} ({i + 1}/{urls.Count})…";
+                await _repoRunner.RunAnalysisAsync(_sessionId, urls[i], _repoScanCts.Token);
             }
             RepoScanStatus = $"All {urls.Count} repos scanned.";
             RepoUrlList = "";
             LoadSessionData();
+        }
+        catch (OperationCanceledException)
+        {
+            RepoScanStatus = "Batch scan cancelled.";
+            LoadSessionData(); // load any already-completed scans
         }
         catch (Exception ex)
         {
@@ -68,7 +81,17 @@ public partial class SessionWorkspaceViewModel
         finally
         {
             IsRepoScanning = false;
+            _repoScanCts = null;
         }
+    }
+
+    [RelayCommand]
+    private void CancelRepoScan()
+    {
+        if (!_dialogService.Confirm("Are you sure you want to cancel the running scan?", "Cancel Scan"))
+            return;
+        _repoScanCts?.Cancel();
+        RepoScanStatus = "Cancelling…";
     }
 
     [RelayCommand]
@@ -130,6 +153,7 @@ public partial class SessionWorkspaceViewModel
 
         IsProjectFusing = true;
         RepoScanStatus = "Running project fusion…";
+        _fusionCts = new CancellationTokenSource();
         try
         {
             var request = new ProjectFusionRequest
@@ -144,9 +168,13 @@ public partial class SessionWorkspaceViewModel
                     Title = o.Title
                 }).ToList()
             };
-            await _projectFusionEngine.RunAsync(_sessionId, request);
+            await _projectFusionEngine.RunAsync(_sessionId, request, _fusionCts.Token);
             RepoScanStatus = "Project fusion complete.";
             LoadSessionData();
+        }
+        catch (OperationCanceledException)
+        {
+            RepoScanStatus = "Fusion cancelled.";
         }
         catch (Exception ex)
         {
@@ -155,7 +183,17 @@ public partial class SessionWorkspaceViewModel
         finally
         {
             IsProjectFusing = false;
+            _fusionCts = null;
         }
+    }
+
+    [RelayCommand]
+    private void CancelProjectFusion()
+    {
+        if (!_dialogService.Confirm("Are you sure you want to cancel the running fusion?", "Cancel Fusion"))
+            return;
+        _fusionCts?.Cancel();
+        RepoScanStatus = "Cancelling fusion…";
     }
 
     [RelayCommand]

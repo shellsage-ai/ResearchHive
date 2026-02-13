@@ -52,19 +52,26 @@ public partial class SessionWorkspaceViewModel
 
         IsRepoScanning = true;
         RepoScanStatus = $"Scanning {selected.Count} discovered repo(s)…";
+        _repoScanCts = new CancellationTokenSource();
         try
         {
             int done = 0;
             foreach (var item in selected)
             {
+                _repoScanCts.Token.ThrowIfCancellationRequested();
                 done++;
                 RepoScanStatus = $"Scanning {done}/{selected.Count}: {item.FullName}…";
-                await _repoRunner.RunAnalysisAsync(_sessionId, item.HtmlUrl);
+                await _repoRunner.RunAnalysisAsync(_sessionId, item.HtmlUrl, _repoScanCts.Token);
                 _notificationService.NotifyRepoScanComplete(item.HtmlUrl);
                 item.IsSelected = false;
             }
 
             RepoScanStatus = $"Scanned {selected.Count} discovered repo(s).";
+            LoadSessionData();
+        }
+        catch (OperationCanceledException)
+        {
+            RepoScanStatus = "Discovery scan cancelled.";
             LoadSessionData();
         }
         catch (Exception ex)
@@ -74,6 +81,7 @@ public partial class SessionWorkspaceViewModel
         finally
         {
             IsRepoScanning = false;
+            _repoScanCts = null;
         }
     }
 
