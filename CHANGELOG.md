@@ -3,6 +3,20 @@
 All changes are tracked in `CAPABILITY_MAP.md` (Change Log section) for granular file-level detail.
 This file provides a high-level summary per milestone.
 
+## 2026-02-12 — Phase 15: Pipeline Telemetry, Framework Detection & Parallelism
+- **LLM call tracking**: Full `ScanTelemetry` model — tracks every LLM call (purpose, model, duration, prompt/response length), phase timing, RAG query count, web search count, GitHub API call count
+- **Pipeline instrumentation**: Every phase in `RepoIntelligenceJobRunner.RunAnalysisAsync` wrapped with `Stopwatch` timing; all 4 LLM calls individually timed
+- **Telemetry in reports**: Generated report now includes `## Pipeline Telemetry` section with call table, phase breakdown, and totals
+- **Telemetry in UI**: `FullProfileText` export includes pipeline summary; `AddReplay` posts telemetry to activity log
+- **Executive summary**: Now includes pipeline stats: `"Pipeline: 4 LLM calls (12.3s) | 18 RAG queries | 7 web searches | 25 GitHub API calls | Total: 45.0s"`
+- **Deterministic framework detection**: `DetectFrameworkHints` maps ~40 known packages → human-readable labels (.NET, React, Django, etc.) + parses `TargetFramework` from `.csproj`. Runs before LLM analysis so frameworks appear even with weak models
+- **Framework deduplication**: `ParseAnalysis` skips LLM-suggested frameworks that overlap with deterministically-detected ones
+- **RAG retrieval parallelism**: 12 analysis queries + N gap verification queries now fire via `Task.WhenAll` instead of sequential `foreach`
+- **GitHub enrichment parallelism**: URL enrichment calls in `ComplementResearchService` now parallel per topic
+- **Counter properties**: `RepoScannerService.LastScanApiCallCount`, `ComplementResearchService.LastSearchCallCount/LastEnrichCallCount/LastLlmDurationMs`
+- **Tests**: 11 new — ScanTelemetry summary/defaults, LlmCallRecord fields, PhaseTimingRecord, DetectFrameworkHints (.NET/JS/Python/empty/csproj), ParseAnalysis dedup, RepoProfile.Telemetry default
+- **Tests**: 380 → 391 (389 passed, 2 skipped, 0 failed)
+
 ## 2026-02-13 — Phase 14: Repo Scan Quality Fixes
 - **Deep .csproj discovery**: Expanded `RepoScannerService` to recurse 2 levels into `src/` and `tests/` directories, fixing dependency=0 for standard .NET repo layouts (`src/ProjectName/ProjectName.csproj`)
 - **Gap quality enforcement**: Added explicit prompt instructions distinguishing "missing capability" gaps (REAL) from "critique of existing feature" gaps (FALSE), with good/bad examples in both `AppendFormatInstructions` and `BuildGapVerificationPrompt`

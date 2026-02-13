@@ -180,6 +180,77 @@ public class RepoProfile
 
     /// <summary>Which LLM model generated the analysis (strengths, gaps, CodeBook).</summary>
     public string? AnalysisModelUsed { get; set; }
+
+    /// <summary>Pipeline telemetry: LLM call count, phase durations, total time.</summary>
+    public ScanTelemetry? Telemetry { get; set; }
+}
+
+/// <summary>
+/// Captures pipeline performance telemetry for a repo scan, including
+/// LLM call count/duration, phase timings, and retrieval/search statistics.
+/// </summary>
+public class ScanTelemetry
+{
+    /// <summary>Total wall-clock time for the entire scan.</summary>
+    public long TotalDurationMs { get; set; }
+
+    /// <summary>Individual LLM call records.</summary>
+    public List<LlmCallRecord> LlmCalls { get; set; } = new();
+
+    /// <summary>Phase-level timing breakdown.</summary>
+    public List<PhaseTimingRecord> Phases { get; set; } = new();
+
+    /// <summary>Total number of LLM calls made during this scan.</summary>
+    public int LlmCallCount => LlmCalls.Count;
+
+    /// <summary>Total LLM latency in milliseconds.</summary>
+    public long TotalLlmDurationMs => LlmCalls.Sum(c => c.DurationMs);
+
+    /// <summary>Total RAG retrieval calls (HybridSearchAsync).</summary>
+    public int RetrievalCallCount { get; set; }
+
+    /// <summary>Total web search calls.</summary>
+    public int WebSearchCallCount { get; set; }
+
+    /// <summary>Total GitHub API calls (metadata + enrichment).</summary>
+    public int GitHubApiCallCount { get; set; }
+
+    /// <summary>Concise summary for display.</summary>
+    public string Summary =>
+        $"{LlmCallCount} LLM calls ({TotalLlmDurationMs:N0}ms) | " +
+        $"{RetrievalCallCount} RAG queries | " +
+        $"{WebSearchCallCount} web searches | " +
+        $"{GitHubApiCallCount} GitHub API calls | " +
+        $"Total: {TotalDurationMs / 1000.0:F1}s";
+}
+
+/// <summary>Records a single LLM call with timing and metadata.</summary>
+public class LlmCallRecord
+{
+    /// <summary>Human-readable label (e.g. "CodeBook Generation", "RAG Analysis").</summary>
+    public string Purpose { get; set; } = string.Empty;
+
+    /// <summary>Which model handled this call.</summary>
+    public string? Model { get; set; }
+
+    /// <summary>Wall-clock duration in milliseconds.</summary>
+    public long DurationMs { get; set; }
+
+    /// <summary>Whether the response was truncated.</summary>
+    public bool WasTruncated { get; set; }
+
+    /// <summary>Approximate prompt length (characters).</summary>
+    public int PromptLength { get; set; }
+
+    /// <summary>Approximate response length (characters).</summary>
+    public int ResponseLength { get; set; }
+}
+
+/// <summary>Records timing for one pipeline phase.</summary>
+public class PhaseTimingRecord
+{
+    public string Phase { get; set; } = string.Empty;
+    public long DurationMs { get; set; }
 }
 
 /// <summary>A single file or directory entry in a repo, used as scan-proof.</summary>

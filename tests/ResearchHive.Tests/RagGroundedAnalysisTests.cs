@@ -435,4 +435,200 @@ research workflows with full citation tracking, safety awareness, and IP analysi
 - 341 tests (xUnit + FluentAssertions + Moq)
 - 339 passed, 2 skipped (manual API comparison tests)";
     }
-}
+
+    // ── ScanTelemetry tests ──
+
+    [Fact]
+    public void ScanTelemetry_Summary_FormatsCorrectly()
+    {
+        var telemetry = new ScanTelemetry
+        {
+            TotalDurationMs = 45000,
+            RetrievalCallCount = 18,
+            WebSearchCallCount = 7,
+            GitHubApiCallCount = 25
+        };
+        telemetry.LlmCalls.Add(new LlmCallRecord { Purpose = "CodeBook", DurationMs = 3000, Model = "llama3.1:8b" });
+        telemetry.LlmCalls.Add(new LlmCallRecord { Purpose = "RAG Analysis", DurationMs = 5000, Model = "llama3.1:8b" });
+        telemetry.LlmCalls.Add(new LlmCallRecord { Purpose = "Gap Verification", DurationMs = 2000, Model = "llama3.1:8b" });
+        telemetry.LlmCalls.Add(new LlmCallRecord { Purpose = "Complement", DurationMs = 1500, Model = "llama3.1:8b" });
+
+        telemetry.LlmCallCount.Should().Be(4);
+        telemetry.TotalLlmDurationMs.Should().Be(11500);
+
+        var summary = telemetry.Summary;
+        summary.Should().Contain("4 LLM calls");
+        summary.Should().Contain("18 RAG queries");
+        summary.Should().Contain("7 web searches");
+        summary.Should().Contain("25 GitHub API calls");
+        summary.Should().Contain("Total: 45.0s");
+    }
+
+    [Fact]
+    public void ScanTelemetry_EmptyByDefault_HasZeroCounts()
+    {
+        var telemetry = new ScanTelemetry();
+        telemetry.LlmCallCount.Should().Be(0);
+        telemetry.TotalLlmDurationMs.Should().Be(0);
+        telemetry.RetrievalCallCount.Should().Be(0);
+        telemetry.WebSearchCallCount.Should().Be(0);
+        telemetry.GitHubApiCallCount.Should().Be(0);
+        telemetry.Phases.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void LlmCallRecord_StoresAllFields()
+    {
+        var record = new LlmCallRecord
+        {
+            Purpose = "RAG Analysis",
+            Model = "codex-cli",
+            DurationMs = 12345,
+            WasTruncated = true,
+            PromptLength = 50000,
+            ResponseLength = 8000
+        };
+
+        record.Purpose.Should().Be("RAG Analysis");
+        record.Model.Should().Be("codex-cli");
+        record.DurationMs.Should().Be(12345);
+        record.WasTruncated.Should().BeTrue();
+        record.PromptLength.Should().Be(50000);
+        record.ResponseLength.Should().Be(8000);
+    }
+
+    [Fact]
+    public void PhaseTimingRecord_StoresPhaseAndDuration()
+    {
+        var phase = new PhaseTimingRecord { Phase = "Clone + Index", DurationMs = 10000 };
+        phase.Phase.Should().Be("Clone + Index");
+        phase.DurationMs.Should().Be(10000);
+    }
+
+    // ── DetectFrameworkHints tests ──
+
+    [Fact]
+    public void DetectFrameworkHints_DotNet_DetectsWpfMvvmAndTestFrameworks()
+    {
+        var deps = new List<RepoDependency>
+        {
+            new() { Name = "CommunityToolkit.Mvvm", Version = "8.2.2" },
+            new() { Name = "Microsoft.Extensions.DependencyInjection", Version = "8.0.0" },
+            new() { Name = "xunit", Version = "2.6.1" },
+            new() { Name = "FluentAssertions", Version = "6.12.0" },
+            new() { Name = "Moq", Version = "4.20.0" },
+            new() { Name = "coverlet.collector", Version = "6.0.0" },
+            new() { Name = "Microsoft.Data.Sqlite", Version = "8.0.0" },
+            new() { Name = "Microsoft.Playwright", Version = "1.40.0" },
+        };
+        var manifests = new Dictionary<string, string>
+        {
+            { "src/App/App.csproj", "<Project><PropertyGroup><TargetFramework>net8.0-windows</TargetFramework><UseWPF>true</UseWPF></PropertyGroup></Project>" }
+        };
+
+        var hints = RepoScannerService.DetectFrameworkHints(deps, manifests);
+
+        hints.Should().Contain("WPF + MVVM (CommunityToolkit.Mvvm)");
+        hints.Should().Contain("Microsoft DI (Microsoft.Extensions.DependencyInjection)");
+        hints.Should().Contain("xUnit");
+        hints.Should().Contain("FluentAssertions");
+        hints.Should().Contain("Moq");
+        hints.Should().Contain("Coverlet (code coverage)");
+        hints.Should().Contain("SQLite");
+        hints.Should().Contain("Playwright (browser automation)");
+        hints.Should().Contain(".NET 8");
+        hints.Should().Contain("WPF");
+        hints.Should().Contain("Windows-specific (WPF/WinForms)");
+    }
+
+    [Fact]
+    public void DetectFrameworkHints_JavaScript_DetectsReactAndNextJs()
+    {
+        var deps = new List<RepoDependency>
+        {
+            new() { Name = "react", Version = "18.2.0" },
+            new() { Name = "react-dom", Version = "18.2.0" },
+            new() { Name = "next", Version = "14.0.0" },
+            new() { Name = "typescript", Version = "5.0.0" },
+            new() { Name = "tailwindcss", Version = "3.3.0" },
+            new() { Name = "jest", Version = "29.0.0" },
+        };
+        var manifests = new Dictionary<string, string>();
+
+        var hints = RepoScannerService.DetectFrameworkHints(deps, manifests);
+
+        hints.Should().Contain("React");
+        hints.Should().Contain("Next.js");
+        hints.Should().Contain("TypeScript");
+        hints.Should().Contain("Tailwind CSS");
+        hints.Should().Contain("Jest");
+    }
+
+    [Fact]
+    public void DetectFrameworkHints_Python_DetectsFastApiAndPytest()
+    {
+        var deps = new List<RepoDependency>
+        {
+            new() { Name = "fastapi", Version = "0.104.0" },
+            new() { Name = "pandas", Version = "2.1.0" },
+            new() { Name = "pytest", Version = "7.4.0" },
+        };
+        var manifests = new Dictionary<string, string>();
+
+        var hints = RepoScannerService.DetectFrameworkHints(deps, manifests);
+
+        hints.Should().Contain("FastAPI");
+        hints.Should().Contain("Pandas");
+        hints.Should().Contain("Pytest");
+    }
+
+    [Fact]
+    public void DetectFrameworkHints_EmptyDeps_ReturnsEmptyList()
+    {
+        var hints = RepoScannerService.DetectFrameworkHints(new(), new());
+        hints.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void DetectFrameworkHints_CsprojTargetFramework_DetectsVersion()
+    {
+        var deps = new List<RepoDependency>();
+        var manifests = new Dictionary<string, string>
+        {
+            { "src/App.csproj", "<Project><PropertyGroup><TargetFramework>net9.0</TargetFramework></PropertyGroup></Project>" }
+        };
+
+        var hints = RepoScannerService.DetectFrameworkHints(deps, manifests);
+        hints.Should().Contain(".NET 9");
+    }
+
+    [Fact]
+    public void ParseAnalysis_DoesNotDuplicateDeterministicFrameworks()
+    {
+        var profile = CreateTestProfile();
+        // Simulate deterministic detection already ran
+        profile.Frameworks.Add("WPF + MVVM (CommunityToolkit.Mvvm)");
+        profile.Frameworks.Add(".NET 8");
+
+        var llmResponse = @"## Frameworks
+- WPF with CommunityToolkit.Mvvm
+-  RAG retrieval pipeline
+## Strengths
+- Good architecture
+## Gaps
+- No CI/CD";
+
+        RepoScannerService.ParseAnalysis(llmResponse, profile);
+
+        // "WPF" from LLM should not duplicate the existing "WPF + MVVM (CommunityToolkit.Mvvm)"
+        profile.Frameworks.Count(f => f.Contains("WPF", StringComparison.OrdinalIgnoreCase)).Should().Be(1);
+        // "RAG retrieval pipeline" is new, should be added
+        profile.Frameworks.Should().Contain("RAG retrieval pipeline");
+    }
+
+    [Fact]
+    public void RepoProfile_Telemetry_IsNullByDefault()
+    {
+        var profile = new RepoProfile();
+        profile.Telemetry.Should().BeNull();
+    }}

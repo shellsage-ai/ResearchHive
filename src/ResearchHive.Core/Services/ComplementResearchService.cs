@@ -1,5 +1,6 @@
 using ResearchHive.Core.Configuration;
 using ResearchHive.Core.Models;
+using System.Diagnostics;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text.Json;
@@ -20,6 +21,15 @@ public class ComplementResearchService
     /// <summary>Minimum number of complement suggestions to produce.</summary>
     public const int MinimumComplements = 5;
 
+    /// <summary>Number of web search calls in the last ResearchAsync invocation.</summary>
+    public int LastSearchCallCount { get; private set; }
+
+    /// <summary>Number of GitHub API enrichment calls in the last ResearchAsync invocation.</summary>
+    public int LastEnrichCallCount { get; private set; }
+
+    /// <summary>Duration of the LLM evaluation call in the last ResearchAsync invocation (ms).</summary>
+    public long LastLlmDurationMs { get; private set; }
+
     public ComplementResearchService(BrowserSearchService searchService, LlmService llmService, AppSettings settings)
     {
         _searchService = searchService;
@@ -33,6 +43,9 @@ public class ComplementResearchService
     public async Task<List<ComplementProject>> ResearchAsync(RepoProfile profile, CancellationToken ct = default)
     {
         var complements = new List<ComplementProject>();
+        LastSearchCallCount = 0;
+        LastEnrichCallCount = 0;
+        LastLlmDurationMs = 0;
 
         // Build search queries — use gaps if available, plus general improvement queries
         var searchTopics = new List<string>();
@@ -69,6 +82,7 @@ public class ComplementResearchService
             var query = $"{profile.PrimaryLanguage} {topic} library github stars:>100";
             try
             {
+                LastSearchCallCount++;
                 var urls = await _searchService.SearchAsync(query, "DuckDuckGo",
                     "https://duckduckgo.com/?q={query}", ct: ct);
                 searchResults.Add((topic, urls.Take(5).ToList()));
@@ -81,16 +95,13 @@ public class ComplementResearchService
 
         if (searchResults.Count == 0) return complements;
 
-        // Enrich GitHub URLs with real descriptions before LLM evaluation
+        // Enrich GitHub URLs with real descriptions before LLM evaluation (parallel per topic)
         var enrichedResults = new List<(string topic, List<(string url, string description)> entries)>();
         foreach (var (topic, urls) in searchResults)
         {
-            var entries = new List<(string url, string description)>();
-            foreach (var url in urls)
-            {
-                var desc = await EnrichGitHubUrlAsync(url, ct);
-                entries.Add((url, desc));
-            }
+            LastEnrichCallCount += urls.Count;
+            var enrichTasks = urls.Select(async url => (url, desc: await EnrichGitHubUrlAsync(url, ct))).ToList();
+            var entries = (await Task.WhenAll(enrichTasks)).ToList();
             enrichedResults.Add((topic, entries));
         }
 
@@ -128,6 +139,7 @@ public class ComplementResearchService
         sb.AppendLine("- License: <license if known, else Unknown>");
         sb.AppendLine("- Maturity: <Mature|Growing|Early|Unknown>");
 
+        var llmSw = Stopwatch.StartNew();
         var response = await _llmService.GenerateAsync(sb.ToString(),
             $"You are a software ecosystem analyst. Identify at least {MinimumComplements} complementary projects ranked by relevance. " +
             "Be specific about what each adds. Ensure diversity across categories. " +
@@ -135,6 +147,8 @@ public class ComplementResearchService
             "Do NOT invent project names that don't appear in the URLs. " +
             "If a URL is from GitHub, derive the project name from the URL path (e.g., github.com/owner/repo → repo).",
             ct: ct);
+        llmSw.Stop();
+        LastLlmDurationMs = llmSw.ElapsedMilliseconds;
 
         complements = ParseComplements(response);
         return complements;

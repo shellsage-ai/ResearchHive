@@ -500,6 +500,11 @@ public class RepoProfileViewModel
                 foreach (var c in Profile.ComplementSuggestions)
                     sb.AppendLine($"  • {c.Name} ({c.Url}) — {c.Purpose}: {c.WhatItAdds}");
             }
+            if (Profile.Telemetry != null)
+            {
+                sb.AppendLine();
+                sb.AppendLine($"Pipeline: {Profile.Telemetry.Summary}");
+            }
             return sb.ToString();
         }
     }

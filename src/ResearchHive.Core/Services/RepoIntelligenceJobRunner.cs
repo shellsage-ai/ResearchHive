@@ -1,4 +1,5 @@
 using ResearchHive.Core.Models;
+using System.Diagnostics;
 using System.Text;
 
 namespace ResearchHive.Core.Services;
@@ -55,7 +56,11 @@ public class RepoIntelligenceJobRunner
 
         try
         {
+            var telemetry = new ScanTelemetry();
+            var totalSw = Stopwatch.StartNew();
+
             // ── Phase 1: Metadata scan (GitHub API — no LLM yet) ──
+            var phaseSw = Stopwatch.StartNew();
             job.State = JobState.Searching;
             db.SaveJob(job);
             AddReplay(job, "scan", "Scanning Repository", "Fetching metadata, README, dependencies via GitHub API...");
@@ -63,10 +68,15 @@ public class RepoIntelligenceJobRunner
             var profile = await _scanner.ScanAsync(repoUrl, ct);
             profile.SessionId = sessionId;
 
+            phaseSw.Stop();
+            telemetry.Phases.Add(new PhaseTimingRecord { Phase = "Metadata Scan", DurationMs = phaseSw.ElapsedMilliseconds });
+            telemetry.GitHubApiCallCount += _scanner.LastScanApiCallCount;
+
             AddReplay(job, "scanned", "Metadata Collected",
                 $"Found: {profile.PrimaryLanguage} | {profile.Dependencies.Count} deps | {profile.Stars}★");
 
             // ── Phase 2: Clone + deep index (chunks + embeddings) ──
+            phaseSw = Stopwatch.StartNew();
             bool isIndexed = false;
             if (_repoIndexService != null)
             {
@@ -84,13 +94,27 @@ public class RepoIntelligenceJobRunner
                 }
             }
 
+            phaseSw.Stop();
+            telemetry.Phases.Add(new PhaseTimingRecord { Phase = "Clone + Index", DurationMs = phaseSw.ElapsedMilliseconds });
+
             // ── Phase 3: CodeBook generation (architecture summary from chunks) ──
+            phaseSw = Stopwatch.StartNew();
             if (_codeBookGenerator != null && isIndexed)
             {
                 try
                 {
                     AddReplay(job, "codebook", "Generating CodeBook", "Analyzing architecture patterns from indexed code...");
+                    var cbSw = Stopwatch.StartNew();
                     profile.CodeBook = await _codeBookGenerator.GenerateAsync(sessionId, profile, ct);
+                    cbSw.Stop();
+                    telemetry.LlmCalls.Add(new LlmCallRecord
+                    {
+                        Purpose = "CodeBook Generation",
+                        Model = _llmService.LastModelUsed,
+                        DurationMs = cbSw.ElapsedMilliseconds,
+                        ResponseLength = profile.CodeBook.Length
+                    });
+                    telemetry.RetrievalCallCount += 6; // CodeBookGenerator issues 6 RAG queries
                     AddReplay(job, "codebook_done", "CodeBook Generated", "Architecture reference document created");
                 }
                 catch (Exception ex)
@@ -99,45 +123,76 @@ public class RepoIntelligenceJobRunner
                 }
             }
 
+            phaseSw.Stop();
+            telemetry.Phases.Add(new PhaseTimingRecord { Phase = "CodeBook Generation", DurationMs = phaseSw.ElapsedMilliseconds });
+
             // ── Phase 4: RAG-grounded strengths + gaps analysis ──
+            phaseSw = Stopwatch.StartNew();
             job.State = JobState.Evaluating;
             db.SaveJob(job);
 
             if (isIndexed && _retrievalService != null)
             {
                 AddReplay(job, "rag_analysis", "RAG-Grounded Analysis", "Querying indexed code to build comprehensive assessment...");
-                await RunRagGroundedAnalysis(sessionId, profile, ct);
+                await RunRagGroundedAnalysis(sessionId, profile, telemetry, ct);
             }
             else
             {
                 // Fallback: shallow analysis from metadata only (no code available)
                 AddReplay(job, "shallow_analysis", "Shallow Analysis", "No indexed code available — analyzing from README + manifests only");
                 await _scanner.AnalyzeShallowAsync(profile, ct);
+                telemetry.LlmCalls.Add(new LlmCallRecord
+                {
+                    Purpose = "Shallow Analysis (fallback)",
+                    Model = _llmService.LastModelUsed,
+                    DurationMs = phaseSw.ElapsedMilliseconds
+                });
             }
 
             AddReplay(job, "analyzed", "Analysis Complete",
                 $"{profile.Strengths.Count} strengths, {profile.Gaps.Count} gaps identified");
 
+            phaseSw.Stop();
+            telemetry.Phases.Add(new PhaseTimingRecord { Phase = "RAG Analysis", DurationMs = phaseSw.ElapsedMilliseconds });
+
             // ── Phase 5: Gap verification via RAG (prune false positives) ──
+            phaseSw = Stopwatch.StartNew();
             if (isIndexed && _retrievalService != null && profile.Gaps.Count > 0)
             {
                 AddReplay(job, "gap_verify", "Verifying Gaps Against Code", "Checking each gap claim against actual source code...");
                 var originalGapCount = profile.Gaps.Count;
-                await VerifyGapsViaRag(sessionId, profile, ct);
+                await VerifyGapsViaRag(sessionId, profile, telemetry, ct);
                 var pruned = originalGapCount - profile.Gaps.Count;
                 if (pruned > 0)
                     AddReplay(job, "gaps_pruned", "False Positives Removed", $"Removed {pruned} false gaps — {profile.Gaps.Count} verified gaps remain");
                 else
                     AddReplay(job, "gaps_confirmed", "Gaps Confirmed", $"All {profile.Gaps.Count} gaps verified as genuine");
             }
+            phaseSw.Stop();
+            telemetry.Phases.Add(new PhaseTimingRecord { Phase = "Gap Verification", DurationMs = phaseSw.ElapsedMilliseconds });
 
             // ── Phase 6: Complement research (based on verified gaps) ──
+            phaseSw = Stopwatch.StartNew();
             AddReplay(job, "complement", "Researching Complements", $"Searching for projects to fill {profile.Gaps.Count} verified gaps...");
             var complements = await _complementService.ResearchAsync(profile, ct);
             profile.ComplementSuggestions = complements;
+            phaseSw.Stop();
+            telemetry.Phases.Add(new PhaseTimingRecord { Phase = "Complement Research", DurationMs = phaseSw.ElapsedMilliseconds });
+            telemetry.WebSearchCallCount = _complementService.LastSearchCallCount;
+            telemetry.GitHubApiCallCount += _complementService.LastEnrichCallCount;
+            // Complement service makes 1 LLM call
+            telemetry.LlmCalls.Add(new LlmCallRecord
+            {
+                Purpose = "Complement Evaluation",
+                Model = _llmService.LastModelUsed,
+                DurationMs = _complementService.LastLlmDurationMs
+            });
             AddReplay(job, "complements_done", "Complements Found", $"Found {complements.Count} complementary projects");
 
             // ── Phase 7: Save + report ──
+            totalSw.Stop();
+            telemetry.TotalDurationMs = totalSw.ElapsedMilliseconds;
+            profile.Telemetry = telemetry;
             db.SaveRepoProfile(profile);
 
             job.State = JobState.Reporting;
@@ -159,10 +214,13 @@ public class RepoIntelligenceJobRunner
             job.State = JobState.Completed;
             job.FullReport = report;
             job.ModelUsed = profile.AnalysisModelUsed;
-            job.ExecutiveSummary = $"Analyzed {profile.Owner}/{profile.Name}: {profile.PrimaryLanguage}, {profile.Dependencies.Count} dependencies, {profile.IndexedChunkCount} chunks indexed, {profile.Strengths.Count} strengths, {profile.Gaps.Count} verified gaps, {complements.Count} complement suggestions.";
+            job.ExecutiveSummary = $"Analyzed {profile.Owner}/{profile.Name}: {profile.PrimaryLanguage}, " +
+                $"{profile.Dependencies.Count} deps, {profile.IndexedChunkCount} chunks, " +
+                $"{profile.Strengths.Count} strengths, {profile.Gaps.Count} gaps, {complements.Count} complements. " +
+                $"Pipeline: {telemetry.Summary}";
             db.SaveJob(job);
             AddReplay(job, "complete", "Analysis Complete", job.ExecutiveSummary);
-            db.SaveJob(job);
+            AddReplay(job, "telemetry", "Pipeline Telemetry", telemetry.Summary);
 
             return profile;
         }
@@ -179,7 +237,7 @@ public class RepoIntelligenceJobRunner
     /// Multi-query RAG analysis: issue diverse queries against the indexed codebase,
     /// gather top chunks, and ask the LLM to assess strengths/gaps from actual code.
     /// </summary>
-    private async Task RunRagGroundedAnalysis(string sessionId, RepoProfile profile, CancellationToken ct)
+    private async Task RunRagGroundedAnalysis(string sessionId, RepoProfile profile, ScanTelemetry telemetry, CancellationToken ct)
     {
         // Diverse queries to explore the full codebase — not just architecture
         var analysisQueries = new[]
@@ -201,15 +259,21 @@ public class RepoIntelligenceJobRunner
         var repoFilter = new[] { "repo_code", "repo_doc" };
         var allChunks = new List<RetrievalResult>();
 
-        foreach (var q in analysisQueries)
+        // Parallel RAG retrieval — queries are independent reads
+        var retrievalTasks = analysisQueries.Select(async q =>
         {
             try
             {
                 var hits = await _retrievalService!.HybridSearchAsync(sessionId, q, repoFilter, topK: 5, ct);
-                allChunks.AddRange(hits);
+                return (IReadOnlyList<RetrievalResult>)hits.ToList();
             }
-            catch { /* individual query failures are non-fatal */ }
-        }
+            catch { return (IReadOnlyList<RetrievalResult>)Array.Empty<RetrievalResult>(); }
+        }).ToList();
+
+        var results = await Task.WhenAll(retrievalTasks);
+        foreach (var hits in results)
+            allChunks.AddRange(hits);
+        telemetry.RetrievalCallCount += analysisQueries.Length;
 
         // Deduplicate and take top 30 by score — broader coverage than CodeBook's 20
         var topChunks = allChunks
@@ -227,11 +291,21 @@ public class RepoIntelligenceJobRunner
         }
 
         var prompt = RepoScannerService.BuildRagAnalysisPrompt(profile, profile.CodeBook, topChunks);
+        var llmSw = Stopwatch.StartNew();
         var analysis = await _llmService.GenerateAsync(prompt,
             "You are a senior software architecture analyst. Analyze the ACTUAL SOURCE CODE provided. " +
             "Be specific — reference real class names, service names, and patterns you see in the code. " +
             "Do NOT make generic assumptions. If the code shows cloud providers, say so. If it has 300+ tests, say so.",
             ct: ct);
+        llmSw.Stop();
+        telemetry.LlmCalls.Add(new LlmCallRecord
+        {
+            Purpose = "RAG-Grounded Analysis",
+            Model = _llmService.LastModelUsed,
+            DurationMs = llmSw.ElapsedMilliseconds,
+            PromptLength = prompt.Length,
+            ResponseLength = analysis.Length
+        });
         RepoScannerService.ParseAnalysis(analysis, profile);
         profile.AnalysisModelUsed = _llmService.LastModelUsed;
     }
@@ -241,27 +315,30 @@ public class RepoIntelligenceJobRunner
     /// If relevant code is found, the gap might be a false positive.
     /// Send all evidence to LLM for final verification.
     /// </summary>
-    private async Task VerifyGapsViaRag(string sessionId, RepoProfile profile, CancellationToken ct)
+    private async Task VerifyGapsViaRag(string sessionId, RepoProfile profile, ScanTelemetry telemetry, CancellationToken ct)
     {
         var repoFilter = new[] { "repo_code", "repo_doc" };
-        var gapEvidence = new List<(string gap, IReadOnlyList<string> chunks)>();
 
-        foreach (var gap in profile.Gaps)
+        // Parallel RAG retrieval for gap evidence
+        var gapTasks = profile.Gaps.Select(async gap =>
         {
             try
             {
-                // Search the indexed codebase for evidence related to this gap
                 var hits = await _retrievalService!.HybridSearchAsync(sessionId, gap, repoFilter, topK: 3, ct);
                 var chunkTexts = hits.Select(h => h.Chunk.Text).ToList();
-                gapEvidence.Add((gap, chunkTexts));
+                return (gap, chunks: (IReadOnlyList<string>)chunkTexts);
             }
             catch
             {
-                gapEvidence.Add((gap, Array.Empty<string>()));
+                return (gap, chunks: (IReadOnlyList<string>)Array.Empty<string>());
             }
-        }
+        }).ToList();
+
+        var gapEvidence = (await Task.WhenAll(gapTasks)).ToList();
+        telemetry.RetrievalCallCount += profile.Gaps.Count;
 
         var verificationPrompt = RepoScannerService.BuildGapVerificationPrompt(profile, gapEvidence);
+        var llmSw = Stopwatch.StartNew();
         var response = await _llmService.GenerateAsync(verificationPrompt,
             "You are a code auditor. Compare each gap claim against the actual source code evidence. " +
             "Be strict: if the code clearly already handles something, mark it as a false positive. " +
@@ -269,6 +346,15 @@ public class RepoIntelligenceJobRunner
             "Gaps that merely critique how an existing feature works should be removed as false positives. " +
             "Keep at least 3 verified gaps.",
             ct: ct);
+        llmSw.Stop();
+        telemetry.LlmCalls.Add(new LlmCallRecord
+        {
+            Purpose = "Gap Verification",
+            Model = _llmService.LastModelUsed,
+            DurationMs = llmSw.ElapsedMilliseconds,
+            PromptLength = verificationPrompt.Length,
+            ResponseLength = response.Length
+        });
 
         var verifiedGaps = RepoScannerService.ParseVerifiedGaps(response);
         if (verifiedGaps.Count >= 3)
@@ -383,6 +469,42 @@ public class RepoIntelligenceJobRunner
                 sb.AppendLine($"- **Purpose:** {c.Purpose}");
                 sb.AppendLine($"- **What it adds:** {c.WhatItAdds}");
                 sb.AppendLine($"- **Category:** {c.Category} | **License:** {c.License} | **Maturity:** {c.Maturity}");
+                sb.AppendLine();
+            }
+        }
+
+        // Pipeline telemetry section
+        if (p.Telemetry != null)
+        {
+            var t = p.Telemetry;
+            sb.AppendLine("## Pipeline Telemetry");
+            sb.AppendLine($"**Total Duration:** {t.TotalDurationMs / 1000.0:F1}s | " +
+                $"**LLM Calls:** {t.LlmCallCount} ({t.TotalLlmDurationMs / 1000.0:F1}s) | " +
+                $"**RAG Queries:** {t.RetrievalCallCount} | " +
+                $"**Web Searches:** {t.WebSearchCallCount} | " +
+                $"**GitHub API Calls:** {t.GitHubApiCallCount}");
+            sb.AppendLine();
+
+            if (t.LlmCalls.Count > 0)
+            {
+                sb.AppendLine("| # | Purpose | Model | Duration | Prompt | Response |");
+                sb.AppendLine("|---|---------|-------|----------|--------|----------|");
+                for (int i = 0; i < t.LlmCalls.Count; i++)
+                {
+                    var c = t.LlmCalls[i];
+                    sb.AppendLine($"| {i + 1} | {c.Purpose} | {c.Model ?? "?"} | {c.DurationMs / 1000.0:F1}s | " +
+                        $"{(c.PromptLength > 0 ? $"{c.PromptLength / 1000.0:F1}K chars" : "—")} | " +
+                        $"{(c.ResponseLength > 0 ? $"{c.ResponseLength / 1000.0:F1}K chars" : "—")} |");
+                }
+                sb.AppendLine();
+            }
+
+            if (t.Phases.Count > 0)
+            {
+                sb.AppendLine("| Phase | Duration |");
+                sb.AppendLine("|-------|----------|");
+                foreach (var phase in t.Phases)
+                    sb.AppendLine($"| {phase.Phase} | {phase.DurationMs / 1000.0:F1}s |");
                 sb.AppendLine();
             }
         }

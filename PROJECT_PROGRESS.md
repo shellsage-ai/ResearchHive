@@ -1,9 +1,9 @@
 # ResearchHive — Project Progress
 
 ## Status
-- Current milestone: All milestones (1-9) + Phases 10-14 complete
+- Current milestone: All milestones (1-9) + Phases 10-15 complete
 - Build status: ✅ PASSING (0 errors)
-- Test baseline: 380 total — 378 passed, 2 skipped, 0 failures
+- Test baseline: 391 total — 389 passed, 2 skipped, 0 failures
 - Services: 37 registered (35 core + PdfIngestionService + NotificationService)
 - Last verified: Full test suite green
 

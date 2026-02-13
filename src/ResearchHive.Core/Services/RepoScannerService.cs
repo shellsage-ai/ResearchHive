@@ -16,6 +16,9 @@ public class RepoScannerService
     private readonly LlmService _llmService;
     private readonly AppSettings _settings;
 
+    /// <summary>Number of GitHub API calls made during the last ScanAsync invocation.</summary>
+    public int LastScanApiCallCount { get; private set; }
+
     public RepoScannerService(AppSettings settings, LlmService llmService)
     {
         _settings = settings;
@@ -39,6 +42,7 @@ public class RepoScannerService
 
     public async Task<RepoProfile> ScanAsync(string repoUrl, CancellationToken ct = default)
     {
+        LastScanApiCallCount = 0;
         var (owner, repo) = ParseRepoUrl(repoUrl);
         var profile = new RepoProfile { RepoUrl = repoUrl, Owner = owner, Name = repo };
 
@@ -187,6 +191,11 @@ public class RepoScannerService
 
         profile.Dependencies = ParseDependencies(depFiles);
         profile.ManifestContents = depFiles; // Preserve full manifest contents for downstream analysis
+
+        // Deterministic framework detection — ensures key technologies are captured
+        // regardless of LLM quality. LLM analysis may add more later.
+        var frameworkHints = DetectFrameworkHints(profile.Dependencies, depFiles);
+        profile.Frameworks.AddRange(frameworkHints);
 
         return profile;
     }
@@ -353,7 +362,12 @@ public class RepoScannerService
                 var text = line[2..].Trim();
                 switch (currentSection)
                 {
-                    case "frameworks": profile.Frameworks.Add(text); break;
+                    case "frameworks":
+                        // Only add if not already present from deterministic detection
+                        if (!profile.Frameworks.Any(f => f.Equals(text, StringComparison.OrdinalIgnoreCase) ||
+                            f.Contains(text.Split(' ')[0], StringComparison.OrdinalIgnoreCase)))
+                            profile.Frameworks.Add(text);
+                        break;
                     case "strengths": profile.Strengths.Add(text); break;
                     case "gaps": profile.Gaps.Add(text); break;
                 }
@@ -442,10 +456,92 @@ public class RepoScannerService
         return deps;
     }
 
+    /// <summary>
+    /// Deterministic framework detection from dependency names. Maps known packages
+    /// to human-readable framework labels. Supplements LLM-inferred frameworks to
+    /// ensure key technologies are always captured even when the LLM is generic.
+    /// </summary>
+    public static List<string> DetectFrameworkHints(List<RepoDependency> deps, Dictionary<string, string> manifests)
+    {
+        var hints = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var depNames = new HashSet<string>(deps.Select(d => d.Name), StringComparer.OrdinalIgnoreCase);
+
+        // .NET / C# packages
+        if (depNames.Contains("CommunityToolkit.Mvvm")) hints.Add("WPF + MVVM (CommunityToolkit.Mvvm)");
+        if (depNames.Contains("Microsoft.Extensions.DependencyInjection")) hints.Add("Microsoft DI (Microsoft.Extensions.DependencyInjection)");
+        if (depNames.Contains("Microsoft.AspNetCore.App") || depNames.Any(d => d.StartsWith("Microsoft.AspNetCore"))) hints.Add("ASP.NET Core");
+        if (depNames.Contains("Microsoft.EntityFrameworkCore") || depNames.Any(d => d.StartsWith("Microsoft.EntityFrameworkCore"))) hints.Add("Entity Framework Core");
+        if (depNames.Contains("Microsoft.Playwright")) hints.Add("Playwright (browser automation)");
+        if (depNames.Contains("Selenium.WebDriver") || depNames.Contains("Selenium.Support")) hints.Add("Selenium WebDriver");
+        if (depNames.Contains("xunit") || depNames.Contains("xunit.runner.visualstudio")) hints.Add("xUnit");
+        if (depNames.Contains("FluentAssertions")) hints.Add("FluentAssertions");
+        if (depNames.Contains("Moq")) hints.Add("Moq");
+        if (depNames.Contains("coverlet.collector")) hints.Add("Coverlet (code coverage)");
+        if (depNames.Contains("Microsoft.Data.Sqlite") || depNames.Contains("System.Data.SQLite") || depNames.Contains("Microsoft.Data.Sqlite.Core")) hints.Add("SQLite");
+        if (depNames.Contains("PdfPig")) hints.Add("PdfPig (PDF extraction)");
+        if (depNames.Contains("Tesseract")) hints.Add("Tesseract OCR");
+        if (depNames.Contains("Newtonsoft.Json")) hints.Add("Newtonsoft.Json");
+        if (depNames.Contains("Serilog") || depNames.Any(d => d.StartsWith("Serilog"))) hints.Add("Serilog (structured logging)");
+        if (depNames.Contains("NLog")) hints.Add("NLog");
+        if (depNames.Contains("Polly")) hints.Add("Polly (resilience)");
+        if (depNames.Contains("MediatR")) hints.Add("MediatR (CQRS/mediator)");
+        if (depNames.Contains("AutoMapper")) hints.Add("AutoMapper");
+        if (depNames.Contains("Dapper")) hints.Add("Dapper (micro-ORM)");
+        if (depNames.Contains("Blazor") || depNames.Any(d => d.Contains("Blazor"))) hints.Add("Blazor");
+
+        // JavaScript / TypeScript packages
+        if (depNames.Contains("react") || depNames.Contains("react-dom")) hints.Add("React");
+        if (depNames.Contains("next")) hints.Add("Next.js");
+        if (depNames.Contains("vue")) hints.Add("Vue.js");
+        if (depNames.Contains("@angular/core")) hints.Add("Angular");
+        if (depNames.Contains("express")) hints.Add("Express.js");
+        if (depNames.Contains("typescript")) hints.Add("TypeScript");
+        if (depNames.Contains("jest")) hints.Add("Jest");
+        if (depNames.Contains("mocha")) hints.Add("Mocha");
+        if (depNames.Contains("tailwindcss")) hints.Add("Tailwind CSS");
+        if (depNames.Contains("vite")) hints.Add("Vite");
+        if (depNames.Contains("webpack")) hints.Add("Webpack");
+        if (depNames.Contains("prisma") || depNames.Contains("@prisma/client")) hints.Add("Prisma ORM");
+
+        // Python packages
+        if (depNames.Contains("django") || depNames.Contains("Django")) hints.Add("Django");
+        if (depNames.Contains("flask") || depNames.Contains("Flask")) hints.Add("Flask");
+        if (depNames.Contains("fastapi") || depNames.Contains("FastAPI")) hints.Add("FastAPI");
+        if (depNames.Contains("pytorch") || depNames.Contains("torch")) hints.Add("PyTorch");
+        if (depNames.Contains("tensorflow")) hints.Add("TensorFlow");
+        if (depNames.Contains("pandas")) hints.Add("Pandas");
+        if (depNames.Contains("numpy")) hints.Add("NumPy");
+        if (depNames.Contains("pytest")) hints.Add("Pytest");
+
+        // Detect target framework from .csproj content
+        foreach (var (file, content) in manifests)
+        {
+            if (!file.EndsWith(".csproj")) continue;
+            var tfMatch = System.Text.RegularExpressions.Regex.Match(content, @"<TargetFramework>([^<]+)</TargetFramework>");
+            if (tfMatch.Success)
+            {
+                var tf = tfMatch.Groups[1].Value;
+                if (tf.StartsWith("net8.0")) hints.Add(".NET 8");
+                else if (tf.StartsWith("net9.0")) hints.Add(".NET 9");
+                else if (tf.StartsWith("net7.0")) hints.Add(".NET 7");
+                else if (tf.StartsWith("net6.0")) hints.Add(".NET 6");
+                else if (tf.StartsWith("netcoreapp")) hints.Add($".NET Core ({tf})");
+                else if (tf.StartsWith("netstandard")) hints.Add($".NET Standard ({tf})");
+
+                if (tf.Contains("-windows")) hints.Add("Windows-specific (WPF/WinForms)");
+            }
+            if (content.Contains("<UseWPF>true</UseWPF>", StringComparison.OrdinalIgnoreCase)) hints.Add("WPF");
+            if (content.Contains("<UseWindowsForms>true</UseWindowsForms>", StringComparison.OrdinalIgnoreCase)) hints.Add("Windows Forms");
+        }
+
+        return hints.ToList();
+    }
+
     private async Task<JsonElement?> FetchJsonAsync(string url, CancellationToken ct)
     {
         try
         {
+            LastScanApiCallCount++;
             var resp = await _http.GetAsync(url, ct);
             if (!resp.IsSuccessStatusCode) return null;
             var json = await resp.Content.ReadAsStringAsync(ct);
@@ -458,6 +554,7 @@ public class RepoScannerService
     {
         try
         {
+            LastScanApiCallCount++;
             var resp = await _http.GetAsync(url, ct);
             if (!resp.IsSuccessStatusCode) return null;
             var json = await resp.Content.ReadAsStringAsync(ct);
