@@ -1,23 +1,33 @@
+using ResearchHive.Core.Configuration;
 using ResearchHive.Core.Models;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Text.Json;
 
 namespace ResearchHive.Core.Services;
 
 /// <summary>
 /// Researches complementary projects for a RepoProfile by searching the web
 /// for tools/libraries that fill identified gaps. Enforces a minimum of 5 complements.
+/// Enriches GitHub URLs with real descriptions before LLM evaluation.
 /// </summary>
 public class ComplementResearchService
 {
     private readonly BrowserSearchService _searchService;
     private readonly LlmService _llmService;
+    private readonly HttpClient _http;
 
     /// <summary>Minimum number of complement suggestions to produce.</summary>
     public const int MinimumComplements = 5;
 
-    public ComplementResearchService(BrowserSearchService searchService, LlmService llmService)
+    public ComplementResearchService(BrowserSearchService searchService, LlmService llmService, AppSettings settings)
     {
         _searchService = searchService;
         _llmService = llmService;
+        _http = new HttpClient();
+        _http.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("ResearchHive", "1.0"));
+        if (!string.IsNullOrEmpty(settings.GitHubPat))
+            _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", settings.GitHubPat);
     }
 
     public async Task<List<ComplementProject>> ResearchAsync(RepoProfile profile, CancellationToken ct = default)
@@ -56,7 +66,7 @@ public class ComplementResearchService
         foreach (var topic in searchTopics)
         {
             if (ct.IsCancellationRequested) break;
-            var query = $"best {profile.PrimaryLanguage} {topic} library tool for {profile.Description}";
+            var query = $"{profile.PrimaryLanguage} {topic} library github stars:>100";
             try
             {
                 var urls = await _searchService.SearchAsync(query, "DuckDuckGo",
@@ -71,18 +81,38 @@ public class ComplementResearchService
 
         if (searchResults.Count == 0) return complements;
 
+        // Enrich GitHub URLs with real descriptions before LLM evaluation
+        var enrichedResults = new List<(string topic, List<(string url, string description)> entries)>();
+        foreach (var (topic, urls) in searchResults)
+        {
+            var entries = new List<(string url, string description)>();
+            foreach (var url in urls)
+            {
+                var desc = await EnrichGitHubUrlAsync(url, ct);
+                entries.Add((url, desc));
+            }
+            enrichedResults.Add((topic, entries));
+        }
+
         // Build LLM prompt to evaluate the discovered projects
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"I'm analyzing the GitHub repo **{profile.Owner}/{profile.Name}** ({profile.PrimaryLanguage}).");
         sb.AppendLine($"Purpose: {profile.Description}");
         sb.AppendLine();
-        sb.AppendLine("I found these potential complementary projects from web search:");
+        sb.AppendLine("I found these potential complementary projects from web search.");
+        sb.AppendLine("Each URL includes a description where available — use these descriptions for accuracy.");
+        sb.AppendLine("Do NOT invent or hallucinate project names or descriptions. Only use information provided here.");
         sb.AppendLine();
-        foreach (var (topic, urls) in searchResults)
+        foreach (var (topic, entries) in enrichedResults)
         {
             sb.AppendLine($"### Topic: {topic}");
-            foreach (var url in urls)
-                sb.AppendLine($"  - {url}");
+            foreach (var (url, desc) in entries)
+            {
+                if (!string.IsNullOrEmpty(desc))
+                    sb.AppendLine($"  - {url} — {desc}");
+                else
+                    sb.AppendLine($"  - {url}");
+            }
             sb.AppendLine();
         }
         sb.AppendLine($"Identify at least {MinimumComplements} complementary projects from the URLs above, ranked by relevance.");
@@ -100,11 +130,65 @@ public class ComplementResearchService
 
         var response = await _llmService.GenerateAsync(sb.ToString(),
             $"You are a software ecosystem analyst. Identify at least {MinimumComplements} complementary projects ranked by relevance. " +
-            "Be specific about what each adds. Ensure diversity across categories.",
+            "Be specific about what each adds. Ensure diversity across categories. " +
+            "IMPORTANT: Use ONLY the project names and descriptions provided in the search results. " +
+            "Do NOT invent project names that don't appear in the URLs. " +
+            "If a URL is from GitHub, derive the project name from the URL path (e.g., github.com/owner/repo → repo).",
             ct: ct);
 
         complements = ParseComplements(response);
         return complements;
+    }
+
+    /// <summary>
+    /// Fetches a short description for GitHub URLs via the GitHub API.
+    /// Returns empty string for non-GitHub URLs or on failure.
+    /// </summary>
+    private async Task<string> EnrichGitHubUrlAsync(string url, CancellationToken ct)
+    {
+        try
+        {
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return string.Empty;
+            if (!uri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase)) return string.Empty;
+
+            // Extract owner/repo from path: /owner/repo[/...]
+            var segments = uri.AbsolutePath.Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (segments.Length < 2) return string.Empty;
+            var owner = segments[0];
+            var repo = segments[1];
+
+            var apiUrl = $"https://api.github.com/repos/{owner}/{repo}";
+            using var request = new HttpRequestMessage(HttpMethod.Get, apiUrl);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
+
+            using var response = await _http.SendAsync(request, ct);
+            if (!response.IsSuccessStatusCode) return string.Empty;
+
+            var json = await response.Content.ReadAsStringAsync(ct);
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            var parts = new List<string>();
+            if (root.TryGetProperty("description", out var descEl) && descEl.ValueKind == JsonValueKind.String)
+            {
+                var desc = descEl.GetString();
+                if (!string.IsNullOrWhiteSpace(desc)) parts.Add(desc);
+            }
+            if (root.TryGetProperty("stargazers_count", out var starsEl))
+                parts.Add($"{starsEl.GetInt32():N0} stars");
+            if (root.TryGetProperty("license", out var licEl) && licEl.ValueKind == JsonValueKind.Object &&
+                licEl.TryGetProperty("spdx_id", out var spdxEl) && spdxEl.ValueKind == JsonValueKind.String)
+            {
+                var spdx = spdxEl.GetString();
+                if (!string.IsNullOrWhiteSpace(spdx) && spdx != "NOASSERTION") parts.Add($"License: {spdx}");
+            }
+
+            return string.Join(" | ", parts);
+        }
+        catch
+        {
+            return string.Empty; // non-fatal
+        }
     }
 
     private static List<ComplementProject> ParseComplements(string response)

@@ -3,6 +3,16 @@
 All changes are tracked in `CAPABILITY_MAP.md` (Change Log section) for granular file-level detail.
 This file provides a high-level summary per milestone.
 
+## 2026-02-13 — Phase 14: Repo Scan Quality Fixes
+- **Deep .csproj discovery**: Expanded `RepoScannerService` to recurse 2 levels into `src/` and `tests/` directories, fixing dependency=0 for standard .NET repo layouts (`src/ProjectName/ProjectName.csproj`)
+- **Gap quality enforcement**: Added explicit prompt instructions distinguishing "missing capability" gaps (REAL) from "critique of existing feature" gaps (FALSE), with good/bad examples in both `AppendFormatInstructions` and `BuildGapVerificationPrompt`
+- **Minimum 3-gap rule**: `VerifyGapsViaRag` now enforces ≥3 verified gaps — supplements with originals if LLM over-prunes, keeps all originals if verification returns 0
+- **Verification system prompt fix**: Gaps about ABSENT things (no CI, no docs) are now explicitly marked REAL when no counter-evidence exists, preventing false-positive pruning of legitimate gaps
+- **GitHub URL enrichment**: `ComplementResearchService` now fetches real descriptions, star counts, and licenses from GitHub API before LLM evaluation — eliminates hallucinated project names/descriptions
+- **Anti-hallucination prompts**: Complement LLM prompt now explicitly forbids inventing project names, requires deriving names from URLs only
+- **Improved search queries**: More targeted search template (`{lang} {topic} library github stars:>100`) replacing overly verbose previous query
+- **Tests**: 380 total — 378 passed, 2 skipped, 0 failed
+
 ## 2026-02-12 — UI/WPF Documentation Overhaul
 - **UI_WPF_SPEC.md**: Expanded from 14 lines to comprehensive spec (~600 lines) covering every view, tab, control, style, converter, ViewModel, and interaction
 - Documents all 20 session workspace tabs, 24 sub-ViewModels, 10 value converters, 14 named styles, full color palette, keyboard shortcuts, tab visibility rules by domain pack, and UX patterns

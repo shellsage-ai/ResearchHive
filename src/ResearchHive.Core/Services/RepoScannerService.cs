@@ -99,7 +99,7 @@ public class RepoScannerService
                     if (fileContent != null) depFiles[name] = fileContent;
                 }
             }
-            // Check src/ folder for .csproj files
+            // Check src/ folder for .csproj files — recurse into subdirs
             foreach (var item in rootContents)
             {
                 if (GetString(item, "name") == "src" && GetString(item, "type") == "dir")
@@ -110,13 +110,77 @@ public class RepoScannerService
                         foreach (var srcItem in srcContents)
                         {
                             var nm = GetString(srcItem, "name");
+                            var tp = GetString(srcItem, "type");
                             if (nm.EndsWith(".csproj"))
                             {
                                 var fc = await FetchFileContent($"https://api.github.com/repos/{owner}/{repo}/contents/src/{nm}", ct);
                                 if (fc != null) depFiles[$"src/{nm}"] = fc;
                             }
+                            // Recurse one level deeper: src/ProjectName/*.csproj
+                            else if (tp == "dir")
+                            {
+                                try
+                                {
+                                    var subContents = await FetchJsonArrayAsync($"https://api.github.com/repos/{owner}/{repo}/contents/src/{nm}", ct);
+                                    if (subContents != null)
+                                    {
+                                        foreach (var subItem in subContents)
+                                        {
+                                            var subName = GetString(subItem, "name");
+                                            if (subName.EndsWith(".csproj"))
+                                            {
+                                                var fc = await FetchFileContent($"https://api.github.com/repos/{owner}/{repo}/contents/src/{nm}/{subName}", ct);
+                                                if (fc != null) depFiles[$"src/{nm}/{subName}"] = fc;
+                                            }
+                                        }
+                                    }
+                                }
+                                catch { /* non-fatal — skip subdirs we can't read */ }
+                            }
                         }
                     }
+                }
+            }
+
+            // Also check tests/ folder for .csproj files (common .NET layout)
+            foreach (var item in rootContents)
+            {
+                if (GetString(item, "name") == "tests" && GetString(item, "type") == "dir")
+                {
+                    try
+                    {
+                        var testsContents = await FetchJsonArrayAsync($"https://api.github.com/repos/{owner}/{repo}/contents/tests", ct);
+                        if (testsContents != null)
+                        {
+                            foreach (var testItem in testsContents)
+                            {
+                                var tn = GetString(testItem, "name");
+                                var tt = GetString(testItem, "type");
+                                if (tn.EndsWith(".csproj"))
+                                {
+                                    var fc = await FetchFileContent($"https://api.github.com/repos/{owner}/{repo}/contents/tests/{tn}", ct);
+                                    if (fc != null) depFiles[$"tests/{tn}"] = fc;
+                                }
+                                else if (tt == "dir")
+                                {
+                                    var subContents = await FetchJsonArrayAsync($"https://api.github.com/repos/{owner}/{repo}/contents/tests/{tn}", ct);
+                                    if (subContents != null)
+                                    {
+                                        foreach (var subItem in subContents)
+                                        {
+                                            var sn = GetString(subItem, "name");
+                                            if (sn.EndsWith(".csproj"))
+                                            {
+                                                var fc = await FetchFileContent($"https://api.github.com/repos/{owner}/{repo}/contents/tests/{tn}/{sn}", ct);
+                                                if (fc != null) depFiles[$"tests/{tn}/{sn}"] = fc;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    catch { /* non-fatal */ }
                 }
             }
         }
@@ -218,6 +282,12 @@ public class RepoScannerService
         sb.AppendLine("Determine if each gap is REAL (the codebase truly lacks this) or FALSE (the codebase already addresses it).");
         sb.AppendLine("Only keep gaps that are genuinely missing. Remove false positives.");
         sb.AppendLine();
+        sb.AppendLine("IMPORTANT RULES:");
+        sb.AppendLine("- A gap about something MISSING (no tests, no CI/CD, no docs) is REAL if no code evidence contradicts it.");
+        sb.AppendLine("- '(No relevant code found)' for a missing-feature gap means it IS real — do NOT remove it.");
+        sb.AppendLine("- A gap that merely critiques HOW an existing feature works is FALSE — remove it.");
+        sb.AppendLine("- Keep at least 3 verified gaps. If fewer than 3 survive, keep the most impactful remaining ones.");
+        sb.AppendLine();
 
         foreach (var (gap, chunks) in gapEvidence)
         {
@@ -260,6 +330,10 @@ public class RepoScannerService
         sb.AppendLine("- gap1");
         sb.AppendLine("- gap2");
         sb.AppendLine("(list at least 5 specific weaknesses, missing features, or improvement opportunities — based on code evidence, not assumptions)");
+        sb.AppendLine("IMPORTANT: Gaps must be MISSING capabilities, not critiques of existing features.");
+        sb.AppendLine("Bad gap example: 'The search engine assumes X which limits Y' — this critiques something that EXISTS.");
+        sb.AppendLine("Good gap example: 'No CI/CD pipeline configuration' — this identifies something ABSENT.");
+        sb.AppendLine("Focus on: missing tests, missing docs, missing config, missing security features, missing monitoring, missing error handling patterns, etc.");
     }
 
     public static void ParseAnalysis(string analysis, RepoProfile profile)

@@ -265,12 +265,23 @@ public class RepoIntelligenceJobRunner
         var response = await _llmService.GenerateAsync(verificationPrompt,
             "You are a code auditor. Compare each gap claim against the actual source code evidence. " +
             "Be strict: if the code clearly already handles something, mark it as a false positive. " +
-            "Only keep gaps that are genuinely missing from the codebase.",
+            "IMPORTANT: gaps about MISSING things (no tests, no CI, no docs) are real when no counter-evidence is found — do NOT remove them just because no code was found. " +
+            "Gaps that merely critique how an existing feature works should be removed as false positives. " +
+            "Keep at least 3 verified gaps.",
             ct: ct);
 
         var verifiedGaps = RepoScannerService.ParseVerifiedGaps(response);
-        if (verifiedGaps.Count > 0)
+        if (verifiedGaps.Count >= 3)
+        {
             profile.Gaps = verifiedGaps;
+        }
+        else if (verifiedGaps.Count > 0)
+        {
+            // Fewer than 3 gaps survived — supplement with highest-value originals
+            var extras = profile.Gaps.Where(g => !verifiedGaps.Any(v =>
+                v.Contains(g.Split(' ')[..Math.Min(3, g.Split(' ').Length)].First(), StringComparison.OrdinalIgnoreCase))).ToList();
+            profile.Gaps = verifiedGaps.Concat(extras).Take(Math.Max(3, verifiedGaps.Count)).ToList();
+        }
         // If parsing returned empty (LLM format issue), keep original gaps rather than losing them all
     }
 
