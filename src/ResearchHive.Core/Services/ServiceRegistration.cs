@@ -83,7 +83,10 @@ public static class ServiceRegistration
 
         // Deterministic fact sheet builder + post-scan verifier (zero-LLM ground truth)
         services.AddSingleton<RepoFactSheetBuilder>();
-        services.AddSingleton<PostScanVerifier>();
+        services.AddSingleton<PostScanVerifier>(sp =>
+            new PostScanVerifier(
+                sp.GetService<ILogger<PostScanVerifier>>(),
+                sp.GetRequiredService<ILlmService>()));
 
         // Global memory (Hive Mind)
         services.AddSingleton<GlobalDb>(sp => new GlobalDb(settings.GlobalDbPath));

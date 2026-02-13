@@ -63,16 +63,9 @@ public class ComplementResearchService
                 searchTopics.Add(dt);
         }
 
-        // Ensure category diversity — even if gaps exist, always inject underrepresented categories
-        // so complements span security, CI/CD, observability, docs, etc.
-        var diverseCategories = new[]
-        {
-            "performance monitoring and observability",
-            "security scanning and vulnerability detection",
-            "CI/CD and deployment automation",
-            "code analysis and linting",
-            "developer experience tooling"
-        };
+        // Ensure category diversity — dynamically derived from project characteristics,
+        // filtered by inapplicable concepts, instead of a static hardcoded list
+        var diverseCategories = InferDiverseCategories(profile);
 
         var existingCategoryWords = searchTopics.SelectMany(t => t.ToLowerInvariant().Split(' ')).ToHashSet();
         foreach (var cat in diverseCategories)
@@ -118,9 +111,20 @@ public class ComplementResearchService
         if (searchResults.Count == 0) return complements;
 
         // Enrich GitHub URLs with real descriptions before LLM evaluation (all topics in parallel)
+        // Store enrichment results for post-scan metadata injection
+        var enrichmentCache = new Dictionary<string, GitHubEnrichmentResult>(StringComparer.OrdinalIgnoreCase);
+        var seenUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase); // dedup
+
         var enrichTasks = searchResults.Select(async sr =>
         {
-            var urlTasks = sr.Item2.Select(async url => (url, desc: await EnrichGitHubUrlAsync(url, ct))).ToList();
+            var urlTasks = sr.Item2.Select(async url =>
+            {
+                var enrichment = await EnrichGitHubUrlAsync(url, ct);
+                if (enrichment != null)
+                    lock (enrichmentCache) { enrichmentCache[url] = enrichment; }
+                var desc = enrichment?.ToDescriptionString() ?? "";
+                return (url, desc);
+            }).ToList();
             var entries = (await Task.WhenAll(urlTasks)).ToList();
             return (topic: sr.Item1, entries);
         }).ToList();
@@ -128,8 +132,23 @@ public class ComplementResearchService
         var enrichedResults = (await Task.WhenAll(enrichTasks)).ToList();
         LastEnrichCallCount = enrichedResults.Sum(r => r.entries.Count);
 
+        // Dedup URLs across topics — keep first occurrence only
+        var dedupedResults = new List<(string topic, List<(string url, string desc)> entries)>();
+        foreach (var (topic, entries) in enrichedResults)
+        {
+            var uniqueEntries = new List<(string url, string desc)>();
+            foreach (var (url, desc) in entries)
+            {
+                var normalizedUrl = NormalizeGitHubUrl(url);
+                if (seenUrls.Add(normalizedUrl))
+                    uniqueEntries.Add((url, desc));
+            }
+            if (uniqueEntries.Count > 0)
+                dedupedResults.Add((topic, uniqueEntries));
+        }
+
         // Use JSON-structured prompt for reliable parsing (especially helps Ollama)
-        var jsonPrompt = RepoScannerService.BuildJsonComplementPrompt(profile, enrichedResults, MinimumComplements);
+        var jsonPrompt = RepoScannerService.BuildJsonComplementPrompt(profile, dedupedResults, MinimumComplements);
 
         var llmSw = Stopwatch.StartNew();
         var response = await _llmService.GenerateJsonAsync(jsonPrompt,
@@ -146,85 +165,203 @@ public class ComplementResearchService
         if (complements.Count == 0)
             complements = ParseComplements(response);
 
+        // Inject GitHub API metadata onto parsed complements from enrichment cache
+        foreach (var comp in complements)
+        {
+            var normalized = NormalizeGitHubUrl(comp.Url);
+            // Try exact URL first, then normalized
+            GitHubEnrichmentResult? enrichment = null;
+            if (enrichmentCache.TryGetValue(comp.Url, out var e1))
+                enrichment = e1;
+            else if (enrichmentCache.TryGetValue(normalized, out var e2))
+                enrichment = e2;
+            else
+            {
+                // Fuzzy match: find enrichment whose URL normalizes to the same repo
+                enrichment = enrichmentCache.Values.FirstOrDefault(
+                    er => NormalizeGitHubUrl(er.Url).Equals(normalized, StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (enrichment != null)
+            {
+                comp.Stars = enrichment.Stars;
+                comp.IsArchived = enrichment.IsArchived;
+                comp.LastPushed = enrichment.LastPushed;
+                comp.RepoLanguage = enrichment.Language;
+                if (string.IsNullOrEmpty(comp.License) && !string.IsNullOrEmpty(enrichment.License))
+                    comp.License = enrichment.License;
+            }
+        }
+
         return complements;
     }
 
+    /// <summary>Normalize a GitHub URL to https://github.com/owner/repo for dedup/matching.</summary>
+    internal static string NormalizeGitHubUrl(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return url;
+        if (!uri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase)) return url;
+        var segments = uri.AbsolutePath.Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length < 2) return url;
+        return $"https://github.com/{segments[0]}/{segments[1]}".ToLowerInvariant();
+    }
+
     /// <summary>
-    /// Infer domain-specific search topics from the project's proven capabilities,
-    /// strengths, app type, and frameworks. This ensures complement suggestions are
-    /// relevant to what the project DOES, not just what tech stack it uses.
+    /// Table-driven domain-specific search topics from the project's proven capabilities,
+    /// domain tags, deployment target, and architecture. Works for ANY project type.
+    /// Instead of hardcoded if-blocks for specific domains, uses a keyword→topic table
+    /// that naturally extends to any capability set.
     /// </summary>
     internal static List<string> InferDomainSearchTopics(RepoProfile profile)
     {
         var topics = new List<string>();
-        var strengthsText = string.Join(" ", profile.Strengths).ToLowerInvariant();
-        var capabilitiesText = profile.FactSheet != null
+        var capText = profile.FactSheet != null
             ? string.Join(" ", profile.FactSheet.ProvenCapabilities.Select(c => c.Capability)).ToLowerInvariant()
-            : strengthsText;
+            : string.Join(" ", profile.Strengths).ToLowerInvariant();
+        var domainTags = profile.FactSheet?.DomainTags ?? new List<string>();
+        var deployTarget = profile.FactSheet?.DeploymentTarget?.ToLowerInvariant() ?? "";
+        var appType = profile.FactSheet?.AppType?.ToLowerInvariant() ?? "";
 
-        // AI / LLM domain
-        if (capabilitiesText.Contains("cloud ai") || capabilitiesText.Contains("llm") ||
-            capabilitiesText.Contains("embedding") || strengthsText.Contains("ai provider"))
+        // Table-driven: (keyword triggers, topic suggestions)
+        // Each rule: if ANY keyword matches capText/domainTags, add the topics
+        var domainTopicRules = new (string[] triggers, string[] topics)[]
         {
-            topics.Add("AI agent orchestration framework");
-            topics.Add("local LLM inference runtime");
-            topics.Add("prompt engineering and evaluation toolkit");
-        }
+            // AI / LLM
+            (new[] { "llm", "ai provider", "embedding", "cloud ai" },
+             new[] { "AI agent orchestration framework", "local LLM inference runtime", "prompt engineering evaluation toolkit" }),
 
-        // RAG / vector search domain
-        if (capabilitiesText.Contains("rag") || capabilitiesText.Contains("vector") ||
-            capabilitiesText.Contains("embedding"))
-        {
-            topics.Add("vector database client library");
-            topics.Add("document chunking and text splitting");
-        }
+            // RAG / vector / embedding
+            (new[] { "rag", "vector", "semantic search", "retrieval", "embedding" },
+             new[] { "vector database client library", "document chunking text splitting" }),
 
-        // Research / web scraping domain
-        if (capabilitiesText.Contains("citation") || capabilitiesText.Contains("search") ||
-            strengthsText.Contains("browser") || strengthsText.Contains("scraping"))
-        {
-            topics.Add("HTML parsing and web scraping library");
-            topics.Add("structured data extraction from web pages");
-        }
+            // Web scraping / research
+            (new[] { "citation", "scraping", "crawl", "playwright", "selenium" },
+             new[] { "HTML parsing web scraping library", "structured data extraction" }),
 
-        // WPF / desktop UI domain
-        if (profile.FactSheet?.AppType?.Contains("WPF", StringComparison.OrdinalIgnoreCase) == true ||
-            profile.Frameworks.Any(f => f.Contains("WPF", StringComparison.OrdinalIgnoreCase)))
-        {
-            topics.Add("WPF data visualization charting library");
-            topics.Add("WPF UI component toolkit");
-        }
+            // Desktop UI
+            (new[] { "wpf", "winforms", "avalonia", "maui", "desktop ui", "gtk", "qt" },
+             new[] { "data visualization charting library", "UI component toolkit" }),
 
-        // Circuit breaker / resilience domain
-        if (capabilitiesText.Contains("circuit breaker") || capabilitiesText.Contains("retry") ||
-            capabilitiesText.Contains("rate limit"))
-        {
-            topics.Add("advanced fault tolerance and resilience patterns");
-        }
+            // Resilience
+            (new[] { "circuit breaker", "retry", "rate limit", "resilience" },
+             new[] { "advanced fault tolerance resilience patterns" }),
 
-        // Structured logging domain
-        if (capabilitiesText.Contains("logging") || capabilitiesText.Contains("structured log"))
+            // Logging
+            (new[] { "logging", "structured log" },
+             new[] { "log aggregation dashboard", "structured logging sink" }),
+
+            // Data / DB
+            (new[] { "database", "sqlite", "postgres", "mongodb", "data access" },
+             new[] { "database migration tool", "data access optimization" }),
+
+            // API / web  
+            (new[] { "api", "rest", "graphql", "grpc", "web api" },
+             new[] { "API documentation generation", "API client SDK generator" }),
+
+            // Security
+            (new[] { "auth", "encryption", "dpapi", "security", "vault" },
+             new[] { "secret management vault", "security scanning tool" }),
+
+            // Testing
+            (new[] { "test", "xunit", "nunit", "jest", "pytest" },
+             new[] { "test coverage reporting", "mutation testing", "property-based testing" }),
+
+            // Real-time
+            (new[] { "websocket", "signalr", "socket.io", "chat", "real-time" },
+             new[] { "real-time messaging library", "event streaming platform" }),
+
+            // Data pipeline / ETL
+            (new[] { "etl", "data pipeline", "spark", "airflow" },
+             new[] { "data transformation library", "workflow orchestration" }),
+
+            // Gaming
+            (new[] { "game", "unity", "godot", "graphics" },
+             new[] { "game physics engine", "game asset management" }),
+
+            // IoT
+            (new[] { "iot", "mqtt", "sensor", "embedded" },
+             new[] { "IoT device management", "time-series database" }),
+
+            // Finance
+            (new[] { "finance", "trading", "market data", "portfolio" },
+             new[] { "financial data feed library", "backtesting framework" }),
+
+            // E-commerce
+            (new[] { "e-commerce", "payment", "stripe", "checkout" },
+             new[] { "payment processing library", "inventory management" }),
+        };
+
+        var combinedText = capText + " " + string.Join(" ", domainTags).ToLowerInvariant() +
+                           " " + deployTarget + " " + appType;
+
+        foreach (var (triggers, topicSuggestions) in domainTopicRules)
         {
-            topics.Add("log aggregation and analysis dashboard");
+            if (triggers.Any(t => combinedText.Contains(t)))
+            {
+                foreach (var t in topicSuggestions)
+                {
+                    if (!topics.Any(existing => existing.Contains(t.Split(' ')[0], StringComparison.OrdinalIgnoreCase)))
+                        topics.Add(t);
+                }
+            }
         }
 
         return topics;
     }
 
     /// <summary>
-    /// Fetches a short description for GitHub URLs via the GitHub API.
-    /// Returns empty string for non-GitHub URLs or on failure.
+    /// Generate dynamic diverse category topics based on the project's actual characteristics.
+    /// Instead of a static list of 5 categories, derives relevant categories from
+    /// what the project IS and what it's MISSING.
     /// </summary>
-    private async Task<string> EnrichGitHubUrlAsync(string url, CancellationToken ct)
+    internal static List<string> InferDiverseCategories(RepoProfile profile)
+    {
+        var categories = new List<string>();
+        var absentCaps = profile.FactSheet?.ConfirmedAbsent?.Select(c => c.Capability.ToLowerInvariant()).ToList()
+                         ?? new List<string>();
+        var missingFiles = profile.FactSheet?.DiagnosticFilesMissing ?? new List<string>();
+        var inapplicable = new HashSet<string>(
+            profile.FactSheet?.InapplicableConcepts ?? Enumerable.Empty<string>(),
+            StringComparer.OrdinalIgnoreCase);
+
+        // Table-driven: category topics to consider, with keywords for filtering
+        var potentialCategories = new (string topic, string[] excludeIfInapplicable)[]
+        {
+            ("performance profiling and benchmarking", new[] { "benchmark" }),
+            ("security scanning and vulnerability detection", new[] { "security" }),
+            ("code analysis and linting", new[] { "linting" }),
+            ("developer experience tooling", Array.Empty<string>()),
+            ("error tracking and crash reporting", Array.Empty<string>()),
+            ("configuration management", Array.Empty<string>()),
+            ("documentation generation", new[] { "documentation" }),
+            ("continuous integration testing", new[] { "containerization" }),
+            ("dependency update automation", Array.Empty<string>()),
+        };
+
+        foreach (var (topic, excludeKeys) in potentialCategories)
+        {
+            // Skip if the topic addresses an inapplicable concept
+            if (excludeKeys.Any(k => inapplicable.Contains(k))) continue;
+            categories.Add(topic);
+        }
+
+        return categories;
+    }
+
+    /// <summary>
+    /// Fetches structured metadata for GitHub URLs via the GitHub API.
+    /// Returns null for non-GitHub URLs or on failure.
+    /// </summary>
+    internal async Task<GitHubEnrichmentResult?> EnrichGitHubUrlAsync(string url, CancellationToken ct)
     {
         try
         {
-            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return string.Empty;
-            if (!uri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase)) return string.Empty;
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return null;
+            if (!uri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase)) return null;
 
             // Extract owner/repo from path: /owner/repo[/...]
             var segments = uri.AbsolutePath.Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
-            if (segments.Length < 2) return string.Empty;
+            if (segments.Length < 2) return null;
             var owner = segments[0];
             var repo = segments[1];
 
@@ -233,32 +370,44 @@ public class ComplementResearchService
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
 
             using var response = await _http.SendAsync(request, ct);
-            if (!response.IsSuccessStatusCode) return string.Empty;
+            if (!response.IsSuccessStatusCode) return null;
 
             var json = await response.Content.ReadAsStringAsync(ct);
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
 
-            var parts = new List<string>();
+            var result = new GitHubEnrichmentResult { Url = url };
+
             if (root.TryGetProperty("description", out var descEl) && descEl.ValueKind == JsonValueKind.String)
-            {
-                var desc = descEl.GetString();
-                if (!string.IsNullOrWhiteSpace(desc)) parts.Add(desc);
-            }
+                result.Description = descEl.GetString() ?? "";
+
             if (root.TryGetProperty("stargazers_count", out var starsEl))
-                parts.Add($"{starsEl.GetInt32():N0} stars");
+                result.Stars = starsEl.GetInt32();
+
             if (root.TryGetProperty("license", out var licEl) && licEl.ValueKind == JsonValueKind.Object &&
                 licEl.TryGetProperty("spdx_id", out var spdxEl) && spdxEl.ValueKind == JsonValueKind.String)
             {
                 var spdx = spdxEl.GetString();
-                if (!string.IsNullOrWhiteSpace(spdx) && spdx != "NOASSERTION") parts.Add($"License: {spdx}");
+                if (!string.IsNullOrWhiteSpace(spdx) && spdx != "NOASSERTION") result.License = spdx;
             }
 
-            return string.Join(" | ", parts);
+            if (root.TryGetProperty("archived", out var archivedEl) && archivedEl.ValueKind == JsonValueKind.True)
+                result.IsArchived = true;
+
+            if (root.TryGetProperty("pushed_at", out var pushedEl) && pushedEl.ValueKind == JsonValueKind.String)
+            {
+                if (DateTime.TryParse(pushedEl.GetString(), out var pushed))
+                    result.LastPushed = pushed;
+            }
+
+            if (root.TryGetProperty("language", out var langEl) && langEl.ValueKind == JsonValueKind.String)
+                result.Language = langEl.GetString() ?? "";
+
+            return result;
         }
         catch
         {
-            return string.Empty; // non-fatal
+            return null; // non-fatal
         }
     }
 

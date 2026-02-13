@@ -1178,12 +1178,28 @@ public class RepoScannerService
             sb.AppendLine("PROJECT CONTEXT (what this project actually is):");
             if (!string.IsNullOrEmpty(profile.FactSheet.AppType))
                 sb.AppendLine($"  App Type: {profile.FactSheet.AppType}");
+            if (!string.IsNullOrEmpty(profile.FactSheet.DeploymentTarget))
+                sb.AppendLine($"  Deployment Target: {profile.FactSheet.DeploymentTarget}");
+            if (!string.IsNullOrEmpty(profile.FactSheet.ArchitectureStyle))
+                sb.AppendLine($"  Architecture: {profile.FactSheet.ArchitectureStyle}");
+            if (!string.IsNullOrEmpty(profile.FactSheet.Ecosystem))
+                sb.AppendLine($"  Ecosystem: {profile.FactSheet.Ecosystem}");
             if (!string.IsNullOrEmpty(profile.FactSheet.DatabaseTechnology))
                 sb.AppendLine($"  Database: {profile.FactSheet.DatabaseTechnology}");
+            if (!string.IsNullOrEmpty(profile.FactSheet.TestFramework))
+                sb.AppendLine($"  Test Framework: {profile.FactSheet.TestFramework}");
+            if (!string.IsNullOrEmpty(profile.FactSheet.ProjectScale))
+                sb.AppendLine($"  Scale: {profile.FactSheet.ProjectScale}");
+            if (profile.FactSheet.DomainTags.Count > 0)
+                sb.AppendLine($"  Domain: {string.Join(", ", profile.FactSheet.DomainTags)}");
             if (profile.FactSheet.ProvenCapabilities.Count > 0)
                 sb.AppendLine($"  Key Capabilities: {string.Join(", ", profile.FactSheet.ProvenCapabilities.Select(c => c.Capability))}");
             if (profile.FactSheet.ActivePackages.Count > 0)
                 sb.AppendLine($"  Active Packages: {string.Join(", ", profile.FactSheet.ActivePackages.Select(p => p.PackageName).Take(15))}");
+            if (profile.FactSheet.ConfirmedAbsent.Count > 0)
+                sb.AppendLine($"  Confirmed Absent: {string.Join(", ", profile.FactSheet.ConfirmedAbsent.Select(c => c.Capability))}");
+            if (profile.FactSheet.InapplicableConcepts.Count > 0)
+                sb.AppendLine($"  DO NOT SUGGEST (inapplicable to this project): {string.Join(", ", profile.FactSheet.InapplicableConcepts)}");
             sb.AppendLine();
         }
 

@@ -1657,25 +1657,31 @@ public class AiProviderRouter
     {
         var verifier = new PostScanVerifier();
         var profile = CreateTestProfile();
-        profile.Gaps.Add("Missing security features, such as authentication and authorization mechanisms");
-        profile.Gaps.Add("No JWT or OAuth support");
+        profile.Gaps.Add("No OAuth middleware for user authentication");
+        profile.Gaps.Add("No JWT bearer token support");
         profile.Gaps.Add("No CI/CD pipeline"); // Should NOT be pruned — valid for any app type
 
         var factSheet = new RepoFactSheet
         {
             AppType = "WPF desktop application",
-            Ecosystem = ".NET/C#"
+            DeploymentTarget = "Windows desktop",
+            ArchitectureStyle = "Monolith",
+            Ecosystem = ".NET/C#",
+            InapplicableConcepts = { "OAuth middleware", "JWT bearer", "session management", "cookie auth",
+                                     "web auth middleware", "middleware pipeline", "containerization",
+                                     "Dockerfile", "Kubernetes", "reverse proxy", "load balancer",
+                                     "API gateway", "CORS", "server-side rendering" }
         };
 
         var result = await verifier.VerifyAsync(profile, factSheet);
 
-        profile.Gaps.Should().NotContain(g => g.Contains("authentication", StringComparison.OrdinalIgnoreCase),
-            "desktop apps don't need web-style authentication");
+        profile.Gaps.Should().NotContain(g => g.Contains("OAuth", StringComparison.OrdinalIgnoreCase),
+            "desktop apps don't need OAuth middleware");
         profile.Gaps.Should().NotContain(g => g.Contains("JWT", StringComparison.OrdinalIgnoreCase),
             "JWT is for web APIs, not desktop apps");
         profile.Gaps.Should().Contain(g => g.Contains("CI/CD"),
             "CI/CD is valid for any app type");
-        result.GapsRemoved.Should().Contain(s => s.Contains("WRONG-APPTYPE"));
+        result.GapsRemoved.Should().Contain(s => s.Contains("INAPPLICABLE"));
     }
 
     [Fact]
@@ -1689,14 +1695,16 @@ public class AiProviderRouter
         var factSheet = new RepoFactSheet
         {
             AppType = "WPF desktop application",
-            Ecosystem = ".NET/C#"
+            DeploymentTarget = "Windows desktop",
+            Ecosystem = ".NET/C#",
+            InapplicableConcepts = { "containerization", "Dockerfile", "Kubernetes" }
         };
 
         var result = await verifier.VerifyAsync(profile, factSheet);
 
         profile.Gaps.Should().NotContain(g => g.Contains("Dockerfile", StringComparison.OrdinalIgnoreCase));
         profile.Gaps.Should().NotContain(g => g.Contains("container", StringComparison.OrdinalIgnoreCase));
-        result.GapsRemoved.Should().Contain(s => s.Contains("WRONG-APPTYPE"));
+        result.GapsRemoved.Should().Contain(s => s.Contains("INAPPLICABLE"));
     }
 
     [Fact]
@@ -1710,7 +1718,9 @@ public class AiProviderRouter
         var factSheet = new RepoFactSheet
         {
             AppType = "WPF desktop application",
-            Ecosystem = ".NET/C#"
+            DeploymentTarget = "Windows desktop",
+            Ecosystem = ".NET/C#",
+            InapplicableConcepts = { "API gateway", "reverse proxy", "load balancer", "middleware pipeline" }
         };
 
         var result = await verifier.VerifyAsync(profile, factSheet);
@@ -1729,15 +1739,17 @@ public class AiProviderRouter
         var factSheet = new RepoFactSheet
         {
             AppType = "WPF desktop application",
+            DeploymentTarget = "Windows desktop",
             DatabaseTechnology = "Raw SQLite via Microsoft.Data.Sqlite (NOT EF Core)",
-            Ecosystem = ".NET/C#"
+            Ecosystem = ".NET/C#",
+            InapplicableConcepts = { "ORM", "Entity Framework", "EF Core" }
         };
 
         var result = await verifier.VerifyAsync(profile, factSheet);
 
         profile.Gaps.Should().NotContain(g => g.Contains("ORM", StringComparison.OrdinalIgnoreCase));
         profile.Gaps.Should().NotContain(g => g.Contains("Entity Framework", StringComparison.OrdinalIgnoreCase));
-        result.GapsRemoved.Should().Contain(s => s.Contains("WRONG-DB"));
+        result.GapsRemoved.Should().Contain(s => s.Contains("INAPPLICABLE"));
     }
 
     [Fact]
@@ -1913,6 +1925,8 @@ public class AiProviderRouter
             "cloud AI + embedding = AI domain");
         topics.Should().Contain(t => t.Contains("vector database", StringComparison.OrdinalIgnoreCase),
             "embedding generation implies vector search domain");
+        topics.Should().Contain(t => t.Contains("document chunking", StringComparison.OrdinalIgnoreCase),
+            "embedding triggers document processing topics");
     }
 
     [Fact]
@@ -1927,8 +1941,12 @@ public class AiProviderRouter
 
         var topics = ComplementResearchService.InferDomainSearchTopics(profile);
 
-        topics.Should().Contain(t => t.Contains("WPF", StringComparison.OrdinalIgnoreCase),
-            "WPF apps should get WPF-specific complement suggestions");
+        topics.Should().Contain(t => t.Contains("visualization", StringComparison.OrdinalIgnoreCase) ||
+                                     t.Contains("charting", StringComparison.OrdinalIgnoreCase),
+            "desktop apps should get visualization-related complement suggestions");
+        topics.Should().Contain(t => t.Contains("UI component", StringComparison.OrdinalIgnoreCase) ||
+                                     t.Contains("toolkit", StringComparison.OrdinalIgnoreCase),
+            "desktop apps should get UI component suggestions");
     }
 
     [Fact]
@@ -2035,15 +2053,17 @@ public class AiProviderRouter
         var factSheet = new RepoFactSheet
         {
             AppType = "WPF desktop application",
+            DeploymentTarget = "Windows desktop",
             Ecosystem = ".NET/C#",
-            DiagnosticFilesMissing = { "Dockerfile" } // Fact sheet says Dockerfile is missing
+            DiagnosticFilesMissing = { "Dockerfile" }, // Fact sheet says Dockerfile is missing
+            InapplicableConcepts = { "containerization", "Dockerfile", "Kubernetes" }
         };
 
         var result = await verifier.VerifyAsync(profile, factSheet);
 
         profile.Gaps.Should().NotContain(g => g.Contains("Dockerfile", StringComparison.OrdinalIgnoreCase),
-            "Dockerfile should stay pruned — InjectConfirmedGaps must respect the WRONG-APPTYPE removal");
-        result.GapsRemoved.Should().Contain(s => s.Contains("WRONG-APPTYPE") && s.Contains("Dockerfile"));
+            "Dockerfile should stay pruned — InjectConfirmedGaps must respect the INAPPLICABLE removal");
+        result.GapsRemoved.Should().Contain(s => s.Contains("INAPPLICABLE") && s.Contains("Dockerfile"));
         result.GapsAdded.Should().NotContain(s => s.Contains("Dockerfile"),
             "InjectConfirmedGaps must not re-add a deliberately pruned gap");
     }
@@ -2082,14 +2102,16 @@ public class AiProviderRouter
         var factSheet = new RepoFactSheet
         {
             AppType = "WPF desktop application",
+            DeploymentTarget = "Windows desktop",
             DatabaseTechnology = "Raw SQLite via Microsoft.Data.Sqlite (NOT EF Core)",
-            Ecosystem = ".NET/C#"
+            Ecosystem = ".NET/C#",
+            InapplicableConcepts = { "ORM", "Entity Framework", "EF Core" }
         };
 
         var result = await verifier.VerifyAsync(profile, factSheet);
 
         profile.Gaps.Should().NotContain(g => g.Contains("Entity Framework", StringComparison.OrdinalIgnoreCase));
-        result.GapsRemoved.Should().Contain(s => s.Contains("WRONG-DB"));
+        result.GapsRemoved.Should().Contain(s => s.Contains("INAPPLICABLE"));
     }
 
     [Fact]
@@ -2246,5 +2268,613 @@ public class AiProviderRouter
         result.Topics.Should().HaveCount(3);
         result.License.Should().Be("MIT");
         result.IsArchived.Should().BeFalse();
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  Phase 24: Dynamic anti-hallucination pipeline
+    // ═══════════════════════════════════════════════════
+
+    // ── Layer 1: Dynamic Project Identity ──
+
+    [Fact]
+    public void InferDeploymentTarget_DetectsDesktop_ForWpf()
+    {
+        var profile = new RepoProfile { PrimaryLanguage = "C#" };
+        var fileContents = new Dictionary<string, string>();
+        var sheet = new RepoFactSheet { AppType = "WPF desktop application" };
+
+        RepoFactSheetBuilder.InferDeploymentTarget(profile, fileContents, sheet);
+
+        sheet.DeploymentTarget.Should().Be("Windows desktop");
+    }
+
+    [Fact]
+    public void InferDeploymentTarget_DetectsServer_ForAspNet()
+    {
+        var profile = new RepoProfile { PrimaryLanguage = "C#" };
+        var fileContents = new Dictionary<string, string>();
+        var sheet = new RepoFactSheet { AppType = "ASP.NET Core web API" };
+
+        RepoFactSheetBuilder.InferDeploymentTarget(profile, fileContents, sheet);
+
+        sheet.DeploymentTarget.Should().Be("Server/web");
+    }
+
+    [Fact]
+    public void InferDeploymentTarget_DetectsCli_ForConsole()
+    {
+        var profile = new RepoProfile { PrimaryLanguage = "C#" };
+        var fileContents = new Dictionary<string, string>();
+        var sheet = new RepoFactSheet { AppType = "Console application" };
+
+        RepoFactSheetBuilder.InferDeploymentTarget(profile, fileContents, sheet);
+
+        sheet.DeploymentTarget.Should().Be("CLI/console");
+    }
+
+    [Fact]
+    public void InferDeploymentTarget_DetectsMobile_ForReactNative()
+    {
+        var profile = new RepoProfile { PrimaryLanguage = "JavaScript" };
+        var fileContents = new Dictionary<string, string>();
+        var sheet = new RepoFactSheet { AppType = "React Native mobile app" };
+
+        RepoFactSheetBuilder.InferDeploymentTarget(profile, fileContents, sheet);
+
+        sheet.DeploymentTarget.Should().Be("Cross-platform mobile");
+    }
+
+    [Fact]
+    public void InferDeploymentTarget_DetectsContainer_FromDockerfile()
+    {
+        var profile = new RepoProfile { PrimaryLanguage = "Go" };
+        var fileContents = new Dictionary<string, string>
+        {
+            ["Dockerfile"] = "FROM golang:1.21",
+            ["main.go"] = "package main"
+        };
+        var sheet = new RepoFactSheet { AppType = "Go application" };
+
+        RepoFactSheetBuilder.InferDeploymentTarget(profile, fileContents, sheet);
+
+        sheet.DeploymentTarget.Should().Be("Container/cloud");
+    }
+
+    [Fact]
+    public void InferArchitectureStyle_DetectsMonolith_ForSimpleProject()
+    {
+        var profile = new RepoProfile { PrimaryLanguage = "C#" };
+        var fileContents = new Dictionary<string, string>
+        {
+            ["MyApp.csproj"] = "<Project>",
+            ["Program.cs"] = "class Program { }"
+        };
+        var sheet = new RepoFactSheet { DeploymentTarget = "Server/web" };
+
+        RepoFactSheetBuilder.InferArchitectureStyle(profile, fileContents, sheet);
+
+        sheet.ArchitectureStyle.Should().Be("Monolith");
+    }
+
+    [Fact]
+    public void InferArchitectureStyle_DetectsMicroservices_WithMessageBusAndCompose()
+    {
+        var profile = new RepoProfile { PrimaryLanguage = "C#" };
+        var fileContents = new Dictionary<string, string>
+        {
+            ["ServiceA/ServiceA.csproj"] = "<Project>",
+            ["ServiceB/ServiceB.csproj"] = "<Project>",
+            ["Gateway/Gateway.csproj"] = "<Project>",
+            ["Shared/Shared.csproj"] = "<Project>",
+            ["docker-compose.yml"] = "services:",
+            ["ServiceA/Program.cs"] = "using RabbitMQ.Client;",
+        };
+        var sheet = new RepoFactSheet { DeploymentTarget = "Container/cloud" };
+
+        RepoFactSheetBuilder.InferArchitectureStyle(profile, fileContents, sheet);
+
+        sheet.ArchitectureStyle.Should().Be("Microservices");
+    }
+
+    [Fact]
+    public void InferArchitectureStyle_DetectsCliTool()
+    {
+        var profile = new RepoProfile { PrimaryLanguage = "C#" };
+        var fileContents = new Dictionary<string, string>();
+        var sheet = new RepoFactSheet { DeploymentTarget = "CLI/console" };
+
+        RepoFactSheetBuilder.InferArchitectureStyle(profile, fileContents, sheet);
+
+        sheet.ArchitectureStyle.Should().Be("CLI tool");
+    }
+
+    [Fact]
+    public void InferDomainTags_DetectsAiAndResearch()
+    {
+        var profile = new RepoProfile
+        {
+            PrimaryLanguage = "C#",
+            Description = "An AI research agent"
+        };
+        var sheet = new RepoFactSheet { AppType = "WPF desktop application" };
+        sheet.ProvenCapabilities.Add(new CapabilityFingerprint { Capability = "Multiple cloud AI providers" });
+        sheet.ProvenCapabilities.Add(new CapabilityFingerprint { Capability = "RAG / vector search" });
+        sheet.ProvenCapabilities.Add(new CapabilityFingerprint { Capability = "Citation verification" });
+        sheet.ActivePackages.Add(new PackageEvidence { PackageName = "Microsoft.Data.Sqlite" });
+
+        RepoFactSheetBuilder.InferDomainTags(profile, new Dictionary<string, string>(), sheet);
+
+        sheet.DomainTags.Should().Contain("AI/ML");
+        sheet.DomainTags.Should().Contain("Research");
+        sheet.DomainTags.Should().Contain("Search & Retrieval");
+    }
+
+    [Fact]
+    public void InferDomainTags_DetectsEcommerce()
+    {
+        var profile = new RepoProfile
+        {
+            PrimaryLanguage = "TypeScript",
+            Description = "E-commerce platform"
+        };
+        var sheet = new RepoFactSheet { AppType = "React web application" };
+        sheet.ActivePackages.Add(new PackageEvidence { PackageName = "stripe" });
+
+        RepoFactSheetBuilder.InferDomainTags(profile, new Dictionary<string, string>(), sheet);
+
+        sheet.DomainTags.Should().Contain("E-commerce");
+    }
+
+    [Fact]
+    public void InferProjectScale_CategorizesCorrectly()
+    {
+        var fileContents = new Dictionary<string, string>
+        {
+            ["a.cs"] = string.Concat(Enumerable.Repeat("line\n", 500)),
+            ["b.cs"] = string.Concat(Enumerable.Repeat("line\n", 500)),
+        };
+        var sheet = new RepoFactSheet();
+        RepoFactSheetBuilder.InferProjectScale(fileContents, sheet);
+        sheet.ProjectScale.Should().Contain("Medium");
+
+        var smallContents = new Dictionary<string, string>
+        {
+            ["a.cs"] = "line1\nline2\nline3"
+        };
+        var smallSheet = new RepoFactSheet();
+        RepoFactSheetBuilder.InferProjectScale(smallContents, smallSheet);
+        smallSheet.ProjectScale.Should().Contain("Small");
+    }
+
+    [Fact]
+    public void InferInapplicableConcepts_DesktopExcludesWebConcepts()
+    {
+        var profile = new RepoProfile { PrimaryLanguage = "C#" };
+        var sheet = new RepoFactSheet
+        {
+            DeploymentTarget = "Windows desktop",
+            ArchitectureStyle = "Monolith",
+            DatabaseTechnology = "Raw SQLite via Microsoft.Data.Sqlite"
+        };
+
+        RepoFactSheetBuilder.InferInapplicableConcepts(profile, sheet);
+
+        sheet.InapplicableConcepts.Should().Contain("containerization");
+        sheet.InapplicableConcepts.Should().Contain("Dockerfile");
+        sheet.InapplicableConcepts.Should().Contain("OAuth middleware");
+        sheet.InapplicableConcepts.Should().Contain("JWT bearer");
+        sheet.InapplicableConcepts.Should().Contain("API gateway");
+        sheet.InapplicableConcepts.Should().Contain("ORM");
+        sheet.InapplicableConcepts.Should().Contain("Entity Framework");
+    }
+
+    [Fact]
+    public void InferInapplicableConcepts_ServerDoesNotExcludeWebConcepts()
+    {
+        var profile = new RepoProfile { PrimaryLanguage = "C#" };
+        var sheet = new RepoFactSheet
+        {
+            DeploymentTarget = "Server/web",
+            ArchitectureStyle = "Monolith",
+            DatabaseTechnology = "Entity Framework Core"
+        };
+
+        RepoFactSheetBuilder.InferInapplicableConcepts(profile, sheet);
+
+        sheet.InapplicableConcepts.Should().NotContain("containerization");
+        sheet.InapplicableConcepts.Should().NotContain("OAuth middleware");
+        sheet.InapplicableConcepts.Should().Contain("micro-ORM"); // They chose EF, not Dapper
+    }
+
+    [Fact]
+    public void InferInapplicableConcepts_CliExcludesUiAndAuth()
+    {
+        var profile = new RepoProfile { PrimaryLanguage = "C#" };
+        var sheet = new RepoFactSheet
+        {
+            DeploymentTarget = "CLI/console",
+            ArchitectureStyle = "CLI tool"
+        };
+
+        RepoFactSheetBuilder.InferInapplicableConcepts(profile, sheet);
+
+        sheet.InapplicableConcepts.Should().Contain("containerization");
+        sheet.InapplicableConcepts.Should().Contain("UI component library");
+        sheet.InapplicableConcepts.Should().Contain("service mesh");
+    }
+
+    [Fact]
+    public void InferInapplicableConcepts_LibraryExcludesDeployment()
+    {
+        var profile = new RepoProfile { PrimaryLanguage = "C#" };
+        var sheet = new RepoFactSheet
+        {
+            DeploymentTarget = "Library/package",
+            ArchitectureStyle = "Library"
+        };
+
+        RepoFactSheetBuilder.InferInapplicableConcepts(profile, sheet);
+
+        sheet.InapplicableConcepts.Should().Contain("containerization");
+        sheet.InapplicableConcepts.Should().Contain("deployment automation");
+        sheet.InapplicableConcepts.Should().Contain("authentication");
+    }
+
+    // ── Layer 2: Enhanced ComplementProject metadata ──
+
+    [Fact]
+    public void GitHubEnrichmentResult_ToDescriptionString_IncludesAllFields()
+    {
+        var result = new GitHubEnrichmentResult
+        {
+            Url = "https://github.com/test/repo",
+            Description = "A great library",
+            Stars = 5000,
+            License = "MIT",
+            IsArchived = true,
+            Language = "C#"
+        };
+
+        var desc = result.ToDescriptionString();
+
+        desc.Should().Contain("A great library");
+        desc.Should().Contain("5,000 stars");
+        desc.Should().Contain("License: MIT");
+        desc.Should().Contain("ARCHIVED");
+        desc.Should().Contain("Lang: C#");
+    }
+
+    [Fact]
+    public void NormalizeGitHubUrl_NormalizesVariations()
+    {
+        ComplementResearchService.NormalizeGitHubUrl("https://github.com/Owner/Repo")
+            .Should().Be("https://github.com/owner/repo");
+        ComplementResearchService.NormalizeGitHubUrl("https://github.com/Owner/Repo/tree/main/src")
+            .Should().Be("https://github.com/owner/repo");
+        ComplementResearchService.NormalizeGitHubUrl("https://github.com/serilog/serilog")
+            .Should().Be("https://github.com/serilog/serilog");
+        ComplementResearchService.NormalizeGitHubUrl("https://example.com/not-github")
+            .Should().Be("https://example.com/not-github");
+    }
+
+    // ── PostScanVerifier: Archived, staleness, stars, language checks ──
+
+    [Fact]
+    public async Task PostScanVerifier_RejectsArchivedComplements()
+    {
+        var verifier = new PostScanVerifier();
+        var profile = CreateTestProfile();
+        profile.ComplementSuggestions.Add(new ComplementProject
+        {
+            Name = "OldLib", Url = "https://github.com/test/old-lib",
+            Purpose = "Archived library", WhatItAdds = "Nothing useful", Category = "Other",
+            IsArchived = true
+        });
+        AddMinFloorComplements(profile, 5);
+
+        var factSheet = new RepoFactSheet { Ecosystem = ".NET/C#" };
+        var result = await verifier.VerifyAsync(profile, factSheet);
+
+        profile.ComplementSuggestions.Should().NotContain(c => c.Name == "OldLib");
+        result.ComplementsRemoved.Should().Contain(s => s.Contains("ARCHIVED"));
+    }
+
+    [Fact]
+    public async Task PostScanVerifier_RejectsStaleComplements_Over3Years()
+    {
+        var verifier = new PostScanVerifier();
+        var profile = CreateTestProfile();
+        profile.ComplementSuggestions.Add(new ComplementProject
+        {
+            Name = "StaleLib", Url = "https://github.com/test/stale-lib",
+            Purpose = "Old library", WhatItAdds = "Nothing", Category = "Other",
+            LastPushed = DateTime.UtcNow.AddYears(-4)
+        });
+        AddMinFloorComplements(profile, 5);
+
+        var factSheet = new RepoFactSheet { Ecosystem = ".NET/C#" };
+        var result = await verifier.VerifyAsync(profile, factSheet);
+
+        profile.ComplementSuggestions.Should().NotContain(c => c.Name == "StaleLib");
+        result.ComplementsRemoved.Should().Contain(s => s.Contains("STALE"));
+    }
+
+    [Fact]
+    public async Task PostScanVerifier_RejectsLowStarsComplements()
+    {
+        var verifier = new PostScanVerifier();
+        var profile = CreateTestProfile();
+        profile.ComplementSuggestions.Add(new ComplementProject
+        {
+            Name = "TinyLib", Url = "https://github.com/test/tiny-lib",
+            Purpose = "Unknown library", WhatItAdds = "Unclear", Category = "Other",
+            Stars = 3
+        });
+        AddMinFloorComplements(profile, 5);
+
+        var factSheet = new RepoFactSheet { Ecosystem = ".NET/C#" };
+        var result = await verifier.VerifyAsync(profile, factSheet);
+
+        profile.ComplementSuggestions.Should().NotContain(c => c.Name == "TinyLib");
+        result.ComplementsRemoved.Should().Contain(s => s.Contains("LOW-STARS"));
+    }
+
+    [Fact]
+    public async Task PostScanVerifier_RejectsWrongLanguageComplements()
+    {
+        var verifier = new PostScanVerifier();
+        var profile = CreateTestProfile();
+        profile.ComplementSuggestions.Add(new ComplementProject
+        {
+            Name = "RubyGem", Url = "https://github.com/test/ruby-gem",
+            Purpose = "Ruby utility", WhatItAdds = "Ruby features", Category = "Other",
+            RepoLanguage = "Ruby"
+        });
+        AddMinFloorComplements(profile, 5);
+
+        var factSheet = new RepoFactSheet { Ecosystem = ".NET/C#" };
+        var result = await verifier.VerifyAsync(profile, factSheet);
+
+        profile.ComplementSuggestions.Should().NotContain(c => c.Name == "RubyGem");
+        result.ComplementsRemoved.Should().Contain(s => s.Contains("WRONG-LANGUAGE"));
+    }
+
+    [Fact]
+    public async Task PostScanVerifier_KeepsCorrectLanguageComplements()
+    {
+        var verifier = new PostScanVerifier();
+        var profile = CreateTestProfile();
+        profile.ComplementSuggestions.Add(new ComplementProject
+        {
+            Name = "CSharpLib", Url = "https://example.com/csharp-lib",
+            Purpose = "C# utility", WhatItAdds = "NET features", Category = "Other",
+            RepoLanguage = "C#", Stars = 1000
+        });
+        AddMinFloorComplements(profile, 5);
+
+        var factSheet = new RepoFactSheet { Ecosystem = ".NET/C#" };
+        var result = await verifier.VerifyAsync(profile, factSheet);
+
+        profile.ComplementSuggestions.Should().Contain(c => c.Name == "CSharpLib");
+    }
+
+    [Fact]
+    public void IsRepoLanguageCompatible_HandlesEcosystemPairings()
+    {
+        // .NET accepts C#, F#, PowerShell
+        PostScanVerifier.IsRepoLanguageCompatible("C#", ".NET/C#").Should().BeTrue();
+        PostScanVerifier.IsRepoLanguageCompatible("F#", ".NET/C#").Should().BeTrue();
+        PostScanVerifier.IsRepoLanguageCompatible("PowerShell", ".NET/C#").Should().BeTrue();
+
+        // .NET rejects Python, Ruby, Go
+        PostScanVerifier.IsRepoLanguageCompatible("Python", ".NET/C#").Should().BeFalse();
+        PostScanVerifier.IsRepoLanguageCompatible("Ruby", ".NET/C#").Should().BeFalse();
+        PostScanVerifier.IsRepoLanguageCompatible("Go", ".NET/C#").Should().BeFalse();
+
+        // Universal languages (Shell, Dockerfile) always allowed
+        PostScanVerifier.IsRepoLanguageCompatible("Shell", ".NET/C#").Should().BeTrue();
+        PostScanVerifier.IsRepoLanguageCompatible("Dockerfile", "Python").Should().BeTrue();
+
+        // Python ecosystem
+        PostScanVerifier.IsRepoLanguageCompatible("Python", "Python").Should().BeTrue();
+        PostScanVerifier.IsRepoLanguageCompatible("Java", "Python").Should().BeFalse();
+
+        // Node.js ecosystem
+        PostScanVerifier.IsRepoLanguageCompatible("JavaScript", "Node.js/JavaScript").Should().BeTrue();
+        PostScanVerifier.IsRepoLanguageCompatible("TypeScript", "Node.js/JavaScript").Should().BeTrue();
+        PostScanVerifier.IsRepoLanguageCompatible("C#", "Node.js/JavaScript").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task PostScanVerifier_RejectsInapplicableComplements()
+    {
+        var verifier = new PostScanVerifier();
+        var profile = CreateTestProfile();
+        profile.ComplementSuggestions.Add(new ComplementProject
+        {
+            Name = "DockerHelper", Url = "https://example.com/docker-helper",
+            Purpose = "Docker containerization helper", WhatItAdds = "Containerization tools",
+            Category = "DevOps", Stars = 5000, RepoLanguage = "C#"
+        });
+        AddMinFloorComplements(profile, 5);
+
+        var factSheet = new RepoFactSheet
+        {
+            Ecosystem = ".NET/C#",
+            InapplicableConcepts = { "containerization", "Dockerfile" }
+        };
+        var result = await verifier.VerifyAsync(profile, factSheet);
+
+        profile.ComplementSuggestions.Should().NotContain(c => c.Name == "DockerHelper");
+        result.ComplementsRemoved.Should().Contain(s => s.Contains("INAPPLICABLE"));
+    }
+
+    // ── Dynamic search topics and diverse categories ──
+
+    [Fact]
+    public void InferDomainSearchTopics_DetectsFinanceDomain()
+    {
+        var profile = new RepoProfile
+        {
+            PrimaryLanguage = "Python",
+            FactSheet = new RepoFactSheet()
+        };
+        profile.FactSheet.ProvenCapabilities.Add(new CapabilityFingerprint
+            { Capability = "Trading algorithm", Evidence = "found in TradingEngine.py" });
+
+        var topics = ComplementResearchService.InferDomainSearchTopics(profile);
+
+        topics.Should().Contain(t => t.Contains("financial", StringComparison.OrdinalIgnoreCase) ||
+                                     t.Contains("backtesting", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void InferDomainSearchTopics_DetectsApiDomain()
+    {
+        var profile = new RepoProfile
+        {
+            PrimaryLanguage = "C#",
+            FactSheet = new RepoFactSheet { AppType = "ASP.NET Core web API" }
+        };
+
+        var topics = ComplementResearchService.InferDomainSearchTopics(profile);
+
+        topics.Should().Contain(t => t.Contains("API documentation", StringComparison.OrdinalIgnoreCase) ||
+                                     t.Contains("SDK generator", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void InferDiverseCategories_FiltersInapplicableConcepts()
+    {
+        var profile = new RepoProfile
+        {
+            PrimaryLanguage = "C#",
+            FactSheet = new RepoFactSheet
+            {
+                InapplicableConcepts = { "containerization" }
+            }
+        };
+
+        var categories = ComplementResearchService.InferDiverseCategories(profile);
+
+        categories.Should().NotContain(c => c.Contains("CI/CD", StringComparison.OrdinalIgnoreCase) &&
+                                             c.Contains("containerization", StringComparison.OrdinalIgnoreCase));
+        categories.Should().Contain(c => c.Contains("security", StringComparison.OrdinalIgnoreCase));
+        categories.Should().Contain(c => c.Contains("code analysis", StringComparison.OrdinalIgnoreCase));
+    }
+
+    // ── ToPromptSection includes new fields ──
+
+    [Fact]
+    public void ToPromptSection_IncludesNewIdentityFields()
+    {
+        var sheet = new RepoFactSheet
+        {
+            AppType = "WPF desktop application",
+            DeploymentTarget = "Windows desktop",
+            ArchitectureStyle = "Monolith",
+            Ecosystem = ".NET/C#",
+            DomainTags = { "AI/ML", "Research", "Desktop UI" },
+            ProjectScale = "Large (10k-100k LOC)",
+            InapplicableConcepts = { "containerization", "Dockerfile", "OAuth middleware" }
+        };
+
+        var prompt = sheet.ToPromptSection();
+
+        prompt.Should().Contain("DEPLOYMENT TARGET: Windows desktop");
+        prompt.Should().Contain("ARCHITECTURE: Monolith");
+        prompt.Should().Contain("DOMAIN TAGS: AI/ML, Research, Desktop UI");
+        prompt.Should().Contain("PROJECT SCALE: Large (10k-100k LOC)");
+        prompt.Should().Contain("INAPPLICABLE CONCEPTS");
+        prompt.Should().Contain("containerization");
+    }
+
+    // ── BuildJsonComplementPrompt includes new context ──
+
+    [Fact]
+    public void BuildJsonComplementPrompt_IncludesFullProjectIdentity()
+    {
+        var profile = new RepoProfile
+        {
+            Owner = "test", Name = "my-app",
+            PrimaryLanguage = "C#",
+            Description = "Test app",
+            FactSheet = new RepoFactSheet
+            {
+                AppType = "WPF desktop application",
+                DeploymentTarget = "Windows desktop",
+                ArchitectureStyle = "Monolith",
+                Ecosystem = ".NET/C#",
+                DatabaseTechnology = "Raw SQLite",
+                TestFramework = "xUnit",
+                ProjectScale = "Medium (1k-10k LOC)",
+                DomainTags = { "AI/ML", "Research" },
+                InapplicableConcepts = { "containerization", "Dockerfile" }
+            }
+        };
+        profile.FactSheet.ProvenCapabilities.Add(new CapabilityFingerprint
+            { Capability = "Circuit breaker" });
+
+        var prompt = RepoScannerService.BuildJsonComplementPrompt(
+            profile, new List<(string, List<(string, string)>)>(), 5);
+
+        prompt.Should().Contain("Deployment Target: Windows desktop");
+        prompt.Should().Contain("Architecture: Monolith");
+        prompt.Should().Contain("Ecosystem: .NET/C#");
+        prompt.Should().Contain("Domain: AI/ML, Research");
+        prompt.Should().Contain("Scale: Medium");
+        prompt.Should().Contain("DO NOT SUGGEST (inapplicable to this project): containerization, Dockerfile");
+    }
+
+    // ── Existing complement DB test still works with InapplicableConcepts empty ──
+
+    [Fact]
+    public async Task PostScanVerifier_StillRejectsEfCoreComplement_ViaDbContradiction()
+    {
+        // DB contradiction check in ValidateComplementsAsync should still fire
+        // even when InapplicableConcepts is empty (backward-compatible)
+        var verifier = new PostScanVerifier();
+        var profile = CreateTestProfile();
+        profile.ComplementSuggestions.Add(new ComplementProject
+        {
+            Name = "EFCore", Url = "https://github.com/dotnet/EFCore",
+            Purpose = "Entity Framework Core ORM",
+            WhatItAdds = "Robust ORM for data access", Category = "DataAccess"
+        });
+        AddMinFloorComplements(profile, 5);
+
+        var factSheet = new RepoFactSheet
+        {
+            Ecosystem = ".NET/C#",
+            DatabaseTechnology = "Raw SQLite via Microsoft.Data.Sqlite (NOT EF Core)"
+            // NO InapplicableConcepts set — tests backward compatibility
+        };
+
+        var result = await verifier.VerifyAsync(profile, factSheet);
+
+        profile.ComplementSuggestions.Should().NotContain(c => c.Name == "EFCore",
+            "DB contradiction check should still catch EF Core complement");
+        result.ComplementsRemoved.Should().Contain(s => s.Contains("WRONG-DB"));
+    }
+
+    // Helper: add non-rejected complements to meet minimum floor
+    private static void AddMinFloorComplements(RepoProfile profile, int count)
+    {
+        var names = new[] { "Serilog", "BenchmarkDotNet", "Snyk", "Coverlet", "StyleCop",
+                           "NSwag", "Bogus", "FluentValidation", "AutoFixture", "Scrutor" };
+        for (int i = 0; i < count && i < names.Length; i++)
+        {
+            profile.ComplementSuggestions.Add(new ComplementProject
+            {
+                Name = names[i],
+                Url = $"https://example.com/{names[i].ToLowerInvariant()}",
+                Purpose = $"{names[i]} utility",
+                WhatItAdds = "Various improvements",
+                Category = i switch { 0 => "Logging", 1 => "Performance", 2 => "Security",
+                                      3 => "Testing", _ => "Other" },
+                Stars = 1000 + i * 100,
+                RepoLanguage = "C#"
+            });
+        }
     }
 }

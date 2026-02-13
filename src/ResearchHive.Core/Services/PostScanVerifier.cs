@@ -1,4 +1,5 @@
 using ResearchHive.Core.Models;
+using ResearchHive.Core.Configuration;
 using Microsoft.Extensions.Logging;
 using System.Text.RegularExpressions;
 
@@ -19,11 +20,13 @@ namespace ResearchHive.Core.Services;
 public class PostScanVerifier
 {
     private readonly HttpClient _http;
+    private readonly ILlmService? _llmService;
     private readonly ILogger<PostScanVerifier>? _logger;
 
-    public PostScanVerifier(ILogger<PostScanVerifier>? logger = null)
+    public PostScanVerifier(ILogger<PostScanVerifier>? logger = null, ILlmService? llmService = null)
     {
         _logger = logger;
+        _llmService = llmService;
         _http = new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
         _http.DefaultRequestHeaders.UserAgent.Add(
             new System.Net.Http.Headers.ProductInfoHeaderValue("ResearchHive", "1.0"));
@@ -52,6 +55,13 @@ public class PostScanVerifier
 
         // 4. Validate complement URLs + ecosystem + redundancy (with floor + diversity)
         await ValidateComplementsAsync(profile, factSheet, result, ct);
+
+        // 4b. LLM relevance second pass — if LLM service available, ask the model
+        //     to evaluate each surviving complement against the full project identity
+        if (_llmService != null && profile.ComplementSuggestions.Count > 0)
+        {
+            await LlmRelevanceCheckAsync(profile, factSheet, result, ct);
+        }
 
         // 5. Inject fact-sheet-derived strengths the LLM may have missed
         InjectProvenStrengths(profile, factSheet, result);
@@ -96,20 +106,15 @@ public class PostScanVerifier
     }
 
     /// <summary>
-    /// Prune gaps that are inappropriate for the app type.
-    /// Desktop apps don't need auth/authorization, Dockerfile, middleware, API gateway.
+    /// Prune gaps that are inappropriate for the project type.
+    /// Uses the dynamically-inferred InapplicableConcepts from the fact sheet
+    /// instead of hardcoded app-type if-chains. Works for ANY project type.
     /// Also rejects gaps contradicting the database technology choice.
     /// </summary>
     private static void PruneAppTypeInappropriateGaps(RepoProfile profile, RepoFactSheet factSheet, VerificationResult result)
     {
-        if (string.IsNullOrEmpty(factSheet.AppType)) return;
-
-        var appTypeLower = factSheet.AppType.ToLowerInvariant();
-        var isDesktop = appTypeLower.Contains("wpf") || appTypeLower.Contains("winforms") ||
-                        appTypeLower.Contains("desktop") || appTypeLower.Contains("maui") ||
-                        appTypeLower.Contains("avalonia");
-        var isConsole = appTypeLower.Contains("console");
-        var dbTech = factSheet.DatabaseTechnology.ToLowerInvariant();
+        if (factSheet.InapplicableConcepts.Count == 0 && string.IsNullOrEmpty(factSheet.DatabaseTechnology))
+            return;
 
         var toRemove = new List<string>();
 
@@ -117,41 +122,33 @@ public class PostScanVerifier
         {
             var gapLower = gap.ToLowerInvariant();
 
-            // Desktop apps: auth/authorization is inapplicable (they use OS-level security, DPAPI, etc.)
-            if (isDesktop && (gapLower.Contains("authentication") || gapLower.Contains("authorization") ||
-                             gapLower.Contains("auth mechanism") || gapLower.Contains("oauth") ||
-                             gapLower.Contains("jwt") || gapLower.Contains("identity provider")))
+            // ── Dynamic InapplicableConcepts check ──
+            // If any inapplicable concept's keywords appear in the gap text, prune it.
+            foreach (var concept in factSheet.InapplicableConcepts)
             {
-                toRemove.Add(gap);
-                result.GapsRemoved.Add($"WRONG-APPTYPE: \"{gap}\" — {factSheet.AppType} does not need web-style auth");
-                continue;
-            }
+                var conceptLower = concept.ToLowerInvariant();
+                var conceptWords = conceptLower.Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
-            // Desktop/console apps: Dockerfile/containerization is not applicable
-            if ((isDesktop || isConsole) && (gapLower.Contains("dockerfile") || gapLower.Contains("container") ||
-                                             gapLower.Contains("docker") || gapLower.Contains("kubernetes")))
-            {
-                toRemove.Add(gap);
-                result.GapsRemoved.Add($"WRONG-APPTYPE: \"{gap}\" — {factSheet.AppType} is not containerized");
-                continue;
-            }
+                // For single-word concepts, require the word to appear
+                // For multi-word concepts, require ALL significant words (3+ chars) to appear
+                bool matches;
+                if (conceptWords.Length == 1)
+                {
+                    matches = gapLower.Contains(conceptLower);
+                }
+                else
+                {
+                    var significantWords = conceptWords.Where(w => w.Length >= 3).ToList();
+                    matches = significantWords.Count > 0 &&
+                              significantWords.All(w => gapLower.Contains(w));
+                }
 
-            // Desktop apps: middleware/API gateway gaps are inapplicable
-            if (isDesktop && (gapLower.Contains("middleware") || gapLower.Contains("api gateway") ||
-                             gapLower.Contains("load balancer") || gapLower.Contains("reverse proxy")))
-            {
-                toRemove.Add(gap);
-                result.GapsRemoved.Add($"WRONG-APPTYPE: \"{gap}\" — {factSheet.AppType} has no web server layer");
-                continue;
-            }
-
-            // Database technology contradiction: if using raw SQLite, "no ORM" is a design choice, not a gap
-            if (dbTech.Contains("raw sqlite") && (gapLower.Contains("entity framework") ||
-                gapLower.Contains("orm") || gapLower.Contains("ef core")))
-            {
-                toRemove.Add(gap);
-                result.GapsRemoved.Add($"WRONG-DB: \"{gap}\" — project deliberately uses {factSheet.DatabaseTechnology}");
-                continue;
+                if (matches)
+                {
+                    toRemove.Add(gap);
+                    result.GapsRemoved.Add($"INAPPLICABLE: \"{gap}\" — concept '{concept}' is not relevant for {factSheet.DeploymentTarget} {factSheet.ArchitectureStyle}");
+                    break;
+                }
             }
         }
 
@@ -280,6 +277,74 @@ public class PostScanVerifier
             {
                 toRemove.Add((comp, $"META-PROJECT: \"{comp.Name}\" — infrastructure engine, not an installable {factSheet.Ecosystem} package", "HARD"));
                 continue;
+            }
+
+            // ── Archived repo check (from GitHub API enrichment) ──
+            if (comp.IsArchived)
+            {
+                toRemove.Add((comp, $"ARCHIVED: \"{comp.Name}\" — GitHub repo is archived/abandoned", "HARD"));
+                continue;
+            }
+
+            // ── Staleness check (from GitHub API enrichment) ──
+            if (comp.LastPushed.HasValue)
+            {
+                var age = DateTime.UtcNow - comp.LastPushed.Value;
+                if (age.TotalDays > 365 * 3) // 3+ years: hard reject
+                {
+                    toRemove.Add((comp, $"STALE: \"{comp.Name}\" — last pushed {comp.LastPushed.Value:yyyy-MM-dd} ({age.TotalDays / 365:F1}yr ago)", "HARD"));
+                    continue;
+                }
+                if (age.TotalDays > 365 * 2) // 2-3 years: soft reject
+                {
+                    toRemove.Add((comp, $"STALE: \"{comp.Name}\" — last pushed {comp.LastPushed.Value:yyyy-MM-dd} ({age.TotalDays / 365:F1}yr ago)", "SOFT"));
+                    continue;
+                }
+            }
+
+            // ── Minimum stars check (from GitHub API enrichment) ──
+            if (comp.Stars >= 0) // -1 means not enriched
+            {
+                if (comp.Stars < 10) // < 10 stars: hard reject (too obscure)
+                {
+                    toRemove.Add((comp, $"LOW-STARS: \"{comp.Name}\" — only {comp.Stars} stars", "HARD"));
+                    continue;
+                }
+                if (comp.Stars < 50) // < 50 stars: soft reject
+                {
+                    toRemove.Add((comp, $"LOW-STARS: \"{comp.Name}\" — only {comp.Stars} stars", "SOFT"));
+                    continue;
+                }
+            }
+
+            // ── Repo language vs ecosystem check (from GitHub API enrichment) ──
+            if (!string.IsNullOrEmpty(comp.RepoLanguage) && !string.IsNullOrEmpty(factSheet.Ecosystem))
+            {
+                if (!IsRepoLanguageCompatible(comp.RepoLanguage, factSheet.Ecosystem))
+                {
+                    toRemove.Add((comp, $"WRONG-LANGUAGE: \"{comp.Name}\" — repo language is {comp.RepoLanguage}, project ecosystem is {factSheet.Ecosystem}", "HARD"));
+                    continue;
+                }
+            }
+
+            // ── InapplicableConcepts check — reject complements matching inapplicable concepts ──
+            if (factSheet.InapplicableConcepts.Count > 0)
+            {
+                var compDesc = (comp.Purpose + " " + comp.WhatItAdds + " " + comp.Name + " " + comp.Category).ToLowerInvariant();
+                bool isInapplicable = false;
+                foreach (var concept in factSheet.InapplicableConcepts)
+                {
+                    var conceptLower = concept.ToLowerInvariant();
+                    var conceptWords = conceptLower.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                    var significantWords = conceptWords.Where(w => w.Length >= 3).ToList();
+                    if (significantWords.Count > 0 && significantWords.All(w => compDesc.Contains(w)))
+                    {
+                        toRemove.Add((comp, $"INAPPLICABLE: \"{comp.Name}\" — addresses concept '{concept}' which is irrelevant for this project", "SOFT"));
+                        isInapplicable = true;
+                        break;
+                    }
+                }
+                if (isInapplicable) continue;
             }
 
             // ── Database technology contradiction: reject if complement conflicts with DB choice ──
@@ -490,6 +555,109 @@ public class PostScanVerifier
         }
     }
 
+    /// <summary>
+    /// LLM-powered relevance check as a second pass after deterministic filters.
+    /// Sends the full project identity + surviving complements to the LLM and asks
+    /// for a KEEP/REJECT verdict on each. Respects the minimum floor.
+    /// </summary>
+    private async Task LlmRelevanceCheckAsync(
+        RepoProfile profile, RepoFactSheet factSheet, VerificationResult result, CancellationToken ct)
+    {
+        try
+        {
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine("You are a software ecosystem expert. Evaluate each complement project for RELEVANCE.");
+            sb.AppendLine();
+            sb.AppendLine("PROJECT IDENTITY:");
+            sb.AppendLine($"  Name: {profile.Owner}/{profile.Name}");
+            sb.AppendLine($"  Language: {profile.PrimaryLanguage}");
+            sb.AppendLine($"  App Type: {factSheet.AppType}");
+            sb.AppendLine($"  Deployment: {factSheet.DeploymentTarget}");
+            sb.AppendLine($"  Architecture: {factSheet.ArchitectureStyle}");
+            sb.AppendLine($"  Ecosystem: {factSheet.Ecosystem}");
+            sb.AppendLine($"  Database: {factSheet.DatabaseTechnology}");
+            if (factSheet.DomainTags.Count > 0)
+                sb.AppendLine($"  Domain: {string.Join(", ", factSheet.DomainTags)}");
+            if (factSheet.InapplicableConcepts.Count > 0)
+                sb.AppendLine($"  Inapplicable: {string.Join(", ", factSheet.InapplicableConcepts)}");
+            sb.AppendLine();
+            sb.AppendLine("COMPLEMENT CANDIDATES:");
+            for (int i = 0; i < profile.ComplementSuggestions.Count; i++)
+            {
+                var c = profile.ComplementSuggestions[i];
+                sb.AppendLine($"  [{i}] {c.Name} — {c.Purpose} (category: {c.Category}, stars: {c.Stars}, lang: {c.RepoLanguage})");
+            }
+            sb.AppendLine();
+            sb.AppendLine("For each candidate, respond with a JSON object:");
+            sb.AppendLine(@"{ ""verdicts"": [ { ""index"": 0, ""verdict"": ""KEEP"", ""reason"": ""..."" }, ... ] }");
+            sb.AppendLine("Verdict must be KEEP or REJECT. REJECT if:");
+            sb.AppendLine("- Not actually useful for this specific project type/domain");
+            sb.AppendLine("- Addresses a concept that's inapplicable to this deployment/architecture");
+            sb.AppendLine("- Is generic infrastructure the project doesn't need");
+            sb.AppendLine("- Duplicates functionality the project already has");
+            sb.AppendLine("Return ONLY valid JSON.");
+
+            var response = await _llmService!.GenerateJsonAsync(
+                sb.ToString(),
+                "You are a software ecosystem analyst. Return valid JSON with verdicts for each complement.",
+                tier: ModelTier.Mini,
+                ct: ct);
+
+            // Parse verdicts
+            var cleaned = response.Trim();
+            if (cleaned.StartsWith("```")) cleaned = cleaned.Split('\n', 2).Length > 1 ? cleaned.Split('\n', 2)[1] : cleaned;
+            if (cleaned.EndsWith("```")) cleaned = cleaned[..cleaned.LastIndexOf("```")];
+            cleaned = cleaned.Trim();
+
+            using var doc = System.Text.Json.JsonDocument.Parse(cleaned);
+            if (!doc.RootElement.TryGetProperty("verdicts", out var verdicts)) return;
+
+            var rejectIndices = new List<int>();
+            foreach (var v in verdicts.EnumerateArray())
+            {
+                if (v.TryGetProperty("index", out var idxEl) && v.TryGetProperty("verdict", out var verdictEl))
+                {
+                    var idx = idxEl.GetInt32();
+                    var verdict = verdictEl.GetString() ?? "";
+                    if (verdict.Equals("REJECT", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var reason = v.TryGetProperty("reason", out var reasonEl) ? reasonEl.GetString() ?? "" : "";
+                        rejectIndices.Add(idx);
+                        if (idx >= 0 && idx < profile.ComplementSuggestions.Count)
+                        {
+                            result.ComplementsRemoved.Add(
+                                $"LLM-REJECT: \"{profile.ComplementSuggestions[idx].Name}\" — {reason}");
+                        }
+                    }
+                }
+            }
+
+            // Apply rejections, respecting the minimum floor
+            var toRemove = rejectIndices
+                .Where(i => i >= 0 && i < profile.ComplementSuggestions.Count)
+                .OrderByDescending(i => i)
+                .ToList();
+
+            var remaining = profile.ComplementSuggestions.Count - toRemove.Count;
+            if (remaining < MinimumComplementFloor)
+            {
+                // Keep enough to meet the floor — skip the last N rejections
+                toRemove = toRemove.Take(profile.ComplementSuggestions.Count - MinimumComplementFloor).ToList();
+            }
+
+            foreach (var idx in toRemove)
+                profile.ComplementSuggestions.RemoveAt(idx);
+
+            _logger?.LogInformation("LLM relevance check: {Rejected} complements rejected, {Remaining} remaining",
+                toRemove.Count, profile.ComplementSuggestions.Count);
+        }
+        catch (Exception ex)
+        {
+            // LLM relevance check is non-fatal — log and continue
+            _logger?.LogWarning(ex, "LLM relevance check failed, skipping second-pass filter");
+        }
+    }
+
     /// <summary>Check if a complement project is in the same language ecosystem.</summary>
     private static bool IsEcosystemCompatible(ComplementProject comp, RepoFactSheet factSheet)
     {
@@ -572,6 +740,53 @@ public class PostScanVerifier
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Check if a GitHub repo's primary language is compatible with the target ecosystem.
+    /// Uses the ACTUAL language from GitHub API (e.g., "C#", "Python", "Go") rather than
+    /// heuristic keyword matching. Works for any ecosystem pairing.
+    /// </summary>
+    internal static bool IsRepoLanguageCompatible(string repoLanguage, string ecosystem)
+    {
+        if (string.IsNullOrEmpty(repoLanguage) || string.IsNullOrEmpty(ecosystem)) return true;
+
+        var lang = repoLanguage.ToLowerInvariant();
+        var eco = ecosystem.ToLowerInvariant();
+
+        // Build a table of which languages belong to which ecosystem families
+        var ecosystemLanguages = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase)
+        {
+            [".net"] = new(StringComparer.OrdinalIgnoreCase) { "c#", "f#", "visual basic .net", "visual basic", "powershell" },
+            ["c#"] = new(StringComparer.OrdinalIgnoreCase) { "c#", "f#", "visual basic .net", "powershell" },
+            ["jvm"] = new(StringComparer.OrdinalIgnoreCase) { "java", "kotlin", "scala", "groovy", "clojure" },
+            ["node"] = new(StringComparer.OrdinalIgnoreCase) { "javascript", "typescript", "coffeescript" },
+            ["javascript"] = new(StringComparer.OrdinalIgnoreCase) { "javascript", "typescript", "coffeescript" },
+            ["python"] = new(StringComparer.OrdinalIgnoreCase) { "python", "cython", "jupyter notebook" },
+            ["rust"] = new(StringComparer.OrdinalIgnoreCase) { "rust" },
+            ["go"] = new(StringComparer.OrdinalIgnoreCase) { "go" },
+            ["ruby"] = new(StringComparer.OrdinalIgnoreCase) { "ruby" },
+            ["php"] = new(StringComparer.OrdinalIgnoreCase) { "php" },
+            ["swift"] = new(StringComparer.OrdinalIgnoreCase) { "swift", "objective-c" },
+            ["dart"] = new(StringComparer.OrdinalIgnoreCase) { "dart" },
+        };
+
+        // Multi-language repos (e.g., documentation, configs) are always allowed
+        var universalLanguages = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "shell", "bash", "dockerfile", "makefile", "html", "css", "markdown", ""
+        };
+        if (universalLanguages.Contains(lang)) return true;
+
+        // Find which ecosystem the target project is in
+        foreach (var (ecoKey, acceptedLangs) in ecosystemLanguages)
+        {
+            if (eco.Contains(ecoKey))
+                return acceptedLangs.Contains(lang);
+        }
+
+        // Unknown ecosystem — allow anything
+        return true;
     }
 
     /// <summary>Extract significant keywords from a capability label for fuzzy matching.</summary>

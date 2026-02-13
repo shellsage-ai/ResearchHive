@@ -75,6 +75,13 @@ public class RepoFactSheetBuilder
         InferTestFramework(profile, fileContents, sheet);
         InferEcosystem(profile, sheet);
 
+        // ── Layer 6: Dynamic project identity (deployment, architecture, domain, scale, inapplicable concepts) ──
+        InferDeploymentTarget(profile, fileContents, sheet);
+        InferArchitectureStyle(profile, fileContents, sheet);
+        InferDomainTags(profile, fileContents, sheet);
+        InferProjectScale(fileContents, sheet);
+        InferInapplicableConcepts(profile, sheet);
+
         _logger?.LogInformation(
             "FactSheet built: {Active} active packages, {Phantom} phantom, {Proven} capabilities proven, " +
             "{Absent} absent, {Tests} test methods, AppType={AppType}",
@@ -495,6 +502,257 @@ public class RepoFactSheetBuilder
             "dart" => "Dart/Flutter",
             _ => profile.PrimaryLanguage ?? ""
         };
+    }
+
+    // ═══════════════════════════════════════════════════════
+    //  LAYER 6: Dynamic Project Identity
+    // ═══════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Infer where this application is deployed/runs. Table-driven by app-type keywords
+    /// and manifest markers — works for ANY ecosystem, not just .NET.
+    /// </summary>
+    internal static void InferDeploymentTarget(RepoProfile profile, Dictionary<string, string> fileContents, RepoFactSheet sheet)
+    {
+        var appType = sheet.AppType.ToLowerInvariant();
+        var allText = string.Concat(fileContents.Values);
+
+        // Table-driven: keyword → deployment target
+        var markers = new (string[] keywords, string target)[]
+        {
+            (new[] { "wpf", "winforms", "avalonia", "maui desktop", "win32", "electron" }, "Windows desktop"),
+            (new[] { "maui", "xamarin" }, "Cross-platform mobile/desktop"),
+            (new[] { "ios", "swift", "uikit", "swiftui" }, "iOS/Apple"),
+            (new[] { "android" }, "Android"),
+            (new[] { "react native", "flutter", "ionic", "cordova" }, "Cross-platform mobile"),
+            (new[] { "asp.net", "web api", "web app", "django", "flask", "fastapi", "express", "spring boot", "rails" }, "Server/web"),
+            (new[] { "lambda", "azure function", "cloud function", "serverless" }, "Cloud function/serverless"),
+            (new[] { "cli", "console" }, "CLI/console"),
+            (new[] { "react", "angular", "vue", "svelte", "blazor wasm" }, "Browser SPA"),
+            (new[] { "library", "nuget", "npm package", "pypi", "crate" }, "Library/package"),
+        };
+
+        foreach (var (keywords, target) in markers)
+        {
+            if (keywords.Any(kw => appType.Contains(kw)))
+            {
+                sheet.DeploymentTarget = target;
+                return;
+            }
+        }
+
+        // Fallback: check file contents for deployment clues
+        if (fileContents.Keys.Any(f => f.Contains("Dockerfile", StringComparison.OrdinalIgnoreCase)) ||
+            Regex.IsMatch(allText, @"docker-compose|kubernetes|k8s|helm", RegexOptions.IgnoreCase))
+            sheet.DeploymentTarget = "Container/cloud";
+        else if (Regex.IsMatch(allText, @"serverless\.yml|sam\.template|cdk\.json", RegexOptions.IgnoreCase))
+            sheet.DeploymentTarget = "Cloud function/serverless";
+        else if (!string.IsNullOrEmpty(profile.PrimaryLanguage))
+            sheet.DeploymentTarget = "Unknown";
+    }
+
+    /// <summary>
+    /// Infer the architecture style from code patterns and project structure.
+    /// Works for any ecosystem — looks at project count, communication patterns, etc.
+    /// </summary>
+    internal static void InferArchitectureStyle(RepoProfile profile, Dictionary<string, string> fileContents, RepoFactSheet sheet)
+    {
+        var allText = string.Concat(fileContents.Values);
+        var fileKeys = fileContents.Keys.ToList();
+
+        // Count distinct project/module boundaries
+        var projectFiles = fileKeys.Count(f =>
+            f.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase) ||
+            f.EndsWith(".fsproj", StringComparison.OrdinalIgnoreCase) ||
+            f.Equals("package.json", StringComparison.OrdinalIgnoreCase) ||
+            f.EndsWith("/package.json", StringComparison.OrdinalIgnoreCase) ||
+            f.EndsWith("setup.py", StringComparison.OrdinalIgnoreCase) ||
+            f.EndsWith("Cargo.toml", StringComparison.OrdinalIgnoreCase) ||
+            f.EndsWith("go.mod", StringComparison.OrdinalIgnoreCase) ||
+            f.EndsWith("build.gradle", StringComparison.OrdinalIgnoreCase));
+
+        bool hasMessageBus = Regex.IsMatch(allText, @"RabbitMQ|Kafka|MassTransit|MediatR|EventBus|ServiceBus|SNS|SQS", RegexOptions.IgnoreCase);
+        bool hasGrpcOrProto = fileKeys.Any(f => f.EndsWith(".proto", StringComparison.OrdinalIgnoreCase)) ||
+                              Regex.IsMatch(allText, @"Grpc\.Core|grpc|protobuf", RegexOptions.IgnoreCase);
+        bool hasDockerCompose = fileKeys.Any(f => f.Contains("docker-compose", StringComparison.OrdinalIgnoreCase));
+
+        if ((hasMessageBus || hasGrpcOrProto) && hasDockerCompose && projectFiles > 3)
+            sheet.ArchitectureStyle = "Microservices";
+        else if (projectFiles > 5 && hasMessageBus)
+            sheet.ArchitectureStyle = "Modular monolith";
+        else if (sheet.DeploymentTarget.Contains("CLI", StringComparison.OrdinalIgnoreCase) ||
+                 sheet.DeploymentTarget.Contains("console", StringComparison.OrdinalIgnoreCase))
+            sheet.ArchitectureStyle = "CLI tool";
+        else if (sheet.DeploymentTarget.Contains("Library", StringComparison.OrdinalIgnoreCase))
+            sheet.ArchitectureStyle = "Library";
+        else if (sheet.DeploymentTarget.Contains("serverless", StringComparison.OrdinalIgnoreCase))
+            sheet.ArchitectureStyle = "Serverless functions";
+        else
+            sheet.ArchitectureStyle = "Monolith";
+    }
+
+    /// <summary>
+    /// Table-driven domain tagging: scan proven capabilities, packages, and file patterns
+    /// to assign domain labels. Works across all ecosystems.
+    /// </summary>
+    internal static void InferDomainTags(RepoProfile profile, Dictionary<string, string> fileContents, RepoFactSheet sheet)
+    {
+        var tags = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var capText = string.Join(" ", sheet.ProvenCapabilities.Select(c => c.Capability)).ToLowerInvariant();
+        var pkgText = string.Join(" ", sheet.ActivePackages.Select(p => p.PackageName)).ToLowerInvariant();
+        var allText = (capText + " " + pkgText + " " + sheet.AppType + " " + (profile.Description ?? "")).ToLowerInvariant();
+
+        // Table-driven: keyword presence → domain tag
+        var domainRules = new (string[] keywords, string tag)[]
+        {
+            (new[] { "llm", "ai provider", "openai", "anthropic", "gemini", "embedding", "gpt", "transformer", "torch", "tensorflow" }, "AI/ML"),
+            (new[] { "rag", "vector search", "semantic search", "retrieval", "embedding generation" }, "Search & Retrieval"),
+            (new[] { "scraping", "crawl", "playwright", "selenium", "puppeteer", "beautifulsoup" }, "Web scraping"),
+            (new[] { "research", "citation", "analysis", "report" }, "Research"),
+            (new[] { "e-commerce", "payment", "stripe", "cart", "checkout", " shop" }, "E-commerce"),
+            (new[] { "game", "unity", "unreal", "godot", "sfml", "sdl" }, "Gaming"),
+            (new[] { "iot", "mqtt", "sensor", "arduino", "raspberry" }, "IoT"),
+            (new[] { "blockchain", "ethereum", "solidity", "web3" }, "Blockchain"),
+            (new[] { "healthcare", "hl7", "fhir", "dicom", "medical" }, "Healthcare"),
+            (new[] { "finance", "trading", "market data", "stock", "portfolio" }, "Finance"),
+            (new[] { "education", "lms", "learning", "quiz", "course" }, "Education"),
+            (new[] { "devops", "ci/cd", "pipeline", "deploy", "terraform", "ansible" }, "DevOps"),
+            (new[] { "cms", "wordpress", "content management" }, "CMS"),
+            (new[] { "messaging", "chat", "websocket", "signalr", "socket.io" }, "Real-time/Messaging"),
+            (new[] { "data pipeline", "etl", "data warehouse", "spark", "airflow", "dbt" }, "Data engineering"),
+            (new[] { "desktop", "wpf", "winforms", "avalonia", "gtk", "qt" }, "Desktop UI"),
+            (new[] { "api", "rest", "graphql", "grpc" }, "API"),
+            (new[] { "security", "auth", "encryption", "dpapi", "vault" }, "Security"),
+            (new[] { "test", "benchmark", "quality" }, "Testing/Quality"),
+        };
+
+        foreach (var (keywords, tag) in domainRules)
+        {
+            if (keywords.Any(kw => allText.Contains(kw)))
+                tags.Add(tag);
+        }
+
+        sheet.DomainTags = tags.OrderBy(t => t).ToList();
+    }
+
+    /// <summary>
+    /// Estimate project scale from total source lines. Works for any language.
+    /// </summary>
+    internal static void InferProjectScale(Dictionary<string, string> fileContents, RepoFactSheet sheet)
+    {
+        long totalLines = fileContents.Values.Sum(c => (long)c.Split('\n').Length);
+
+        sheet.ProjectScale = totalLines switch
+        {
+            < 1_000 => "Small (<1k LOC)",
+            < 10_000 => "Medium (1k-10k LOC)",
+            < 100_000 => "Large (10k-100k LOC)",
+            _ => "Very large (>100k LOC)"
+        };
+    }
+
+    /// <summary>
+    /// Dynamically determine which concepts are INAPPLICABLE to this project.
+    /// Rules operate on ABSTRACT categories (deployment target, architecture style, DB choice)
+    /// — NOT on hardcoded app names. This means any new repo type automatically gets correct filtering.
+    /// </summary>
+    internal static void InferInapplicableConcepts(RepoProfile profile, RepoFactSheet sheet)
+    {
+        var concepts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var deploy = sheet.DeploymentTarget.ToLowerInvariant();
+        var arch = sheet.ArchitectureStyle.ToLowerInvariant();
+        var dbTech = sheet.DatabaseTechnology.ToLowerInvariant();
+
+        // ── Deployment-target rules (any app with these targets gets these exclusions) ──
+
+        // Desktop/mobile apps: no web server concepts
+        if (deploy.Contains("desktop") || deploy.Contains("mobile"))
+        {
+            concepts.Add("containerization");
+            concepts.Add("Dockerfile");
+            concepts.Add("Kubernetes");
+            concepts.Add("reverse proxy");
+            concepts.Add("load balancer");
+            concepts.Add("API gateway");
+            concepts.Add("web auth middleware");
+            concepts.Add("middleware pipeline");
+            concepts.Add("CORS");
+            concepts.Add("server-side rendering");
+        }
+
+        // Desktop apps specifically: no web-style auth
+        if (deploy.Contains("desktop"))
+        {
+            concepts.Add("OAuth middleware");
+            concepts.Add("JWT bearer");
+            concepts.Add("session management");
+            concepts.Add("cookie auth");
+        }
+
+        // CLI tools: no UI frameworks, no web auth, no containerization for most
+        if (deploy.Contains("cli") || deploy.Contains("console"))
+        {
+            concepts.Add("containerization");
+            concepts.Add("Dockerfile");
+            concepts.Add("UI component library");
+            concepts.Add("web auth middleware");
+            concepts.Add("OAuth middleware");
+            concepts.Add("session management");
+        }
+
+        // Browser SPA: no server-side templating, no backend DB ORM
+        if (deploy.Contains("browser") || deploy.Contains("spa"))
+        {
+            concepts.Add("server-side templating");
+            concepts.Add("database migration tool");
+        }
+
+        // Library/package: no deployment infrastructure
+        if (deploy.Contains("library") || deploy.Contains("package"))
+        {
+            concepts.Add("containerization");
+            concepts.Add("Dockerfile");
+            concepts.Add("deployment automation");
+            concepts.Add("monitoring dashboard");
+        }
+
+        // ── Architecture rules ──
+
+        // Monolith: no service mesh, no distributed tracing (optional)
+        if (arch == "monolith" || arch == "cli tool")
+        {
+            concepts.Add("service mesh");
+            concepts.Add("API gateway");
+        }
+
+        // Library: no end-user auth, no deployment
+        if (arch == "library")
+        {
+            concepts.Add("authentication");
+            concepts.Add("deployment automation");
+        }
+
+        // ── Database technology rules (deliberate choices) ──
+
+        if (dbTech.Contains("raw sqlite") || dbTech.Contains("dapper") || dbTech.Contains("hand-written sql"))
+        {
+            concepts.Add("ORM");
+            concepts.Add("Entity Framework");
+            concepts.Add("EF Core");
+        }
+
+        if (dbTech.Contains("entity framework") || dbTech.Contains("ef core"))
+        {
+            concepts.Add("micro-ORM"); // They chose EF, don't suggest Dapper
+        }
+
+        if (dbTech.Contains("mongodb") || dbTech.Contains("nosql"))
+        {
+            concepts.Add("SQL migration tool");
+            concepts.Add("relational database");
+        }
+
+        sheet.InapplicableConcepts = concepts.OrderBy(c => c).ToList();
     }
 
     // ═══════════════════════════════════════════════════

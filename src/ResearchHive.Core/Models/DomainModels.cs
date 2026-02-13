@@ -237,6 +237,29 @@ public class RepoFactSheet
     /// <summary>Primary language ecosystem for complement validation.</summary>
     public string Ecosystem { get; set; } = string.Empty;
 
+    // ─── Dynamic Project Identity (Layer 1 anti-hallucination) ───
+
+    /// <summary>Where this app runs: "Windows desktop", "Linux server", "Browser", "Mobile", "CLI", "Cloud function", etc.</summary>
+    public string DeploymentTarget { get; set; } = string.Empty;
+
+    /// <summary>Architecture style: "Monolith", "Microservices", "Modular monolith", "Serverless", "CLI tool", etc.</summary>
+    public string ArchitectureStyle { get; set; } = string.Empty;
+
+    /// <summary>Domain tags describing what the project DOES: ["research", "AI", "data-pipeline", "e-commerce"], etc.</summary>
+    public List<string> DomainTags { get; set; } = new();
+
+    /// <summary>Rough project scale: "Small (<1k LOC)", "Medium (1k-10k LOC)", "Large (10k-100k LOC)", "Very large (>100k LOC)".</summary>
+    public string ProjectScale { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Concepts that are INAPPLICABLE to this project type/deployment/architecture.
+    /// Dynamic rules determine these at build time — NOT hardcoded per specific app.
+    /// Examples: "containerization" for desktop apps, "auth middleware" for CLI tools,
+    ///           "ORM" when raw SQL is a deliberate choice.
+    /// Used by PostScanVerifier to prune irrelevant gaps AND complements.
+    /// </summary>
+    public List<string> InapplicableConcepts { get; set; } = new();
+
     /// <summary>Render the fact sheet as a structured prompt section for LLM injection.</summary>
     public string ToPromptSection()
     {
@@ -291,6 +314,17 @@ public class RepoFactSheet
             sb.AppendLine($"TEST FRAMEWORK: {TestFramework} ({TestMethodCount} test methods in {TestFileCount} files)");
         if (!string.IsNullOrEmpty(Ecosystem))
             sb.AppendLine($"ECOSYSTEM: {Ecosystem}");
+
+        if (!string.IsNullOrEmpty(DeploymentTarget))
+            sb.AppendLine($"DEPLOYMENT TARGET: {DeploymentTarget}");
+        if (!string.IsNullOrEmpty(ArchitectureStyle))
+            sb.AppendLine($"ARCHITECTURE: {ArchitectureStyle}");
+        if (DomainTags.Count > 0)
+            sb.AppendLine($"DOMAIN TAGS: {string.Join(", ", DomainTags)}");
+        if (!string.IsNullOrEmpty(ProjectScale))
+            sb.AppendLine($"PROJECT SCALE: {ProjectScale}");
+        if (InapplicableConcepts.Count > 0)
+            sb.AppendLine($"INAPPLICABLE CONCEPTS (do NOT suggest these): {string.Join(", ", InapplicableConcepts)}");
 
         sb.AppendLine();
         sb.AppendLine("RULES FOR THE LLM:");
@@ -419,9 +453,47 @@ public class ComplementProject
     public string Category { get; set; } = string.Empty;
     public string License { get; set; } = string.Empty;
     public string Maturity { get; set; } = string.Empty;
+
+    // ─── GitHub API metadata (populated by structured enrichment) ───
+
+    /// <summary>GitHub stars from API. -1 means not yet enriched.</summary>
+    public int Stars { get; set; } = -1;
+
+    /// <summary>Whether the GitHub repo is archived (abandoned).</summary>
+    public bool IsArchived { get; set; }
+
+    /// <summary>Last push date from GitHub API. Null if not enriched.</summary>
+    public DateTime? LastPushed { get; set; }
+
+    /// <summary>Primary language of the GitHub repo (e.g., "C#", "Python", "Go").</summary>
+    public string RepoLanguage { get; set; } = string.Empty;
 }
 
 public enum ProjectFusionGoal { Merge, Extend, Compare, Architect }
+
+/// <summary>Structured result from GitHub API enrichment of a complement URL.</summary>
+public class GitHubEnrichmentResult
+{
+    public string Url { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public int Stars { get; set; }
+    public string License { get; set; } = string.Empty;
+    public bool IsArchived { get; set; }
+    public DateTime? LastPushed { get; set; }
+    public string Language { get; set; } = string.Empty;
+
+    /// <summary>Format as the original enriched description string for backward compatibility.</summary>
+    public string ToDescriptionString()
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(Description)) parts.Add(Description);
+        parts.Add($"{Stars:N0} stars");
+        if (!string.IsNullOrWhiteSpace(License) && License != "NOASSERTION") parts.Add($"License: {License}");
+        if (IsArchived) parts.Add("⚠ ARCHIVED");
+        if (!string.IsNullOrWhiteSpace(Language)) parts.Add($"Lang: {Language}");
+        return string.Join(" | ", parts);
+    }
+}
 
 public enum FusionInputType { RepoProfile, FusionArtifact }
 
