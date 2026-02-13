@@ -164,11 +164,14 @@ public class CodexCliService
     /// Best for: research tasks that need live web data, grounding, fact-checking.
     /// </summary>
     /// <param name="modelOverride">If set, override the user's model selection for this call.</param>
+    /// <param name="timeoutSeconds">Process timeout in seconds. Default 180s; agentic calls should use 300s+.</param>
     public async Task<string?> GenerateWithToolsAsync(string prompt, int? maxTokens = null,
-        bool enableSearch = true, string sandbox = "read-only", string? modelOverride = null, CancellationToken ct = default)
+        bool enableSearch = true, string sandbox = "read-only", string? modelOverride = null,
+        int timeoutSeconds = 180, CancellationToken ct = default)
     {
         return await RunCodexExecAsync(prompt, maxTokens: maxTokens,
-            enableSearch: enableSearch, sandbox: sandbox, modelOverride: modelOverride, ct: ct);
+            enableSearch: enableSearch, sandbox: sandbox, modelOverride: modelOverride,
+            timeoutSeconds: timeoutSeconds, ct: ct);
     }
 
     /// <summary>

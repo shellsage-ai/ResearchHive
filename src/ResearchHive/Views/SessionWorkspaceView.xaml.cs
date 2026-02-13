@@ -14,6 +14,13 @@ public partial class SessionWorkspaceView : UserControl
         AllowDrop = true;
         Drop += OnFileDrop;
         DragOver += OnDragOver;
+
+        Loaded += (_, _) => FindBar.SearchRoot = ContentScrollViewer;
+    }
+
+    private void Find_Executed(object sender, ExecutedRoutedEventArgs e)
+    {
+        FindBar.Toggle();
     }
 
     private void OnDragOver(object sender, DragEventArgs e)

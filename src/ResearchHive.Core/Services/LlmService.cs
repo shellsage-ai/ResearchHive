@@ -152,7 +152,7 @@ public class LlmService : ILlmService
             {
                 var result = await _codexCli.GenerateWithToolsAsync(
                     fullPrompt, enableSearch: true, sandbox: "read-only",
-                    ct: ct);
+                    timeoutSeconds: timeoutSeconds, ct: ct);
                 RaiseCodexActivity();
                 if (result != null)
                 {
@@ -177,8 +177,8 @@ public class LlmService : ILlmService
         }
 
         _circuitBreaker.RecordCloudFailure();
-        _logger?.LogWarning("GenerateAgenticAsync: Both attempts failed, falling back to GenerateAsync");
-        return await GenerateAsync(prompt, systemPrompt, ct: ct);
+        _logger?.LogWarning("GenerateAgenticAsync: Both attempts failed, returning empty — caller will use fallback path");
+        return string.Empty;
     }
 
     /// <summary>Resolve the mini model name for the current provider.</summary>

@@ -124,17 +124,38 @@ public class RepoIntelligenceJobRunner
                 _logger?.LogInformation("Agentic path: Codex 5.3 with web search for {Owner}/{Name}", profile.Owner, profile.Name);
 
                 var agenticComplements = await RunAgenticFullAnalysisAsync(sessionId, profile, telemetry, ct);
+                phaseSw.Stop();
+
                 if (agenticComplements != null && agenticComplements.Count > 0)
                 {
                     profile.ComplementSuggestions = agenticComplements;
                     agenticComplementsHandled = true;
+                    AddReplay(job, "analyzed", "Agentic Analysis Complete",
+                        $"CodeBook generated, {profile.Strengths.Count} strengths, {profile.Gaps.Count} pre-verified gaps, " +
+                        $"{profile.ComplementSuggestions.Count} complements from web search");
+                    telemetry.Phases.Add(new PhaseTimingRecord { Phase = "Agentic Full Analysis (CodeBook+RAG+GapVerify+Complements)", DurationMs = phaseSw.ElapsedMilliseconds });
                 }
+                else if (profile.Strengths.Count > 0)
+                {
+                    // Agentic call succeeded for analysis but returned no complements — complements will be researched separately
+                    AddReplay(job, "analyzed", "Agentic Analysis Complete (no complements)",
+                        $"CodeBook generated, {profile.Strengths.Count} strengths, {profile.Gaps.Count} pre-verified gaps — complements will be researched separately");
+                    telemetry.Phases.Add(new PhaseTimingRecord { Phase = "Agentic Full Analysis (partial — no complements)", DurationMs = phaseSw.ElapsedMilliseconds });
+                }
+                else
+                {
+                    // Agentic call failed entirely — fall through to consolidated path
+                    _logger?.LogWarning("Agentic path failed for {Owner}/{Name}, falling back to consolidated analysis", profile.Owner, profile.Name);
+                    AddReplay(job, "agentic_fallback", "Agentic Failed", "Falling back to consolidated cloud analysis...");
+                    telemetry.Phases.Add(new PhaseTimingRecord { Phase = "Agentic Full Analysis (FAILED)", DurationMs = phaseSw.ElapsedMilliseconds });
 
-                AddReplay(job, "analyzed", "Agentic Analysis Complete",
-                    $"CodeBook generated, {profile.Strengths.Count} strengths, {profile.Gaps.Count} pre-verified gaps" +
-                    (agenticComplementsHandled ? $", {profile.ComplementSuggestions.Count} complements from web search" : ""));
-                phaseSw.Stop();
-                telemetry.Phases.Add(new PhaseTimingRecord { Phase = "Agentic Full Analysis (CodeBook+RAG+GapVerify+Complements)", DurationMs = phaseSw.ElapsedMilliseconds });
+                    phaseSw = Stopwatch.StartNew();
+                    await RunConsolidatedAnalysisAsync(sessionId, profile, telemetry, ct);
+                    phaseSw.Stop();
+                    AddReplay(job, "analyzed", "Consolidated Analysis Complete (fallback)",
+                        $"CodeBook generated, {profile.Strengths.Count} strengths, {profile.Gaps.Count} pre-verified gaps");
+                    telemetry.Phases.Add(new PhaseTimingRecord { Phase = "Consolidated Analysis (fallback from agentic)", DurationMs = phaseSw.ElapsedMilliseconds });
+                }
             }
             else if (_llmService.IsLargeContextProvider && isIndexed && _retrievalService != null)
             {
