@@ -25,7 +25,7 @@ public class ProjectFusionEngine
     private static readonly string[] AllSections = new[]
     {
         "PROJECT_IDENTITIES", "UNIFIED_VISION", "ARCHITECTURE", "TECH_STACK",
-        "FEATURE_MATRIX", "GAPS_CLOSED", "NEW_GAPS", "IP_NOTES", "PROVENANCE"
+        "FEATURE_MATRIX", "PROJECTED_CAPABILITIES", "GAPS_CLOSED", "NEW_GAPS", "IP_NOTES", "PROVENANCE"
     };
 
     // ─────────────── Goal descriptions (user-facing, shown in report) ───────────────
@@ -191,6 +191,7 @@ public class ProjectFusionEngine
                 ArchitectureProposal = ExtractSection(combinedResponse, "ARCHITECTURE"),
                 TechStackDecisions = ExtractSection(combinedResponse, "TECH_STACK"),
                 FeatureMatrix = ParseFeatureMatrix(combinedResponse),
+                ProjectedCapabilities = ParseList(ExtractSection(combinedResponse, "PROJECTED_CAPABILITIES")),
                 GapsClosed = ParseList(ExtractSection(combinedResponse, "GAPS_CLOSED")),
                 NewGaps = ParseList(ExtractSection(combinedResponse, "NEW_GAPS")),
                 IpNotes = ParseIpNotes(ExtractSection(combinedResponse, "IP_NOTES")),
@@ -250,7 +251,10 @@ CRITICAL GROUNDING RULES — follow these exactly:
 4. Always include the source project name (e.g., ""AutoMapper"" or ""ResearchHive"") when referencing where a feature, strength, or decision comes from.
 5. Be specific and concrete — describe what THESE specific projects do and how they relate. No generic boilerplate.
 6. Use formatting: **bold** for key terms, markdown tables where comparing items, bullet points for lists.
-7. When listing technologies, ONLY list ones that appear in the Dependencies, Frameworks, or Languages fields of the input data.";
+7. When listing technologies, ONLY list ones that appear in the Dependencies, Frameworks, or Languages fields of the input data.
+8. Read each project's Description and Summary carefully — understand what each project IS before analyzing. Do not confuse one project's purpose with another's.
+9. For IP_NOTES: report the license EXACTLY as stated in the input data. If no license is listed, say 'License: Not specified in scan data'. Do NOT guess or invent licenses.
+10. A gap in Project A is only 'resolved' by Project B if Project B's strengths or capabilities explicitly address that gap. Do not claim a gap is resolved by the same project that has it.";
 
     // ─────────────── Goal Instructions (detailed per mode) ───────────────
 
@@ -360,6 +364,27 @@ FEATURE: <feature name> | SOURCE: <project name(s)>
 
 Include all significant features from EACH input project.
 For Compare mode, note which project(s) have each feature.");
+        sb.AppendLine();
+
+        // PROJECTED_CAPABILITIES
+        if (goal == ProjectFusionGoal.Compare)
+        {
+            sb.AppendLine(@"PROJECTED_CAPABILITIES:
+For each project, list what it would be capable of if combined with the other's strengths.
+Format: - <capability description> (enabled by combining <Project A feature> + <Project B feature>)
+Focus on NEW capabilities that neither project has alone but would emerge from combining them.");
+        }
+        else
+        {
+            sb.AppendLine(@"PROJECTED_CAPABILITIES:
+List the concrete capabilities the resulting fused project would have.
+Include BOTH:
+1. Inherited capabilities — things each input project can already do that carry over.
+2. Emergent capabilities — NEW things the fused project could do that neither input could do alone.
+Format each as: - <capability description> (from <source> OR enabled by combining <A> + <B>)
+Be specific and practical — describe what a user or developer could actually DO with the fused project.
+List at least 8-12 capabilities.");
+        }
         sb.AppendLine();
 
         // GAPS_CLOSED
@@ -475,6 +500,12 @@ RULES:
         "FEATURE_MATRIX" =>
             "List ALL significant features in the EXACT format: FEATURE: <name> | SOURCE: <project(s)>. One per line. Include features from EVERY input project.",
 
+        "PROJECTED_CAPABILITIES" when goal == ProjectFusionGoal.Compare =>
+            "List what each project could do if combined with the other's strengths. Focus on emergent capabilities neither has alone.",
+
+        "PROJECTED_CAPABILITIES" =>
+            "List 8-12 concrete capabilities the fused project would have. Include inherited capabilities (carried from inputs) AND emergent ones (new from combining). Be specific — describe what a user could actually DO.",
+
         "GAPS_CLOSED" when goal == ProjectFusionGoal.Compare =>
             "For each project, list strengths it has that the other lacks. Format: **<Project>** fills gap: <description>.",
 
@@ -503,6 +534,8 @@ RULES:
         var sb = new StringBuilder();
         sb.AppendLine($"**Source:** {p.RepoUrl}");
         sb.AppendLine($"**Description:** {p.Description}");
+        if (!string.IsNullOrWhiteSpace(p.ProjectSummary))
+            sb.AppendLine($"**Project Summary:** {p.ProjectSummary}");
         sb.AppendLine($"**Primary Language:** {p.PrimaryLanguage} | **All Languages:** {string.Join(", ", p.Languages)}");
 
         if (p.Frameworks.Count > 0)
@@ -595,6 +628,8 @@ RULES:
             sb.AppendLine($"**Gaps Closed:** {string.Join("; ", f.GapsClosed)}");
         if (f.NewGaps.Count > 0)
             sb.AppendLine($"**Remaining Gaps:** {string.Join("; ", f.NewGaps)}");
+        if (f.ProjectedCapabilities.Count > 0)
+            sb.AppendLine($"**Projected Capabilities:** {string.Join("; ", f.ProjectedCapabilities)}");
         return sb.ToString();
     }
 
@@ -755,6 +790,16 @@ RULES:
             sb.AppendLine("|---------|--------|");
             foreach (var kv in a.FeatureMatrix)
                 sb.AppendLine($"| {kv.Key} | {kv.Value} |");
+            sb.AppendLine();
+        }
+
+        // Projected Capabilities
+        if (a.ProjectedCapabilities.Count > 0)
+        {
+            var capHeading = a.Goal == ProjectFusionGoal.Compare ? "Potential Combined Capabilities" : "Projected Capabilities";
+            sb.AppendLine($"## {capHeading}");
+            foreach (var c in a.ProjectedCapabilities)
+                sb.AppendLine($"- 🔮 {c}");
             sb.AppendLine();
         }
 

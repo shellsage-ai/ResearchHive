@@ -2012,6 +2012,18 @@
                                             <TextBox Text="{Binding Description, Mode=OneWay}" Style="{StaticResource SelectableText}"
                                                      FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,0"/>
 
+                                            <!-- Project Summary (LLM-generated) -->
+                                            <Border Background="#1A66BB6A" CornerRadius="4" Padding="8,6" Margin="0,6,0,2"
+                                                    BorderBrush="#66BB6A" BorderThickness="1"
+                                                    Visibility="{Binding HasProjectSummary, Converter={StaticResource BoolVis}}">
+                                                <StackPanel>
+                                                    <TextBlock Text="📋 Project Summary" FontSize="11" FontWeight="SemiBold"
+                                                               Foreground="#A5D6A7" Margin="0,0,0,4"/>
+                                                    <TextBox Text="{Binding ProjectSummary, Mode=OneWay}" Style="{StaticResource SelectableText}"
+                                                             FontSize="12" Foreground="{StaticResource TextPrimaryBrush}" TextWrapping="Wrap"/>
+                                                </StackPanel>
+                                            </Border>
+
                                             <!-- Analysis Model — prominent display -->
                                             <Border Background="#1A448AFF" CornerRadius="6" Padding="10,6" Margin="0,6,0,2"
                                                     BorderBrush="#448AFF" BorderThickness="1">
@@ -2180,6 +2192,15 @@
 
                                             <TextBlock Text="Feature Matrix" Style="{StaticResource SubHeader}" Margin="0,6,0,2"/>
                                             <TextBox Text="{Binding FeatureMatrix, Mode=OneWay}" Style="{StaticResource SelectableText}" FontSize="11"/>
+
+                                            <!-- Projected Capabilities -->
+                                            <TextBlock Text="{Binding ProjectedCapabilitiesCount, StringFormat='🔮 {0} projected capabilities'}" 
+                                                       FontSize="11" Foreground="#CE93D8" Margin="0,6,0,0"
+                                                       Visibility="{Binding HasProjectedCapabilities, Converter={StaticResource BoolVis}}"/>
+                                            <TextBlock Text="{Binding ProjectedCapabilitiesLabel}" Style="{StaticResource SubHeader}" Margin="0,4,0,2"
+                                                       Visibility="{Binding HasProjectedCapabilities, Converter={StaticResource BoolVis}}"/>
+                                            <TextBox Text="{Binding ProjectedCapabilities, Mode=OneWay}" Style="{StaticResource SelectableText}" FontSize="11"
+                                                     Visibility="{Binding HasProjectedCapabilities, Converter={StaticResource BoolVis}}"/>
 
                                             <TextBlock Text="{Binding GapsClosedLabel}" Style="{StaticResource SubHeader}" Margin="0,6,0,2"/>
                                             <TextBox Text="{Binding GapsClosed, Mode=OneWay}" Style="{StaticResource SelectableText}" FontSize="11"/>

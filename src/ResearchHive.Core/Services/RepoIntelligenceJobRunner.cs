@@ -476,10 +476,13 @@ public class RepoIntelligenceJobRunner
         });
 
         // Parse the combined response
-        var (codeBook, frameworks, strengths, gaps) = RepoScannerService.ParseConsolidatedAnalysis(response);
+        var (summary, codeBook, frameworks, strengths, gaps) = RepoScannerService.ParseConsolidatedAnalysis(response);
 
         profile.CodeBook = $"# CodeBook: {profile.Owner}/{profile.Name}\n\n{codeBook}";
         profile.AnalysisModelUsed = _llmService.LastModelUsed;
+
+        if (!string.IsNullOrWhiteSpace(summary))
+            profile.ProjectSummary = summary;
 
         // Add LLM-detected frameworks (dedup with deterministic ones)
         foreach (var fw in frameworks)
@@ -619,13 +622,16 @@ public class RepoIntelligenceJobRunner
             return null;
         }
 
-        // ── Step 4: Parse the 5-section response ──
-        var (codeBook, frameworks, strengths, gaps, complements) =
+        // ── Step 4: Parse the 6-section response ──
+        var (summary, codeBook, frameworks, strengths, gaps, complements) =
             RepoScannerService.ParseFullAgenticAnalysis(response);
 
         // ── Step 5: Apply results to profile ──
         profile.CodeBook = $"# CodeBook: {profile.Owner}/{profile.Name}\n\n{codeBook}";
         profile.AnalysisModelUsed = _llmService.LastModelUsed;
+
+        if (!string.IsNullOrWhiteSpace(summary))
+            profile.ProjectSummary = summary;
 
         // Dedup frameworks
         foreach (var fw in frameworks)
@@ -849,6 +855,13 @@ public class RepoIntelligenceJobRunner
 
         sb.AppendLine($"> {p.Description}");
         sb.AppendLine();
+
+        if (!string.IsNullOrWhiteSpace(p.ProjectSummary))
+        {
+            sb.AppendLine("## Project Summary");
+            sb.AppendLine(p.ProjectSummary);
+            sb.AppendLine();
+        }
 
         if (p.Languages.Count > 0)
         {

@@ -77,7 +77,10 @@ public class SmartPipelineTests
     [Fact]
     public void ParseConsolidatedAnalysis_ExtractsAllSections()
     {
-        var response = @"## CodeBook
+        var response = @"## Summary
+AutoMapper is a convention-based object-object mapping library for .NET that eliminates manual mapping code between DTOs and domain models.
+
+## CodeBook
 ### Purpose
 A WPF desktop application for agentic research.
 
@@ -99,8 +102,9 @@ MVVM pattern with CommunityToolkit.Mvvm.
 - No automated security scanning
 - Missing API rate limiting";
 
-        var (codeBook, frameworks, strengths, gaps) = RepoScannerService.ParseConsolidatedAnalysis(response);
+        var (summary, codeBook, frameworks, strengths, gaps) = RepoScannerService.ParseConsolidatedAnalysis(response);
 
+        summary.Should().Contain("convention-based object-object mapping");
         codeBook.Should().Contain("WPF desktop application");
         codeBook.Should().Contain("MVVM pattern");
         frameworks.Should().HaveCount(3);
@@ -131,7 +135,7 @@ Research tool.
 ## Gaps
 - No tests";
 
-        var (codeBook, _, _, _) = RepoScannerService.ParseConsolidatedAnalysis(response);
+        var (_, codeBook, _, _, _) = RepoScannerService.ParseConsolidatedAnalysis(response);
 
         codeBook.Should().Contain("### Purpose");
         codeBook.Should().Contain("### Key Abstractions");
@@ -141,7 +145,7 @@ Research tool.
     [Fact]
     public void ParseConsolidatedAnalysis_HandlesEmptyResponse()
     {
-        var (codeBook, frameworks, strengths, gaps) = RepoScannerService.ParseConsolidatedAnalysis("");
+        var (_, codeBook, frameworks, strengths, gaps) = RepoScannerService.ParseConsolidatedAnalysis("");
 
         codeBook.Should().BeEmpty();
         frameworks.Should().BeEmpty();
@@ -158,7 +162,7 @@ Some architecture notes.
 ## Strengths
 - Good design";
 
-        var (codeBook, frameworks, strengths, gaps) = RepoScannerService.ParseConsolidatedAnalysis(response);
+        var (_, codeBook, frameworks, strengths, gaps) = RepoScannerService.ParseConsolidatedAnalysis(response);
 
         codeBook.Should().Contain("architecture notes");
         frameworks.Should().BeEmpty();
@@ -432,7 +436,7 @@ Streaming Codex CLI via stdin for unbounded prompt size. SemaphoreSlim-based par
 - No user authentication or multi-user support (single-user desktop app)
 - Missing structured logging (no Serilog/NLog integration despite being a complex application)";
 
-        var (codeBook, frameworks, strengths, gaps) = RepoScannerService.ParseConsolidatedAnalysis(response);
+        var (_, codeBook, frameworks, strengths, gaps) = RepoScannerService.ParseConsolidatedAnalysis(response);
 
         codeBook.Should().Contain("WPF .NET 8");
         codeBook.Should().Contain("LlmService");

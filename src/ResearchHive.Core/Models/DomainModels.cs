@@ -148,6 +148,8 @@ public class RepoProfile
     public string Owner { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
+    /// <summary>LLM-generated 1-3 sentence summary of what the project IS and DOES.</summary>
+    public string ProjectSummary { get; set; } = string.Empty;
     public string PrimaryLanguage { get; set; } = string.Empty;
     public List<string> Languages { get; set; } = new();
     public List<string> Frameworks { get; set; } = new();
@@ -544,5 +546,7 @@ public class ProjectFusionArtifact
     public List<string> NewGaps { get; set; } = new();
     public IpAssessment? IpNotes { get; set; }
     public Dictionary<string, string> ProvenanceMap { get; set; } = new();
+    /// <summary>Forward-looking list of concrete capabilities the fused/resulting project would have.</summary>
+    public List<string> ProjectedCapabilities { get; set; } = new();
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
 }

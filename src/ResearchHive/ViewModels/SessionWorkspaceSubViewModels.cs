@@ -454,6 +454,8 @@ public class RepoProfileViewModel
     public string RepoName => Profile.Name;
     public string FullName => $"{Profile.Owner}/{Profile.Name}";
     public string Description => Profile.Description.Length > 200 ? Profile.Description[..200] + "..." : Profile.Description;
+    public string ProjectSummary => Profile.ProjectSummary;
+    public bool HasProjectSummary => !string.IsNullOrWhiteSpace(Profile.ProjectSummary);
     public string PrimaryLanguage => Profile.PrimaryLanguage;
     public string Stars => Profile.Stars.ToString("N0");
     public string Forks => Profile.Forks.ToString("N0");
@@ -485,6 +487,12 @@ public class RepoProfileViewModel
             sb.AppendLine($"Stars: {Stars} | Forks: {Forks} | Dependencies: {DependencyCount}");
             sb.AppendLine($"Analysis Model: {AnalysisModel}");
             sb.AppendLine($"Last Push: {LastCommitAgo}");
+            if (!string.IsNullOrWhiteSpace(Profile.ProjectSummary))
+            {
+                sb.AppendLine();
+                sb.AppendLine("Summary:");
+                sb.AppendLine($"  {Profile.ProjectSummary}");
+            }
             if (Profile.TopLevelEntries.Count > 0)
                 sb.AppendLine($"Root: {TopEntriesProof}");
             sb.AppendLine();
@@ -560,6 +568,10 @@ public class ProjectFusionArtifactViewModel
     public string GapsClosedLabel => Artifact.Goal == ProjectFusionGoal.Compare ? "Complementary Strengths" : "Gaps Closed";
     public string NewGaps => string.Join("\n", Artifact.NewGaps.Select(g => $"• {g}"));
     public string NewGapsLabel => Artifact.Goal == ProjectFusionGoal.Compare ? "Shared Gaps & Conflicts" : "New Gaps / Challenges";
+    public string ProjectedCapabilities => string.Join("\n", Artifact.ProjectedCapabilities.Select(c => $"🔮 {c}"));
+    public string ProjectedCapabilitiesLabel => Artifact.Goal == ProjectFusionGoal.Compare ? "Potential Combined Capabilities" : "Projected Capabilities";
+    public int ProjectedCapabilitiesCount => Artifact.ProjectedCapabilities.Count;
+    public bool HasProjectedCapabilities => Artifact.ProjectedCapabilities.Count > 0;
     public bool HasIpNotes => Artifact.IpNotes != null;
     public string IpNotes => Artifact.IpNotes?.Notes ?? "";
     public string ProvenanceMap => string.Join("\n", Artifact.ProvenanceMap.Select(kv => $"• {kv.Key} ← {kv.Value}"));
@@ -594,6 +606,12 @@ public class ProjectFusionArtifactViewModel
             sb.AppendLine("=== Feature Matrix ===");
             sb.AppendLine(FeatureMatrix);
             sb.AppendLine();
+            if (HasProjectedCapabilities)
+            {
+                sb.AppendLine($"=== {ProjectedCapabilitiesLabel} ===");
+                sb.AppendLine(ProjectedCapabilities);
+                sb.AppendLine();
+            }
             sb.AppendLine($"=== {GapsClosedLabel} ===");
             sb.AppendLine(GapsClosed);
             sb.AppendLine();

@@ -532,6 +532,9 @@ public class RepoScannerService
     private static void AppendFormatInstructions(System.Text.StringBuilder sb)
     {
         sb.AppendLine("Respond with EXACTLY this format:");
+        sb.AppendLine("## Summary");
+        sb.AppendLine("1-3 sentences describing what this project IS and DOES. Focus on the project's own purpose and functionality.");
+        sb.AppendLine("Example: 'AutoMapper is a convention-based object-object mapper for .NET that eliminates manual mapping code between DTOs 	and domain models. It supports projection, flattening, and custom value resolvers.'");
         sb.AppendLine("## Frameworks");
         sb.AppendLine("- framework1");
         sb.AppendLine("- framework2");
@@ -543,23 +546,35 @@ public class RepoScannerService
         sb.AppendLine("- gap1");
         sb.AppendLine("- gap2");
         sb.AppendLine("(list at least 5 specific weaknesses, missing features, or improvement opportunities — based on code evidence, not assumptions)");
-        sb.AppendLine("IMPORTANT: Gaps must be MISSING capabilities, not critiques of existing features.");
-        sb.AppendLine("Bad gap example: 'The search engine assumes X which limits Y' — this critiques something that EXISTS.");
-        sb.AppendLine("Good gap example: 'No CI/CD pipeline configuration' — this identifies something ABSENT.");
-        sb.AppendLine("Focus on: missing tests, missing docs, missing config, missing security features, missing monitoring, missing error handling patterns, etc.");
+        sb.AppendLine("IMPORTANT RULES:");
+        sb.AppendLine("- Gaps must be MISSING capabilities, not critiques of existing features.");
+        sb.AppendLine("  Bad gap example: 'The search engine assumes X which limits Y' — this critiques something that EXISTS.");
+        sb.AppendLine("  Good gap example: 'No CI/CD pipeline configuration' — this identifies something ABSENT.");
+        sb.AppendLine("- Focus on: missing tests, missing docs, missing config, missing security features, missing monitoring, missing error handling patterns, etc.");
+        sb.AppendLine("- Do NOT list the analysis tool, scanning model, or LLM used to analyze this repo as a 'strength' of the repo itself. Strengths must be capabilities of THIS project's own code.");
+        sb.AppendLine("- Gaps and strengths must be about THIS project — not about capabilities of unrelated tools or projects.");
     }
 
     public static void ParseAnalysis(string analysis, RepoProfile profile)
     {
         var lines = analysis.Split('\n').Select(l => l.Trim()).ToList();
         string? currentSection = null;
+        var summarySb = new System.Text.StringBuilder();
 
         foreach (var line in lines)
         {
+            if (line.StartsWith("## Summary", StringComparison.OrdinalIgnoreCase)) { currentSection = "summary"; continue; }
             if (line.StartsWith("## Frameworks", StringComparison.OrdinalIgnoreCase)) { currentSection = "frameworks"; continue; }
             if (line.StartsWith("## Strengths", StringComparison.OrdinalIgnoreCase)) { currentSection = "strengths"; continue; }
             if (line.StartsWith("## Gaps", StringComparison.OrdinalIgnoreCase)) { currentSection = "gaps"; continue; }
             if (line.StartsWith("## ")) { currentSection = null; continue; }
+
+            if (currentSection == "summary" && !string.IsNullOrWhiteSpace(line))
+            {
+                if (summarySb.Length > 0) summarySb.Append(' ');
+                summarySb.Append(line);
+                continue;
+            }
 
             if (line.StartsWith("- ") && line.Length > 2)
             {
@@ -577,6 +592,9 @@ public class RepoScannerService
                 }
             }
         }
+
+        if (summarySb.Length > 0)
+            profile.ProjectSummary = summarySb.ToString().Trim();
     }
 
     private static List<RepoDependency> ParseDependencies(Dictionary<string, string> depFiles)
@@ -851,7 +869,10 @@ public class RepoScannerService
         }
         sb.AppendLine();
 
-        sb.AppendLine("=== PRODUCE ALL FOUR SECTIONS BELOW ===");
+        sb.AppendLine("=== PRODUCE ALL FIVE SECTIONS BELOW ===");
+        sb.AppendLine();
+        sb.AppendLine("## Summary");
+        sb.AppendLine("1-3 sentences describing what this project IS and DOES. Focus on the project's own purpose and functionality — not the analysis tool used to scan it.");
         sb.AppendLine();
         sb.AppendLine("## CodeBook");
         sb.AppendLine("A concise architecture reference document (under 1500 words) covering:");
@@ -884,18 +905,21 @@ public class RepoScannerService
         sb.AppendLine("  Good gap: 'No CI/CD pipeline configuration files found' — this identifies something ABSENT");
         sb.AppendLine("- Self-verify each gap: if the code excerpts show the feature exists, REMOVE that gap");
         sb.AppendLine("- Keep at least 5 verified gaps after self-verification");
+        sb.AppendLine("- Do NOT list the analysis tool, scanning model, or LLM used to analyze this repo as a 'strength' of the repo. Strengths must be capabilities of THIS project's own code.");
+        sb.AppendLine("- Gaps and strengths must be about THIS project — not about capabilities of unrelated tools.");
 
         return sb.ToString();
     }
 
     /// <summary>
-    /// Parse the consolidated analysis response into CodeBook, Frameworks, Strengths, and Gaps.
-    /// The response contains all four sections: ## CodeBook, ## Frameworks, ## Strengths, ## Gaps.
+    /// Parse the consolidated analysis response into Summary, CodeBook, Frameworks, Strengths, and Gaps.
+    /// The response contains all five sections: ## Summary, ## CodeBook, ## Frameworks, ## Strengths, ## Gaps.
     /// </summary>
-    public static (string codeBook, List<string> frameworks, List<string> strengths, List<string> gaps) ParseConsolidatedAnalysis(string response)
+    public static (string summary, string codeBook, List<string> frameworks, List<string> strengths, List<string> gaps) ParseConsolidatedAnalysis(string response)
     {
         var lines = response.Split('\n');
         string? currentSection = null;
+        var summarySb = new System.Text.StringBuilder();
         var codeBookSb = new System.Text.StringBuilder();
         var frameworks = new List<string>();
         var strengths = new List<string>();
@@ -908,7 +932,9 @@ public class RepoScannerService
             // Detect ## level headers (not ### subheadings within CodeBook)
             if (trimmed.StartsWith("## ") && !trimmed.StartsWith("### "))
             {
-                if (trimmed.StartsWith("## CodeBook", StringComparison.OrdinalIgnoreCase))
+                if (trimmed.StartsWith("## Summary", StringComparison.OrdinalIgnoreCase))
+                    currentSection = "summary";
+                else if (trimmed.StartsWith("## CodeBook", StringComparison.OrdinalIgnoreCase))
                     currentSection = "codebook";
                 else if (trimmed.StartsWith("## Frameworks", StringComparison.OrdinalIgnoreCase))
                     currentSection = "frameworks";
@@ -923,6 +949,13 @@ public class RepoScannerService
 
             switch (currentSection)
             {
+                case "summary":
+                    if (!string.IsNullOrWhiteSpace(trimmed))
+                    {
+                        if (summarySb.Length > 0) summarySb.Append(' ');
+                        summarySb.Append(trimmed);
+                    }
+                    break;
                 case "codebook":
                     codeBookSb.AppendLine(rawLine);
                     break;
@@ -941,7 +974,7 @@ public class RepoScannerService
             }
         }
 
-        return (codeBookSb.ToString().Trim(), frameworks, strengths, gaps);
+        return (summarySb.ToString().Trim(), codeBookSb.ToString().Trim(), frameworks, strengths, gaps);
     }
 
     // ─── Full Agentic Analysis (Codex 5.3 single call with web search) ───
@@ -983,7 +1016,10 @@ public class RepoScannerService
         }
         sb.AppendLine();
 
-        sb.AppendLine("=== PRODUCE ALL FIVE SECTIONS BELOW ===");
+        sb.AppendLine("=== PRODUCE ALL SIX SECTIONS BELOW ===");
+        sb.AppendLine();
+        sb.AppendLine("## Summary");
+        sb.AppendLine("1-3 sentences describing what this project IS and DOES. Focus on the project's own purpose and functionality — not the analysis tool used to scan it.");
         sb.AppendLine();
         sb.AppendLine("## CodeBook");
         sb.AppendLine("A concise architecture reference document (under 1500 words) covering:");
@@ -1028,18 +1064,21 @@ public class RepoScannerService
         sb.AppendLine("- Self-verify each gap: if the code excerpts show the feature exists, REMOVE that gap");
         sb.AppendLine("- Complementary projects MUST be real — use your web search to find and verify them");
         sb.AppendLine("- Keep at least 5 verified gaps and at least 5 complementary projects");
+        sb.AppendLine("- Do NOT list the analysis tool, scanning model, or LLM used to analyze this repo as a 'strength' of the repo. Strengths must be capabilities of THIS project's own code.");
+        sb.AppendLine("- Gaps and strengths must be about THIS project — not about capabilities of unrelated tools.");
 
         return sb.ToString();
     }
 
     /// <summary>
-    /// Parse the full agentic analysis response into CodeBook, Frameworks, Strengths, Gaps, AND Complements.
-    /// The response contains five sections: ## CodeBook, ## Frameworks, ## Strengths, ## Gaps, ## Complementary Projects.
+    /// Parse the full agentic analysis response into Summary, CodeBook, Frameworks, Strengths, Gaps, AND Complements.
+    /// The response contains six sections: ## Summary, ## CodeBook, ## Frameworks, ## Strengths, ## Gaps, ## Complementary Projects.
     /// </summary>
-    public static (string codeBook, List<string> frameworks, List<string> strengths, List<string> gaps, List<ComplementProject> complements) ParseFullAgenticAnalysis(string response)
+    public static (string summary, string codeBook, List<string> frameworks, List<string> strengths, List<string> gaps, List<ComplementProject> complements) ParseFullAgenticAnalysis(string response)
     {
         var lines = response.Split('\n');
         string? currentSection = null;
+        var summarySb = new System.Text.StringBuilder();
         var codeBookSb = new System.Text.StringBuilder();
         var frameworks = new List<string>();
         var strengths = new List<string>();
@@ -1061,7 +1100,9 @@ public class RepoScannerService
                     complements.Add(currentComplement);
                 currentComplement = null;
 
-                if (trimmed.StartsWith("## CodeBook", StringComparison.OrdinalIgnoreCase))
+                if (trimmed.StartsWith("## Summary", StringComparison.OrdinalIgnoreCase))
+                    currentSection = "summary";
+                else if (trimmed.StartsWith("## CodeBook", StringComparison.OrdinalIgnoreCase))
                     currentSection = "codebook";
                 else if (trimmed.StartsWith("## Frameworks", StringComparison.OrdinalIgnoreCase))
                     currentSection = "frameworks";
@@ -1079,6 +1120,13 @@ public class RepoScannerService
 
             switch (currentSection)
             {
+                case "summary":
+                    if (!string.IsNullOrWhiteSpace(trimmed))
+                    {
+                        if (summarySb.Length > 0) summarySb.Append(' ');
+                        summarySb.Append(trimmed);
+                    }
+                    break;
                 case "codebook":
                     codeBookSb.AppendLine(rawLine);
                     break;
@@ -1104,7 +1152,7 @@ public class RepoScannerService
         if (currentComplement != null && !string.IsNullOrEmpty(currentComplement.Name))
             complements.Add(currentComplement);
 
-        return (codeBookSb.ToString().Trim(), frameworks, strengths, gaps, complements);
+        return (summarySb.ToString().Trim(), codeBookSb.ToString().Trim(), frameworks, strengths, gaps, complements);
     }
 
     /// <summary>Parse a single line within the Complementary Projects section.</summary>

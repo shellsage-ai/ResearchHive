@@ -4,7 +4,7 @@
 > This file is the single source of truth for "what exists, where, and why."
 >
 > **Maintenance rule**: Updated after every implementation step per `agents/orchestrator.agent.md` enforcement rules.
-> **Last verified**: 2026-02-13 — 597 tests (597 passed, 2 skipped), 0 build errors. Phase 25 commit `fadf193`.
+> **Last verified**: 2026-02-14 — 597 tests (597 passed, 2 skipped), 0 build errors. Phase 27 commit (pending).
 
 ---
 
@@ -290,9 +290,17 @@ Status: `[x]` = implemented + tested | `[~]` = implemented, untested or partial 
   WHY: Maps ~40 known packages → human-readable labels; runs before LLM analysis so frameworks appear even with weak models
 
 - [x] Project Fusion (4 goals: Merge, Extend, Compare, Architect × 6 templates) — ProjectFusionEngine.cs
-  - Anti-hallucination grounded (7 rules), goal-specific section prompts, PROJECT_IDENTITIES section, source URL references
+  - Anti-hallucination grounded (10 rules), goal-specific section prompts, PROJECT_IDENTITIES section, source URL references
+  - PROJECTED_CAPABILITIES section: forward-looking capability predictions after fusion, goal-aware
   WHY: Fuse multiple scanned repos into unified architecture documents with provenance
   TESTS: RepoIntelligenceTests.cs
+
+- [x] Project Summary in scans — RepoScannerService.cs (## Summary section in all prompts)
+  WHY: Concise 1-3 sentence project summary extracted during scan; answers "what is this project and what does it do"
+  TESTS: SmartPipelineTests.cs, Phase17AgenticTests.cs
+
+- [x] Scan anti-hallucination rules — RepoScannerService.cs (AppendFormatInstructions, BuildConsolidatedAnalysisPrompt, BuildFullAgenticPrompt)
+  WHY: Prevents LLM from listing analysis tool/model as a repo strength, inventing licenses, or confusing project identities
 
 ---
 
@@ -650,6 +658,7 @@ tests/
 | Date | Change | Files |
 |------|--------|-------|
 | 2026-02-13 | Add PolyForm Noncommercial 1.0.0 license + commercial licensing guide + README update | LICENSE.md, COMMERCIAL_LICENSE.md, README.md |
+| 2026-02-14 | Phase 27: Scan & Fusion quality overhaul — ProjectSummary field (## Summary in all 4 scan prompts + parsers), ProjectedCapabilities (PROJECTED_CAPABILITIES fusion section, goal-aware), anti-hallucination rules in all scan prompts, 3 new fusion grounding rules, UI panels for both new fields, test assertions for Summary parsing | DomainModels.cs, RepoScannerService.cs, ProjectFusionEngine.cs, RepoIntelligenceJobRunner.cs, SessionWorkspaceSubViewModels.cs, SessionWorkspaceView.xaml, SmartPipelineTests.cs, Phase17AgenticTests.cs |
 | 2026-02-14 | Phase 26: Project Fusion quality overhaul — anti-hallucination grounding (7 rules), comprehensive FormatProfileForLlm (deps+versions, Topics, file tree, CodeBook), new PROJECT_IDENTITIES section, goal-specific section prompts (Merge/Extend/Compare/Architect), Compare mode differentiation (goal-aware section titles), source URL references in reports, enriched UI (goal descriptions, dynamic labels, template descriptions) | ProjectFusionEngine.cs, DomainModels.cs, SessionWorkspaceSubViewModels.cs, SessionWorkspaceView.xaml |
 | 2026-02-13 | Phase 25: Research report quality + readability overhaul — 6 pipeline bug fixes (iteration cap, citation label collisions, early-exit thresholds, sufficiency skip, expert search queries, target sources 5→8) + formatting/highlighting in all prompts | ResearchJobRunner.cs, ReportTemplateService.cs, SessionWorkspaceViewModel.cs |
 | 2026-02-13 | Phase 24: Dynamic anti-hallucination pipeline — 4-layer complement filtering (expanded models, 7 deterministic checks, LLM relevance, 17-rule dynamic search) | RepoFactSheetBuilder.cs, PostScanVerifier.cs, ComplementResearchService.cs, RepoIntelligenceJobRunner.cs, DomainModels.cs, ServiceRegistration.cs |

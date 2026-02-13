@@ -114,7 +114,10 @@ public class Phase17AgenticTests
     [Fact]
     public void ParseFullAgenticAnalysis_ParsesAllFiveSections()
     {
-        var response = @"## CodeBook
+        var response = @"## Summary
+A .NET 8 WPF desktop application for agentic research workflows with multi-provider LLM routing and RAG-grounded analysis.
+
+## CodeBook
 This is a .NET 8 WPF application using CommunityToolkit.Mvvm.
 
 ## Frameworks
@@ -141,9 +144,10 @@ This is a .NET 8 WPF application using CommunityToolkit.Mvvm.
 - **License**: Apache-2.0
 - **Maturity**: Production-ready";
 
-        var (codeBook, frameworks, strengths, gaps, complements) =
+        var (summary, codeBook, frameworks, strengths, gaps, complements) =
             RepoScannerService.ParseFullAgenticAnalysis(response);
 
+        summary.Should().Contain("agentic research");
         codeBook.Should().Contain("CommunityToolkit.Mvvm");
         frameworks.Should().Contain(".NET 8");
         frameworks.Should().Contain("WPF");
@@ -158,7 +162,7 @@ This is a .NET 8 WPF application using CommunityToolkit.Mvvm.
     [Fact]
     public void ParseFullAgenticAnalysis_HandlesEmptyResponse()
     {
-        var (codeBook, frameworks, strengths, gaps, complements) =
+        var (_, codeBook, frameworks, strengths, gaps, complements) =
             RepoScannerService.ParseFullAgenticAnalysis("");
 
         codeBook.Should().BeEmpty();
@@ -177,7 +181,7 @@ Architecture overview here.
 ## Strengths
 - Good test coverage";
 
-        var (codeBook, frameworks, strengths, gaps, complements) =
+        var (_, codeBook, frameworks, strengths, gaps, complements) =
             RepoScannerService.ParseFullAgenticAnalysis(response);
 
         codeBook.Should().Contain("Architecture overview");
@@ -219,7 +223,7 @@ App summary.
 - **License**: BSD-3-Clause
 - **Maturity**: Production-ready";
 
-        var (_, _, _, _, complements) =
+        var (_, _, _, _, _, complements) =
             RepoScannerService.ParseFullAgenticAnalysis(response);
 
         complements.Should().HaveCount(2);
