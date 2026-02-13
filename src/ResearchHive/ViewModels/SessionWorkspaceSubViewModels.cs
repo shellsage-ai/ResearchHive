@@ -363,6 +363,7 @@ public partial class QaMessageViewModel : ObservableObject
 {
     [ObservableProperty] private string _question = "";
     [ObservableProperty] private string _answer = "";
+    [ObservableProperty] private string? _modelUsed;
 }
 
 /// <summary>
@@ -467,6 +468,8 @@ public class RepoProfileViewModel
     public string Frameworks => string.Join(", ", Profile.Frameworks);
     public string Created => Profile.CreatedUtc.ToLocalTime().ToString("g");
     public string RepoUrl => Profile.RepoUrl;
+    /// <summary>Which model generated this analysis.</summary>
+    public string AnalysisModel => Profile.AnalysisModelUsed ?? "unknown";
 
     /// <summary>Full text of the entire profile for clipboard export.</summary>
     public string FullProfileText
@@ -480,6 +483,7 @@ public class RepoProfileViewModel
             sb.AppendLine($"Primary Language: {PrimaryLanguage}");
             sb.AppendLine($"Frameworks: {Frameworks}");
             sb.AppendLine($"Stars: {Stars} | Forks: {Forks} | Dependencies: {DependencyCount}");
+            sb.AppendLine($"Analysis Model: {AnalysisModel}");
             sb.AppendLine($"Last Push: {LastCommitAgo}");
             if (Profile.TopLevelEntries.Count > 0)
                 sb.AppendLine($"Root: {TopEntriesProof}");

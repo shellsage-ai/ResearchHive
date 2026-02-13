@@ -4,7 +4,7 @@
 > This file is the single source of truth for "what exists, where, and why."
 >
 > **Maintenance rule**: Updated after every implementation step per `agents/orchestrator.agent.md` enforcement rules.
-> **Last verified**: 2026-02-12 — 357 tests (355 passed, 2 skipped), 0 build errors.
+> **Last verified**: 2026-02-12 — 378 tests (378 passed, 0 failed), 0 build errors.
 
 ---
 
@@ -101,9 +101,13 @@ Status: `[x]` = implemented + tested | `[~]` = implemented, untested or partial 
   WHY: Local-first with cloud fallback; 8 cloud providers for flexibility
   CONFIG: AppSettings.Routing (LocalWithCloudFallback | LocalOnly | CloudOnly | RoundRobin)
 
-- [x] LlmResponse metadata (WasTruncated, FinishReason) — Artifacts.cs (LlmResponse record), LlmService.cs
-  WHY: Detect truncation from all providers; parse Anthropic stop_reason, Gemini finishReason, OpenAI finish_reason, Ollama done_reason
-  TESTS: LlmTruncationTests.cs (5)
+- [x] LlmResponse metadata (WasTruncated, FinishReason, ModelName) — Artifacts.cs (LlmResponse record), LlmService.cs
+  WHY: Detect truncation from all providers; track which model generated each response for attribution
+  TESTS: LlmTruncationTests.cs (5), ModelAttributionTests.cs (23)
+
+- [x] Model attribution across all AI outputs — LlmService.cs (LastModelUsed), Jobs.cs (ModelUsed), DomainModels.cs (AnalysisModelUsed)
+  WHY: Every AI-generated output tracks the model that produced it (Ollama/Anthropic/Gemini/OpenAI/Codex)
+  TESTS: ModelAttributionTests.cs (23 — LlmResponse model name, domain model fields, DB persistence, migration safety)
 
 - [x] Auto-retry on truncation (double token budget, cap 8K) — LlmService.cs (GenerateWithMetadataAsync → RouteGenerationAsync)
   WHY: Silently recover from truncated responses without caller awareness
@@ -199,8 +203,9 @@ Status: `[x]` = implemented + tested | `[~]` = implemented, untested or partial 
   WHY: Strengths/gaps assessed AFTER deep indexing — 12 diverse RAG queries retrieve 30 top chunks, LLM analyzes actual code not truncated README; verified gaps checked per-gap against codebase
   TESTS: RagGroundedAnalysisTests.cs (16)
 
-- [x] Complement research (find projects that fill gaps) — ComplementResearchService.cs
-  WHY: After identifying a repo's gaps, automatically suggest complementary OSS projects
+- [x] Complement research (≥5 suggestions, ranked by relevance) — ComplementResearchService.cs
+  WHY: After identifying a repo's gaps, automatically suggest at least 5 complementary OSS projects; adds general improvement categories when gaps < 5
+  TESTS: ModelAttributionTests.cs (complement parsing, MinimumComplements constant)
 
 - [x] Repo analysis orchestrator (scan → complement → index → CodeBook → Q&A) — RepoIntelligenceJobRunner.cs
   WHY: Full pipeline from URL to interactive Q&A about any GitHub repo
@@ -490,8 +495,9 @@ SessionWorkspaceViewModel decomposed from 2578 lines into 12 files using partial
 | SessionManagerTests.cs | — | Session CRUD operations |
 | StreamlinedCodexTests.cs | — | Codex CLI integration |
 | RagGroundedAnalysisTests.cs | 16 | RAG analysis prompt building (no truncation, all chunks/deps), gap verification parsing, self-scan simulation (cloud providers, tests, Hive Mind, notifications captured), false positive detection |
+| ModelAttributionTests.cs | 23 | LlmResponse.ModelName (all providers), domain model fields (ResearchJob/Report/QaMessage/RepoProfile), DB persistence round-trip (4 tables), migration safety, complement parsing (≥5), deconstruction |
 
-**Total: 357 tests — 355 passed, 2 skipped, 0 failures**
+**Total: 378 tests — 378 passed, 0 failed**
 
 ---
 
@@ -556,6 +562,8 @@ tests/
 
 | Date | Change | Files |
 |------|--------|-------|
+| 2026-02-12 | Phase 13: Model attribution + complement enforcement — LlmResponse.ModelName, LastModelUsed, domain model fields, DB migration, ≥5 complements | Artifacts.cs, LlmService.cs, Jobs.cs, DomainModels.cs, SessionDb.cs, ResearchJobRunner.cs, RepoIntelligenceJobRunner.cs, ProjectFusionEngine.cs, ComplementResearchService.cs, SessionWorkspaceViewModel.NotebookQa.cs, SessionWorkspaceSubViewModels.cs |
+| 2026-02-12 | 23 new tests: ModelAttributionTests (LlmResponse model, domain fields, DB persistence, complement parsing) | ModelAttributionTests.cs |
 | 2026-02-12 | CAPABILITY_MAP.md created; enforcement rules added to orchestrator agent | CAPABILITY_MAP.md, orchestrator.agent.md |
 | 2026-02-12 | Phase 10c: Hive Mind / Global Memory — GlobalDb, GlobalMemoryService, strategy extraction, Hive Mind tab UI | GlobalDb.cs, GlobalMemoryService.cs, ResearchJobRunner.cs, ServiceRegistration.cs, SessionWorkspaceView.xaml, SessionWorkspaceViewModel.cs, ViewModelFactory.cs |
 | 2026-02-12 | Phase 10b: Repo RAG — cloning, chunking, indexing, CodeBook generation, RAG Q&A | RepoCloneService.cs, CodeChunker.cs, RepoIndexService.cs, CodeBookGenerator.cs, SessionDb.cs, RetrievalService.cs, RepoIntelligenceJobRunner.cs |

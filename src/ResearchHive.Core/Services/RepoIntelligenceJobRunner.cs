@@ -151,12 +151,14 @@ public class RepoIntelligenceJobRunner
                 ReportType = "RepoAnalysis",
                 Title = $"Repo Analysis: {profile.Owner}/{profile.Name}",
                 Content = report,
-                Format = "markdown"
+                Format = "markdown",
+                ModelUsed = profile.AnalysisModelUsed
             };
             db.SaveReport(reportRecord);
 
             job.State = JobState.Completed;
             job.FullReport = report;
+            job.ModelUsed = profile.AnalysisModelUsed;
             job.ExecutiveSummary = $"Analyzed {profile.Owner}/{profile.Name}: {profile.PrimaryLanguage}, {profile.Dependencies.Count} dependencies, {profile.IndexedChunkCount} chunks indexed, {profile.Strengths.Count} strengths, {profile.Gaps.Count} verified gaps, {complements.Count} complement suggestions.";
             db.SaveJob(job);
             AddReplay(job, "complete", "Analysis Complete", job.ExecutiveSummary);
@@ -231,6 +233,7 @@ public class RepoIntelligenceJobRunner
             "Do NOT make generic assumptions. If the code shows cloud providers, say so. If it has 300+ tests, say so.",
             ct: ct);
         RepoScannerService.ParseAnalysis(analysis, profile);
+        profile.AnalysisModelUsed = _llmService.LastModelUsed;
     }
 
     /// <summary>

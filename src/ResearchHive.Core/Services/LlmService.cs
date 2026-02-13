@@ -43,6 +43,9 @@ public class LlmService
         && _settings.ChatGptPlusAuth == ChatGptPlusAuthMode.CodexOAuth
         && _codexCli is { IsAvailable: true, IsAuthenticated: true };
 
+    /// <summary>The model name used in the most recent LLM call. Null if no call has been made yet.</summary>
+    public string? LastModelUsed { get; private set; }
+
     /// <summary>Notify subscribers of Codex events from the last call.</summary>
     private void RaiseCodexActivity()
     {
@@ -78,6 +81,7 @@ public class LlmService
             result = await RouteGenerationAsync(prompt, systemPrompt, retryTokens, ct);
         }
 
+        LastModelUsed = result.ModelName;
         return result;
     }
 
@@ -92,7 +96,7 @@ public class LlmService
             _lastOllamaRetryTime = DateTime.UtcNow;
         }
 
-        LlmResponse unavailable(string msg) => new(msg, false, "error");
+        LlmResponse unavailable(string msg) => new(msg, false, "error", null);
 
         // Route based on strategy
         switch (routing)
@@ -181,14 +185,15 @@ public class LlmService
                 ? await _codexCli.GenerateWithToolsAsync(fullPrompt, ct: ct)
                 : await _codexCli.GenerateAsync(fullPrompt, ct: ct);
             RaiseCodexActivity();
-            if (result != null) return result;
+            if (result != null) { LastModelUsed = "codex-cli"; return result; }
             // Retry once — transient failures (rate limits, token refresh) often resolve quickly
             await Task.Delay(2000, ct);
             result = useWebSearch
                 ? await _codexCli.GenerateWithToolsAsync(fullPrompt, ct: ct)
                 : await _codexCli.GenerateAsync(fullPrompt, ct: ct);
             RaiseCodexActivity();
-            return result ?? await GenerateAsync(prompt, systemPrompt, ct: ct);
+            if (result != null) { LastModelUsed = "codex-cli"; return result; }
+            return await GenerateAsync(prompt, systemPrompt, ct: ct);
         }
 
         var apiKey = ResolveApiKey();
@@ -205,7 +210,11 @@ public class LlmService
 
         // Anthropic has a different tool-calling format
         if (provider == PaidProviderType.Anthropic)
-            return await AnthropicToolLoop(messages, tools, executeToolCall, apiKey, maxCalls, ct);
+        {
+            var anthropicResult = await AnthropicToolLoop(messages, tools, executeToolCall, apiKey, maxCalls, ct);
+            LastModelUsed = _settings.PaidProviderModel ?? "claude-sonnet-4-20250514";
+            return anthropicResult;
+        }
 
         // OpenAI-compatible tool loop (OpenAI, GitHub Models, Mistral, OpenRouter, Azure)
         var (url, headers, modelName) = BuildCloudEndpoint(provider, apiKey);
@@ -258,6 +267,7 @@ public class LlmService
             else
             {
                 // Final text response
+                LastModelUsed = modelName;
                 return message.TryGetProperty("content", out var content)
                     ? content.GetString() ?? ""
                     : "";
@@ -275,6 +285,7 @@ public class LlmService
         var finalResp = await _httpClient.SendAsync(finalHttpReq, ct);
         var finalJson = await finalResp.Content.ReadAsStringAsync(ct);
         using var finalDoc = JsonDocument.Parse(finalJson);
+        LastModelUsed = modelName;
         return finalDoc.RootElement.GetProperty("choices")[0]
             .GetProperty("message").GetProperty("content").GetString() ?? "";
     }
@@ -433,11 +444,11 @@ public class LlmService
                 var fullPrompt = systemPrompt != null ? $"{systemPrompt}\n\n{prompt}" : prompt;
                 var result = await _codexCli.GenerateAsync(fullPrompt, maxTokens, ct);
                 RaiseCodexActivity();
-                if (result != null) return new LlmResponse(result, false, "stop");
+                if (result != null) return new LlmResponse(result, false, "stop", "codex-cli");
                 await Task.Delay(1500, ct);
                 result = await _codexCli.GenerateAsync(fullPrompt, maxTokens, ct);
                 RaiseCodexActivity();
-                return result != null ? new LlmResponse(result, false, "stop") : null;
+                return result != null ? new LlmResponse(result, false, "stop", "codex-cli") : null;
             }
             catch
             {
@@ -646,7 +657,7 @@ public class LlmService
         var doneReason = doc.RootElement.TryGetProperty("done_reason", out var dr) ? dr.GetString() : "stop";
         var wasTruncated = string.Equals(doneReason, "length", StringComparison.OrdinalIgnoreCase);
 
-        return new LlmResponse(text, wasTruncated, doneReason);
+        return new LlmResponse(text, wasTruncated, doneReason, _settings.SynthesisModel);
     }
 
     /// <summary>Cloud provider call with truncation detection via finish_reason / stop_reason.</summary>
@@ -679,7 +690,7 @@ public class LlmService
                 // Anthropic: stop_reason = "end_turn" (complete) or "max_tokens" (truncated)
                 var stopReason = doc.RootElement.TryGetProperty("stop_reason", out var sr) ? sr.GetString() : "end_turn";
                 var truncated = string.Equals(stopReason, "max_tokens", StringComparison.OrdinalIgnoreCase);
-                return new LlmResponse(text, truncated, stopReason);
+                return new LlmResponse(text, truncated, stopReason, model);
             }
 
             case PaidProviderType.GoogleGemini:
@@ -706,7 +717,7 @@ public class LlmService
                 var finishReason = doc.RootElement.GetProperty("candidates")[0]
                     .TryGetProperty("finishReason", out var fr) ? fr.GetString() : "STOP";
                 var truncated = string.Equals(finishReason, "MAX_TOKENS", StringComparison.OrdinalIgnoreCase);
-                return new LlmResponse(text, truncated, finishReason);
+                return new LlmResponse(text, truncated, finishReason, model);
             }
 
             // OpenAI, MistralAI, OpenRouter, AzureOpenAI, GitHubModels — all OpenAI-compatible
@@ -732,7 +743,7 @@ public class LlmService
                 var finishReason = doc.RootElement.GetProperty("choices")[0]
                     .TryGetProperty("finish_reason", out var fr) ? fr.GetString() : "stop";
                 var truncated = string.Equals(finishReason, "length", StringComparison.OrdinalIgnoreCase);
-                return new LlmResponse(text, truncated, finishReason);
+                return new LlmResponse(text, truncated, finishReason, modelName);
             }
         }
     }

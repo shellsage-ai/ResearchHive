@@ -163,6 +163,12 @@ public class SessionDb : IDisposable
         MigrateAddColumn("repo_profiles", "tree_sha", "TEXT DEFAULT ''");
         MigrateAddColumn("repo_profiles", "indexed_file_count", "INTEGER DEFAULT 0");
         MigrateAddColumn("repo_profiles", "indexed_chunk_count", "INTEGER DEFAULT 0");
+
+        // Phase 13: Model attribution — track which LLM generated AI content
+        MigrateAddColumn("jobs", "model_used", "TEXT");
+        MigrateAddColumn("reports", "model_used", "TEXT");
+        MigrateAddColumn("qa_messages", "model_used", "TEXT");
+        MigrateAddColumn("repo_profiles", "analysis_model_used", "TEXT");
     }
 
     private void MigrateAddColumn(string table, string column, string typeDef)
@@ -174,6 +180,17 @@ public class SessionDb : IDisposable
             cmd.ExecuteNonQuery();
         }
         catch { /* column already exists — ignore */ }
+    }
+
+    /// <summary>Safely read a nullable string column by name — returns null if column not found (migration pending).</summary>
+    private static string? TryGetString(SqliteDataReader r, string column)
+    {
+        try
+        {
+            var ordinal = r.GetOrdinal(column);
+            return r.IsDBNull(ordinal) ? null : r.GetString(ordinal);
+        }
+        catch { return null; }
     }
 
     // ---- Artifact CRUD ----
@@ -610,8 +627,8 @@ public class SessionDb : IDisposable
             (id,session_id,type,state,prompt,plan,search_queries,search_lanes,acquired_source_ids,
             target_source_count,max_iterations,current_iteration,created_utc,updated_utc,completed_utc,
             error_message,checkpoint_data,most_supported_view,credible_alternatives,
-            executive_summary,full_report,activity_report,replay_entries)
-            VALUES ($id,$sid,$t,$st,$pr,$pl,$sq,$sl,$asi,$tsc,$mi,$ci,$cu,$uu,$cu2,$em,$cd,$msv,$ca,$es,$fr,$ar,$re)";
+            executive_summary,full_report,activity_report,replay_entries,model_used)
+            VALUES ($id,$sid,$t,$st,$pr,$pl,$sq,$sl,$asi,$tsc,$mi,$ci,$cu,$uu,$cu2,$em,$cd,$msv,$ca,$es,$fr,$ar,$re,$mu)";
         cmd.Parameters.AddWithValue("$id", j.Id);
         cmd.Parameters.AddWithValue("$sid", j.SessionId);
         cmd.Parameters.AddWithValue("$t", j.Type.ToString());
@@ -635,6 +652,7 @@ public class SessionDb : IDisposable
         cmd.Parameters.AddWithValue("$fr", (object?)j.FullReport ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$ar", (object?)j.ActivityReport ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$re", JsonSerializer.Serialize(j.ReplayEntries));
+        cmd.Parameters.AddWithValue("$mu", (object?)j.ModelUsed ?? DBNull.Value);
         cmd.ExecuteNonQuery();
     }
 
@@ -677,7 +695,8 @@ public class SessionDb : IDisposable
         ExecutiveSummary = r.IsDBNull(19) ? null : r.GetString(19),
         FullReport = r.IsDBNull(20) ? null : r.GetString(20),
         ActivityReport = r.IsDBNull(21) ? null : r.GetString(21),
-        ReplayEntries = JsonSerializer.Deserialize<List<ReplayEntry>>(r.GetString(22)) ?? new()
+        ReplayEntries = JsonSerializer.Deserialize<List<ReplayEntry>>(r.GetString(22)) ?? new(),
+        ModelUsed = TryGetString(r, "model_used")
     };
 
     // ---- JobStep CRUD ----
@@ -725,8 +744,8 @@ public class SessionDb : IDisposable
     {
         using var cmd = _conn.CreateCommand();
         cmd.CommandText = @"INSERT OR REPLACE INTO reports 
-            (id,session_id,job_id,report_type,title,content,format,created_utc,file_path)
-            VALUES ($id,$sid,$jid,$rt,$t,$c,$f,$utc,$fp)";
+            (id,session_id,job_id,report_type,title,content,format,created_utc,file_path,model_used)
+            VALUES ($id,$sid,$jid,$rt,$t,$c,$f,$utc,$fp,$mu)";
         cmd.Parameters.AddWithValue("$id", rep.Id);
         cmd.Parameters.AddWithValue("$sid", rep.SessionId);
         cmd.Parameters.AddWithValue("$jid", rep.JobId);
@@ -736,6 +755,7 @@ public class SessionDb : IDisposable
         cmd.Parameters.AddWithValue("$f", rep.Format);
         cmd.Parameters.AddWithValue("$utc", rep.CreatedUtc.ToString("O"));
         cmd.Parameters.AddWithValue("$fp", rep.FilePath);
+        cmd.Parameters.AddWithValue("$mu", (object?)rep.ModelUsed ?? DBNull.Value);
         cmd.ExecuteNonQuery();
     }
 
@@ -755,7 +775,8 @@ public class SessionDb : IDisposable
                 Id = r.GetString(0), SessionId = r.GetString(1), JobId = r.GetString(2),
                 ReportType = r.GetString(3), Title = r.GetString(4), Content = r.GetString(5),
                 Format = r.GetString(6), CreatedUtc = DateTime.Parse(r.GetString(7)),
-                FilePath = r.GetString(8)
+                FilePath = r.GetString(8),
+                ModelUsed = TryGetString(r, "model_used")
             });
         }
         return list;
@@ -954,14 +975,15 @@ public class SessionDb : IDisposable
     {
         using var cmd = _conn.CreateCommand();
         cmd.CommandText = @"INSERT OR REPLACE INTO qa_messages 
-            (id,session_id,question,answer,scope,timestamp_utc)
-            VALUES ($id,$sid,$q,$a,$sc,$utc)";
+            (id,session_id,question,answer,scope,timestamp_utc,model_used)
+            VALUES ($id,$sid,$q,$a,$sc,$utc,$mu)";
         cmd.Parameters.AddWithValue("$id", msg.Id);
         cmd.Parameters.AddWithValue("$sid", msg.SessionId);
         cmd.Parameters.AddWithValue("$q", msg.Question);
         cmd.Parameters.AddWithValue("$a", msg.Answer);
         cmd.Parameters.AddWithValue("$sc", msg.Scope);
         cmd.Parameters.AddWithValue("$utc", msg.TimestampUtc.ToString("O"));
+        cmd.Parameters.AddWithValue("$mu", (object?)msg.ModelUsed ?? DBNull.Value);
         cmd.ExecuteNonQuery();
     }
 
@@ -977,7 +999,8 @@ public class SessionDb : IDisposable
             {
                 Id = r.GetString(0), SessionId = r.GetString(1),
                 Question = r.GetString(2), Answer = r.GetString(3),
-                Scope = r.GetString(4), TimestampUtc = DateTime.Parse(r.GetString(5))
+                Scope = r.GetString(4), TimestampUtc = DateTime.Parse(r.GetString(5)),
+                ModelUsed = TryGetString(r, "model_used")
             });
         }
         return list;
@@ -1283,9 +1306,9 @@ public class SessionDb : IDisposable
             (id,session_id,repo_url,owner,name,description,primary_language,languages,frameworks,
              dependencies,stars,forks,open_issues,topics,last_commit_utc,readme_content,
              strengths,gaps,complement_suggestions,top_level_entries,created_utc,
-             code_book,tree_sha,indexed_file_count,indexed_chunk_count)
+             code_book,tree_sha,indexed_file_count,indexed_chunk_count,analysis_model_used)
             VALUES ($id,$sid,$url,$own,$nm,$desc,$pl,$langs,$fw,$deps,$stars,$forks,$oi,$topics,$lcu,$readme,$str,$gaps,$cs,$tle,$utc,
-                    $cb,$tsha,$ifc,$icc)";
+                    $cb,$tsha,$ifc,$icc,$amu)";
         cmd.Parameters.AddWithValue("$id", rp.Id);
         cmd.Parameters.AddWithValue("$sid", rp.SessionId);
         cmd.Parameters.AddWithValue("$url", rp.RepoUrl);
@@ -1311,6 +1334,7 @@ public class SessionDb : IDisposable
         cmd.Parameters.AddWithValue("$tsha", (object?)rp.TreeSha ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$ifc", rp.IndexedFileCount);
         cmd.Parameters.AddWithValue("$icc", rp.IndexedChunkCount);
+        cmd.Parameters.AddWithValue("$amu", (object?)rp.AnalysisModelUsed ?? DBNull.Value);
         cmd.ExecuteNonQuery();
     }
 
@@ -1342,7 +1366,8 @@ public class SessionDb : IDisposable
                 CodeBook = SafeGetString(r, "code_book") ?? "",
                 TreeSha = SafeGetString(r, "tree_sha") ?? "",
                 IndexedFileCount = SafeGetInt(r, "indexed_file_count"),
-                IndexedChunkCount = SafeGetInt(r, "indexed_chunk_count")
+                IndexedChunkCount = SafeGetInt(r, "indexed_chunk_count"),
+                AnalysisModelUsed = TryGetString(r, "analysis_model_used")
             });
         }
         return list;

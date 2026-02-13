@@ -223,12 +223,14 @@ DECISION: <decision> | FROM: <input name(s)>
                 ReportType = "ProjectFusion",
                 Title = artifact.Title,
                 Content = report,
-                Format = "markdown"
+                Format = "markdown",
+                ModelUsed = _llmService.LastModelUsed
             };
             db.SaveReport(reportRecord);
 
             job.State = JobState.Completed;
             job.FullReport = report;
+            job.ModelUsed = _llmService.LastModelUsed;
             job.ExecutiveSummary = $"Fused {inputTitles.Count} projects ({request.Goal}): {artifact.FeatureMatrix.Count} features mapped, {artifact.GapsClosed.Count} gaps closed.";
             db.SaveJob(job);
             AddReplay(job, "complete", "Fusion Complete", job.ExecutiveSummary);

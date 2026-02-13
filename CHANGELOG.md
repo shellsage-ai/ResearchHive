@@ -3,6 +3,17 @@
 All changes are tracked in `CAPABILITY_MAP.md` (Change Log section) for granular file-level detail.
 This file provides a high-level summary per milestone.
 
+## 2026-02-12 — Phase 13: Model Attribution + Complement Enforcement
+- **Model attribution**: Every AI-generated output now tracks which LLM model produced it (`LlmResponse.ModelName`, `LastModelUsed` on LlmService)
+- **Domain model fields**: `ResearchJob.ModelUsed`, `Report.ModelUsed`, `QaMessage.ModelUsed`, `RepoProfile.AnalysisModelUsed`
+- **DB persistence**: Schema migration adds `model_used`/`analysis_model_used` columns to jobs, reports, qa_messages, repo_profiles tables
+- **Full provider coverage**: Ollama (SynthesisModel), Anthropic, Gemini, OpenAI-compat (5 providers), Codex CLI — all pass model name through
+- **Wired through callers**: ResearchJobRunner (16 LLM call sites), RepoIntelligenceJobRunner, ProjectFusionEngine, ComplementResearchService, Q&A
+- **Minimum 5 complements**: ComplementResearchService now enforces ≥5 complement suggestions with general improvement categories as fallback
+- **UI model display**: RepoProfileViewModel.AnalysisModel, QaMessageViewModel.ModelUsed, FullProfileText export includes model
+- **Tests**: 23 new (ModelAttributionTests.cs) — LlmResponse model name, domain model fields, DB persistence round-trip, migration safety, complement parsing
+- **Tests**: 357 → 378 (378 passed, 0 failed)
+
 ## 2026-02-12 — Phase 12: RAG-Grounded Repo Analysis
 - **Pipeline redesign**: Scan(metadata only) → Clone+Index → CodeBook → RAG analysis(12 queries, 30 chunks) → Gap verification → Complements
 - **Zero truncation**: Removed all README/manifest truncation; full content preserved and used via chunked retrieval

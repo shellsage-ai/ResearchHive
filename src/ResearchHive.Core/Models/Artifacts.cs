@@ -76,10 +76,10 @@ public enum CitationType
 }
 
 /// <summary>
-/// Wraps an LLM response with metadata about truncation and finish reason.
-/// Used by GenerateWithMetadataAsync for callers that need truncation awareness.
+/// Wraps an LLM response with metadata about truncation, finish reason, and which model generated it.
+/// Used by GenerateWithMetadataAsync for callers that need truncation awareness and model attribution.
 /// </summary>
-public record LlmResponse(string Text, bool WasTruncated, string? FinishReason);
+public record LlmResponse(string Text, bool WasTruncated, string? FinishReason, string? ModelName = null);
 
 /// <summary>
 /// A chunk stored in the global memory database with cross-session metadata.

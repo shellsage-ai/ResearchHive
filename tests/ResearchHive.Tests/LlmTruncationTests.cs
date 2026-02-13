@@ -36,10 +36,11 @@ public class LlmTruncationTests
     [Fact]
     public void LlmResponse_Record_SupportsDeconstruction()
     {
-        var (text, wasTruncated, finishReason) = new LlmResponse("hello", true, "length");
+        var (text, wasTruncated, finishReason, modelName) = new LlmResponse("hello", true, "length", "test-model");
         text.Should().Be("hello");
         wasTruncated.Should().BeTrue();
         finishReason.Should().Be("length");
+        modelName.Should().Be("test-model");
     }
 
     [Fact]

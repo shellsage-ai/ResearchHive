@@ -132,6 +132,9 @@ public class ResearchJob
     public string? ActivityReport { get; set; }
     public double GroundingScore { get; set; }
     public List<ReplayEntry> ReplayEntries { get; set; } = new();
+
+    /// <summary>Which LLM model generated the AI outputs for this job (e.g. "llama3.2:latest", "claude-sonnet-4-20250514").</summary>
+    public string? ModelUsed { get; set; }
 }
 
 public class JobStep
@@ -181,6 +184,8 @@ public class Report
     public string Format { get; set; } = "markdown";
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
     public string FilePath { get; set; } = string.Empty;
+    /// <summary>Which LLM model generated this report content.</summary>
+    public string? ModelUsed { get; set; }
 }
 
 /// <summary>
@@ -195,6 +200,8 @@ public class QaMessage
     /// <summary>"session" or a Report.Id for scoped Q&amp;A.</summary>
     public string Scope { get; set; } = "session";
     public DateTime TimestampUtc { get; set; } = DateTime.UtcNow;
+    /// <summary>Which LLM model generated the answer.</summary>
+    public string? ModelUsed { get; set; }
 }
 
 /// <summary>

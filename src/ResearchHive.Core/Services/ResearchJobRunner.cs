@@ -202,6 +202,7 @@ Return ONLY numbered queries, no explanation:
             }
 
             job.Plan = planResponse;
+            job.ModelUsed = _llmService.LastModelUsed;
             job.SearchQueries = ExtractQueries(planResponse, prompt);
             job.SubQuestions = subQuestions;
             db.SaveJob(job);
@@ -751,26 +752,30 @@ Return ONLY numbered queries, no explanation:
             {
                 SessionId = sessionId, JobId = job.Id, ReportType = "executive",
                 Title = $"Executive Summary - {shortTitle}", Content = job.ExecutiveSummary,
-                FilePath = Path.Combine(exportsDir, $"{job.Id}_executive.md")
+                FilePath = Path.Combine(exportsDir, $"{job.Id}_executive.md"),
+                ModelUsed = job.ModelUsed
             };
             var fullReport = new Report
             {
                 SessionId = sessionId, JobId = job.Id, ReportType = "full",
                 Title = $"Full Report - {shortTitle}", Content = job.FullReport,
-                FilePath = Path.Combine(exportsDir, $"{job.Id}_full.md")
+                FilePath = Path.Combine(exportsDir, $"{job.Id}_full.md"),
+                ModelUsed = job.ModelUsed
             };
             var actReport = new Report
             {
                 SessionId = sessionId, JobId = job.Id, ReportType = "activity",
                 Title = $"Activity Report - {shortTitle}", Content = job.ActivityReport,
-                FilePath = Path.Combine(exportsDir, $"{job.Id}_activity.md")
+                FilePath = Path.Combine(exportsDir, $"{job.Id}_activity.md"),
+                ModelUsed = job.ModelUsed
             };
             var replayReport = new Report
             {
                 SessionId = sessionId, JobId = job.Id, ReportType = "replay",
                 Title = $"Replay Timeline - {shortTitle}",
                 Content = JsonSerializer.Serialize(job.ReplayEntries, new JsonSerializerOptions { WriteIndented = true }),
-                FilePath = Path.Combine(exportsDir, $"{job.Id}_replay.json")
+                FilePath = Path.Combine(exportsDir, $"{job.Id}_replay.json"),
+                ModelUsed = job.ModelUsed
             };
 
             // Write all 4 report files in parallel
@@ -1104,26 +1109,30 @@ REQUIRED SECTIONS (use these exact headings):
         {
             SessionId = sessionId, JobId = job.Id, ReportType = "executive",
             Title = $"Executive Summary - {shortTitle}", Content = job.ExecutiveSummary,
-            FilePath = Path.Combine(exportsDir, $"{job.Id}_executive.md")
+            FilePath = Path.Combine(exportsDir, $"{job.Id}_executive.md"),
+            ModelUsed = job.ModelUsed
         };
         var fullReport = new Report
         {
             SessionId = sessionId, JobId = job.Id, ReportType = "full",
             Title = $"Full Report - {shortTitle}", Content = job.FullReport,
-            FilePath = Path.Combine(exportsDir, $"{job.Id}_full.md")
+            FilePath = Path.Combine(exportsDir, $"{job.Id}_full.md"),
+            ModelUsed = job.ModelUsed
         };
         var actReport = new Report
         {
             SessionId = sessionId, JobId = job.Id, ReportType = "activity",
             Title = $"Activity Report - {shortTitle}", Content = job.ActivityReport,
-            FilePath = Path.Combine(exportsDir, $"{job.Id}_activity.md")
+            FilePath = Path.Combine(exportsDir, $"{job.Id}_activity.md"),
+            ModelUsed = job.ModelUsed
         };
         var replayReport = new Report
         {
             SessionId = sessionId, JobId = job.Id, ReportType = "replay",
             Title = $"Replay Timeline - {shortTitle}",
             Content = JsonSerializer.Serialize(job.ReplayEntries, new JsonSerializerOptions { WriteIndented = true }),
-            FilePath = Path.Combine(exportsDir, $"{job.Id}_replay.json")
+            FilePath = Path.Combine(exportsDir, $"{job.Id}_replay.json"),
+            ModelUsed = job.ModelUsed
         };
 
         await Task.WhenAll(
@@ -1317,6 +1326,7 @@ REQUIRED SECTIONS (use these exact headings):
 Domain: {session.Pack}
 Format: 1. [query]  2. [query]  etc.";
                 var planResponse = await _llmService.GenerateAsync(planPrompt, ct: token);
+                job.ModelUsed ??= _llmService.LastModelUsed;
                 job.SearchQueries = ExtractQueries(planResponse, job.Prompt);
             }
 
@@ -1537,7 +1547,8 @@ IMPORTANT: In the Sources section, EVERY source must include its full URL. Use t
                 {
                     SessionId = sessionId, JobId = job.Id, ReportType = type,
                     Title = title, Content = content!,
-                    FilePath = Path.Combine(exportsDir, $"{job.Id}_{type}.md")
+                    FilePath = Path.Combine(exportsDir, $"{job.Id}_{type}.md"),
+                    ModelUsed = job.ModelUsed
                 };
                 await File.WriteAllTextAsync(rpt.FilePath, rpt.Content, token);
                 db.SaveReport(rpt);
@@ -1762,6 +1773,7 @@ IMPORTANT: In the Sources section, EVERY source must include its full URL. Use t
                     deduped, citations, sourceUrlMap, job, token);
             }
 
+            job.ModelUsed ??= _llmService.LastModelUsed;
             job.MostSupportedView = ExtractSection(reportContent, "Most Supported View");
             job.CredibleAlternatives = ExtractSection(reportContent, "Credible Alternatives");
 
@@ -1793,7 +1805,8 @@ IMPORTANT: In the Sources section, EVERY source must include its full URL. Use t
                 SessionId = sessionId, JobId = job.Id,
                 ReportType = "incremental", Title = "Incremental Research Report",
                 Content = job.FullReport, Format = "markdown",
-                CreatedUtc = DateTime.UtcNow
+                CreatedUtc = DateTime.UtcNow,
+                ModelUsed = job.ModelUsed
             });
 
             job.State = JobState.Completed;

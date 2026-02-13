@@ -177,6 +177,9 @@ public class RepoProfile
     /// <summary>Full contents of manifest files (package.json, .csproj, etc.) — not persisted, used during analysis.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public Dictionary<string, string> ManifestContents { get; set; } = new();
+
+    /// <summary>Which LLM model generated the analysis (strengths, gaps, CodeBook).</summary>
+    public string? AnalysisModelUsed { get; set; }
 }
 
 /// <summary>A single file or directory entry in a repo, used as scan-proof.</summary>

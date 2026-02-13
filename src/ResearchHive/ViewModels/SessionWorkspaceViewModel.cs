@@ -529,7 +529,7 @@ public partial class SessionWorkspaceViewModel : ObservableObject
         // Load Q&A messages from DB
         QaMessages.Clear();
         foreach (var qa in db.GetQaMessages())
-            QaMessages.Add(new QaMessageViewModel { Question = qa.Question, Answer = qa.Answer });
+            QaMessages.Add(new QaMessageViewModel { Question = qa.Question, Answer = qa.Answer, ModelUsed = qa.ModelUsed });
 
         // Update overview stats
         StatSources = Snapshots.Count;

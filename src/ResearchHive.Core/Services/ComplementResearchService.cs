@@ -4,12 +4,15 @@ namespace ResearchHive.Core.Services;
 
 /// <summary>
 /// Researches complementary projects for a RepoProfile by searching the web
-/// for tools/libraries that fill identified gaps.
+/// for tools/libraries that fill identified gaps. Enforces a minimum of 5 complements.
 /// </summary>
 public class ComplementResearchService
 {
     private readonly BrowserSearchService _searchService;
     private readonly LlmService _llmService;
+
+    /// <summary>Minimum number of complement suggestions to produce.</summary>
+    public const int MinimumComplements = 5;
 
     public ComplementResearchService(BrowserSearchService searchService, LlmService llmService)
     {
@@ -20,21 +23,45 @@ public class ComplementResearchService
     public async Task<List<ComplementProject>> ResearchAsync(RepoProfile profile, CancellationToken ct = default)
     {
         var complements = new List<ComplementProject>();
-        if (profile.Gaps.Count == 0) return complements;
 
-        // Group gaps into categories and search for each
-        var gapBatches = profile.Gaps.Take(8).ToList(); // Limit to avoid too many searches
+        // Build search queries — use gaps if available, plus general improvement queries
+        var searchTopics = new List<string>();
+        foreach (var gap in profile.Gaps.Take(8))
+            searchTopics.Add(gap);
 
-        var searchResults = new List<(string gap, List<string> urls)>();
-        foreach (var gap in gapBatches)
+        // If fewer than MinimumComplements gaps, add general improvement categories
+        if (searchTopics.Count < MinimumComplements)
+        {
+            var generalCategories = new[]
+            {
+                "testing and quality assurance",
+                "performance monitoring and observability",
+                "security scanning and vulnerability detection",
+                "documentation generation",
+                "CI/CD and deployment automation",
+                "code analysis and linting",
+                "dependency management"
+            };
+            foreach (var cat in generalCategories)
+            {
+                if (searchTopics.Count >= MinimumComplements + 2) break; // search a few extra for redundancy
+                if (!searchTopics.Any(s => s.Contains(cat.Split(' ')[0], StringComparison.OrdinalIgnoreCase)))
+                    searchTopics.Add(cat);
+            }
+        }
+
+        if (searchTopics.Count == 0) return complements;
+
+        var searchResults = new List<(string topic, List<string> urls)>();
+        foreach (var topic in searchTopics)
         {
             if (ct.IsCancellationRequested) break;
-            var query = $"best {profile.PrimaryLanguage} {gap} library tool for {profile.Description}";
+            var query = $"best {profile.PrimaryLanguage} {topic} library tool for {profile.Description}";
             try
             {
                 var urls = await _searchService.SearchAsync(query, "DuckDuckGo",
                     "https://duckduckgo.com/?q={query}", ct: ct);
-                searchResults.Add((gap, urls.Take(5).ToList()));
+                searchResults.Add((topic, urls.Take(5).ToList()));
             }
             catch
             {
@@ -51,14 +78,15 @@ public class ComplementResearchService
         sb.AppendLine();
         sb.AppendLine("I found these potential complementary projects from web search:");
         sb.AppendLine();
-        foreach (var (gap, urls) in searchResults)
+        foreach (var (topic, urls) in searchResults)
         {
-            sb.AppendLine($"### Gap: {gap}");
+            sb.AppendLine($"### Topic: {topic}");
             foreach (var url in urls)
                 sb.AppendLine($"  - {url}");
             sb.AppendLine();
         }
-        sb.AppendLine("For each gap, identify the BEST complementary project from the URLs above (pick one per gap).");
+        sb.AppendLine($"Identify at least {MinimumComplements} complementary projects from the URLs above, ranked by relevance.");
+        sb.AppendLine("Pick the BEST option per topic. If multiple topics yield the same project, pick additional alternatives.");
         sb.AppendLine("For each, respond in this exact format:");
         sb.AppendLine();
         sb.AppendLine("## Complement");
@@ -71,7 +99,8 @@ public class ComplementResearchService
         sb.AppendLine("- Maturity: <Mature|Growing|Early|Unknown>");
 
         var response = await _llmService.GenerateAsync(sb.ToString(),
-            "You are a software ecosystem analyst. Identify the best complementary project for each gap. Be specific about what each adds.",
+            $"You are a software ecosystem analyst. Identify at least {MinimumComplements} complementary projects ranked by relevance. " +
+            "Be specific about what each adds. Ensure diversity across categories.",
             ct: ct);
 
         complements = ParseComplements(response);

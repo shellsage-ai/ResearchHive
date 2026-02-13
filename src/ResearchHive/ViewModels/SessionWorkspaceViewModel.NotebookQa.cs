@@ -84,7 +84,8 @@ public partial class SessionWorkspaceViewModel
             db.SaveQaMessage(new QaMessage
             {
                 SessionId = _sessionId, Question = question,
-                Answer = msg.Answer, Scope = QaScope
+                Answer = msg.Answer, Scope = QaScope,
+                ModelUsed = _llmService.LastModelUsed
             });
         }
         catch (Exception ex)
