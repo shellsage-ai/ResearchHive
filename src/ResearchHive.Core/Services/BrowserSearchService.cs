@@ -16,7 +16,7 @@ namespace ResearchHive.Core.Services;
 /// B1: Browser context pool — pre-warmed IBrowserContext instances are rented/returned
 /// instead of created/destroyed per call.
 /// </summary>
-public sealed class BrowserSearchService : IAsyncDisposable
+public sealed class BrowserSearchService : IBrowserSearchService, IAsyncDisposable
 {
     private IPlaywright? _playwright;
     private IBrowser? _browser;

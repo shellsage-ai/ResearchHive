@@ -1,4 +1,6 @@
+using ResearchHive.Core.Configuration;
 using ResearchHive.Core.Models;
+using Microsoft.Extensions.Logging;
 using System.Diagnostics;
 using System.Text;
 
@@ -7,16 +9,22 @@ namespace ResearchHive.Core.Services;
 /// <summary>
 /// Orchestrates repo scanning + complement research as a tracked job.
 /// Also supports multi-repo instant scan-and-fuse.
+///
+/// Pipeline routing (LLM call counts):
+///   Codex 5.3 (agentic): 1 call — analysis + web search for complements in a single agentic call
+///   Other cloud (large context): 2 calls — consolidated analysis + separate complement research
+///   Ollama/local: 4 calls — CodeBook + analysis + gap verify + complement
 /// </summary>
 public class RepoIntelligenceJobRunner
 {
     private readonly SessionManager _sessionManager;
     private readonly RepoScannerService _scanner;
     private readonly ComplementResearchService _complementService;
-    private readonly LlmService _llmService;
+    private readonly ILlmService _llmService;
     private readonly RepoIndexService? _repoIndexService;
     private readonly CodeBookGenerator? _codeBookGenerator;
-    private readonly RetrievalService? _retrievalService;
+    private readonly IRetrievalService? _retrievalService;
+    private readonly ILogger<RepoIntelligenceJobRunner>? _logger;
 
     // Optional Hive Mind integration — set via property injection
     public GlobalMemoryService? GlobalMemory { get; set; }
@@ -25,10 +33,11 @@ public class RepoIntelligenceJobRunner
         SessionManager sessionManager,
         RepoScannerService scanner,
         ComplementResearchService complementService,
-        LlmService llmService,
+        ILlmService llmService,
         RepoIndexService? repoIndexService = null,
         CodeBookGenerator? codeBookGenerator = null,
-        RetrievalService? retrievalService = null)
+        IRetrievalService? retrievalService = null,
+        ILogger<RepoIntelligenceJobRunner>? logger = null)
     {
         _sessionManager = sessionManager;
         _scanner = scanner;
@@ -37,6 +46,7 @@ public class RepoIntelligenceJobRunner
         _repoIndexService = repoIndexService;
         _codeBookGenerator = codeBookGenerator;
         _retrievalService = retrievalService;
+        _logger = logger;
     }
 
     /// <summary>Scan a single repo: metadata → clone+index → RAG-grounded analysis → gap verification → complements.</summary>
@@ -97,10 +107,36 @@ public class RepoIntelligenceJobRunner
             phaseSw.Stop();
             telemetry.Phases.Add(new PhaseTimingRecord { Phase = "Clone + Index", DurationMs = phaseSw.ElapsedMilliseconds });
 
-            // ── Phases 3-5: Analysis pipeline (consolidated for cloud, separate for local) ──
-            // Cloud/Codex providers (large context): combine CodeBook + Analysis + Gap Verification into 1 LLM call
+            // ── Phases 3-5: Analysis pipeline (agentic for Codex, consolidated for cloud, separate for local) ──
+            // Codex 5.3 (agentic): single call with web search — analysis + complements in one shot
+            // Cloud providers (large context): combine CodeBook + Analysis + Gap Verification into 1 LLM call
             // Local/Ollama providers (small context): keep 3 separate LLM calls for reliability
-            if (_llmService.IsLargeContextProvider && isIndexed && _retrievalService != null)
+            bool agenticComplementsHandled = false;
+
+            if (_llmService.IsCodexOAuthActive && isIndexed && _retrievalService != null)
+            {
+                // ── AGENTIC PATH: Single Codex call handles everything including web search for complements ──
+                phaseSw = Stopwatch.StartNew();
+                AddReplay(job, "agentic", "Agentic Full Analysis",
+                    "Running full analysis + complement web search in a single Codex agentic call...");
+                job.State = JobState.Evaluating;
+                db.SaveJob(job);
+                _logger?.LogInformation("Agentic path: Codex 5.3 with web search for {Owner}/{Name}", profile.Owner, profile.Name);
+
+                var agenticComplements = await RunAgenticFullAnalysisAsync(sessionId, profile, telemetry, ct);
+                if (agenticComplements != null && agenticComplements.Count > 0)
+                {
+                    profile.ComplementSuggestions = agenticComplements;
+                    agenticComplementsHandled = true;
+                }
+
+                AddReplay(job, "analyzed", "Agentic Analysis Complete",
+                    $"CodeBook generated, {profile.Strengths.Count} strengths, {profile.Gaps.Count} pre-verified gaps" +
+                    (agenticComplementsHandled ? $", {profile.ComplementSuggestions.Count} complements from web search" : ""));
+                phaseSw.Stop();
+                telemetry.Phases.Add(new PhaseTimingRecord { Phase = "Agentic Full Analysis (CodeBook+RAG+GapVerify+Complements)", DurationMs = phaseSw.ElapsedMilliseconds });
+            }
+            else if (_llmService.IsLargeContextProvider && isIndexed && _retrievalService != null)
             {
                 phaseSw = Stopwatch.StartNew();
                 AddReplay(job, "consolidated", "Consolidated Analysis",
@@ -193,22 +229,31 @@ public class RepoIntelligenceJobRunner
             }
 
             // ── Phase 6: Complement research (based on verified gaps) ──
-            phaseSw = Stopwatch.StartNew();
-            AddReplay(job, "complement", "Researching Complements", $"Searching for projects to fill {profile.Gaps.Count} verified gaps...");
-            var complements = await _complementService.ResearchAsync(profile, ct);
-            profile.ComplementSuggestions = complements;
-            phaseSw.Stop();
-            telemetry.Phases.Add(new PhaseTimingRecord { Phase = "Complement Research", DurationMs = phaseSw.ElapsedMilliseconds });
-            telemetry.WebSearchCallCount = _complementService.LastSearchCallCount;
-            telemetry.GitHubApiCallCount += _complementService.LastEnrichCallCount;
-            // Complement service makes 1 LLM call
-            telemetry.LlmCalls.Add(new LlmCallRecord
+            // SKIP when the agentic path already handled complements via web search
+            if (!agenticComplementsHandled)
             {
-                Purpose = "Complement Evaluation",
-                Model = _llmService.LastModelUsed,
-                DurationMs = _complementService.LastLlmDurationMs
-            });
-            AddReplay(job, "complements_done", "Complements Found", $"Found {complements.Count} complementary projects");
+                phaseSw = Stopwatch.StartNew();
+                AddReplay(job, "complement", "Researching Complements", $"Searching for projects to fill {profile.Gaps.Count} verified gaps...");
+                var complements = await _complementService.ResearchAsync(profile, ct);
+                profile.ComplementSuggestions = complements;
+                phaseSw.Stop();
+                telemetry.Phases.Add(new PhaseTimingRecord { Phase = "Complement Research", DurationMs = phaseSw.ElapsedMilliseconds });
+                telemetry.WebSearchCallCount = _complementService.LastSearchCallCount;
+                telemetry.GitHubApiCallCount += _complementService.LastEnrichCallCount;
+                // Complement service makes 1 LLM call
+                telemetry.LlmCalls.Add(new LlmCallRecord
+                {
+                    Purpose = "Complement Evaluation",
+                    Model = _llmService.LastModelUsed,
+                    DurationMs = _complementService.LastLlmDurationMs
+                });
+                AddReplay(job, "complements_done", "Complements Found", $"Found {complements.Count} complementary projects");
+            }
+            else
+            {
+                AddReplay(job, "complements_done", "Complements Found (Agentic)",
+                    $"Found {profile.ComplementSuggestions.Count} complementary projects via Codex web search");
+            }
 
             // ── Phase 7: Save + report ──
             totalSw.Stop();
@@ -237,7 +282,7 @@ public class RepoIntelligenceJobRunner
             job.ModelUsed = profile.AnalysisModelUsed;
             job.ExecutiveSummary = $"Analyzed {profile.Owner}/{profile.Name}: {profile.PrimaryLanguage}, " +
                 $"{profile.Dependencies.Count} deps, {profile.IndexedChunkCount} chunks, " +
-                $"{profile.Strengths.Count} strengths, {profile.Gaps.Count} gaps, {complements.Count} complements. " +
+                $"{profile.Strengths.Count} strengths, {profile.Gaps.Count} gaps, {profile.ComplementSuggestions.Count} complements. " +
                 $"Pipeline: {telemetry.Summary}";
             db.SaveJob(job);
             AddReplay(job, "complete", "Analysis Complete", job.ExecutiveSummary);
@@ -299,7 +344,11 @@ public class RepoIntelligenceJobRunner
                 var hits = await _retrievalService!.HybridSearchAsync(sessionId, q, repoFilter, topK: 5, ct);
                 return (IReadOnlyList<RetrievalResult>)hits.ToList();
             }
-            catch { return (IReadOnlyList<RetrievalResult>)Array.Empty<RetrievalResult>(); }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Consolidated RAG query failed: {Query}", q);
+                return (IReadOnlyList<RetrievalResult>)Array.Empty<RetrievalResult>();
+            }
         }).ToList();
 
         var results = await Task.WhenAll(retrievalTasks);
@@ -365,6 +414,157 @@ public class RepoIntelligenceJobRunner
     }
 
     /// <summary>
+    /// Agentic full analysis: sends a single Codex 5.3 call with web search enabled.
+    /// Codex handles CodeBook generation, framework detection, strengths, gaps, AND
+    /// autonomously searches the web for complementary projects — all in one shot.
+    /// Returns the complement list on success, or null if the agentic call failed.
+    /// </summary>
+    private async Task<List<ComplementProject>?> RunAgenticFullAnalysisAsync(
+        string sessionId, RepoProfile profile, ScanTelemetry telemetry, CancellationToken ct)
+    {
+        // ── Step 1: Parallel RAG retrieval (same 18 queries as consolidated path) ──
+        var architectureQueries = new[]
+        {
+            "main entry point program startup initialization",
+            "architecture modules services dependency injection",
+            "data model schema database entities",
+            "API endpoints routes controllers",
+            "configuration settings environment",
+            "build deploy dockerfile CI pipeline"
+        };
+        var analysisQueries = new[]
+        {
+            "service registration dependency injection startup configuration",
+            "database data access storage persistence repository",
+            "API cloud provider external service integration",
+            "test testing unit test integration test assertion",
+            "error handling retry fault tolerance resilience",
+            "user interface view model MVVM commands controls",
+            "search indexing retrieval embedding vector",
+            "authentication security encryption key management",
+            "export reporting document generation output",
+            "domain business logic core workflow pipeline",
+            "notification monitoring health check logging",
+            "safety validation verification quality"
+        };
+
+        var allQueries = architectureQueries.Concat(analysisQueries).ToArray();
+        var repoFilter = new[] { "repo_code", "repo_doc" };
+        var allChunks = new List<RetrievalResult>();
+
+        var retrievalTasks = allQueries.Select(async q =>
+        {
+            try
+            {
+                var hits = await _retrievalService!.HybridSearchAsync(sessionId, q, repoFilter, topK: 5, ct);
+                return (IReadOnlyList<RetrievalResult>)hits.ToList();
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Agentic RAG query failed: {Query}", q);
+                return (IReadOnlyList<RetrievalResult>)Array.Empty<RetrievalResult>();
+            }
+        }).ToList();
+
+        var results = await Task.WhenAll(retrievalTasks);
+        foreach (var hits in results)
+            allChunks.AddRange(hits);
+
+        telemetry.RetrievalCallCount += allQueries.Length;
+
+        // Dedup by content hash, take top 40 by score
+        var topChunks = allChunks
+            .DistinctBy(c => c.Chunk.Id)
+            .OrderByDescending(c => c.Score)
+            .Take(40)
+            .Select(c => $"[{c.SourceType}]\n{c.Chunk.Text}")
+            .ToList();
+
+        if (topChunks.Count < 3)
+        {
+            _logger?.LogWarning("Agentic path: only {Count} chunks retrieved, falling back to shallow analysis", topChunks.Count);
+            await _scanner.AnalyzeShallowAsync(profile, ct);
+            return null;
+        }
+
+        // ── Step 2: Build the agentic prompt (all 5 sections + web search instructions) ──
+        var prompt = RepoScannerService.BuildFullAgenticPrompt(profile, topChunks);
+
+        // ── Step 3: Single agentic Codex call ──
+        var llmSw = Stopwatch.StartNew();
+        string response;
+        try
+        {
+            response = await _llmService.GenerateAgenticAsync(
+                prompt,
+                "You are a senior software architect with web search capabilities. " +
+                "Analyze the codebase thoroughly, then use web search to find real complementary projects. " +
+                "Be specific — reference real class names, service names, and patterns from the code. " +
+                "Self-verify your gap claims: only include gaps for things genuinely MISSING.",
+                timeoutSeconds: 300,
+                ct: ct);
+        }
+        catch (Exception ex)
+        {
+            llmSw.Stop();
+            _logger?.LogError(ex, "Agentic Codex call failed for {Owner}/{Name}", profile.Owner, profile.Name);
+            telemetry.LlmCalls.Add(new LlmCallRecord
+            {
+                Purpose = "Agentic Full Analysis (FAILED)",
+                Model = _llmService.LastModelUsed,
+                DurationMs = llmSw.ElapsedMilliseconds,
+                PromptLength = prompt.Length
+            });
+            return null; // Caller will fall through to complement service
+        }
+
+        llmSw.Stop();
+        telemetry.LlmCalls.Add(new LlmCallRecord
+        {
+            Purpose = "Agentic Full Analysis (CodeBook+RAG+GapVerify+Complements)",
+            Model = _llmService.LastModelUsed,
+            DurationMs = llmSw.ElapsedMilliseconds,
+            PromptLength = prompt.Length,
+            ResponseLength = response.Length
+        });
+
+        if (string.IsNullOrWhiteSpace(response))
+        {
+            _logger?.LogWarning("Agentic call returned empty response for {Owner}/{Name}", profile.Owner, profile.Name);
+            return null;
+        }
+
+        // ── Step 4: Parse the 5-section response ──
+        var (codeBook, frameworks, strengths, gaps, complements) =
+            RepoScannerService.ParseFullAgenticAnalysis(response);
+
+        // ── Step 5: Apply results to profile ──
+        profile.CodeBook = $"# CodeBook: {profile.Owner}/{profile.Name}\n\n{codeBook}";
+        profile.AnalysisModelUsed = _llmService.LastModelUsed;
+
+        // Dedup frameworks
+        foreach (var fw in frameworks)
+        {
+            if (!profile.Frameworks.Any(f => f.Equals(fw, StringComparison.OrdinalIgnoreCase) ||
+                f.Contains(fw.Split(' ')[0], StringComparison.OrdinalIgnoreCase)))
+                profile.Frameworks.Add(fw);
+        }
+
+        profile.Strengths.AddRange(strengths);
+
+        if (gaps.Count >= 3)
+            profile.Gaps = gaps;
+        else if (gaps.Count > 0)
+            profile.Gaps = gaps;
+
+        _logger?.LogInformation(
+            "Agentic analysis complete: {Strengths} strengths, {Gaps} gaps, {Complements} complements",
+            strengths.Count, gaps.Count, complements.Count);
+
+        return complements.Count > 0 ? complements : null;
+    }
+
+    /// <summary>
     /// Multi-query RAG analysis: issue diverse queries against the indexed codebase,
     /// gather top chunks, and ask the LLM to assess strengths/gaps from actual code.
     /// </summary>
@@ -398,7 +598,11 @@ public class RepoIntelligenceJobRunner
                 var hits = await _retrievalService!.HybridSearchAsync(sessionId, q, repoFilter, topK: 5, ct);
                 return (IReadOnlyList<RetrievalResult>)hits.ToList();
             }
-            catch { return (IReadOnlyList<RetrievalResult>)Array.Empty<RetrievalResult>(); }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "RAG analysis query failed: {Query}", q);
+                return (IReadOnlyList<RetrievalResult>)Array.Empty<RetrievalResult>();
+            }
         }).ToList();
 
         var results = await Task.WhenAll(retrievalTasks);
@@ -459,8 +663,9 @@ public class RepoIntelligenceJobRunner
                 var chunkTexts = hits.Select(h => h.Chunk.Text).ToList();
                 return (gap, chunks: (IReadOnlyList<string>)chunkTexts);
             }
-            catch
+            catch (Exception ex)
             {
+                _logger?.LogWarning(ex, "Gap evidence retrieval failed: {Gap}", gap);
                 return (gap, chunks: (IReadOnlyList<string>)Array.Empty<string>());
             }
         }).ToList();
@@ -476,6 +681,7 @@ public class RepoIntelligenceJobRunner
             "IMPORTANT: gaps about MISSING things (no tests, no CI, no docs) are real when no counter-evidence is found — do NOT remove them just because no code was found. " +
             "Gaps that merely critique how an existing feature works should be removed as false positives. " +
             "Keep at least 3 verified gaps.",
+            tier: ModelTier.Mini,
             ct: ct);
         llmSw.Stop();
         telemetry.LlmCalls.Add(new LlmCallRecord
@@ -744,7 +950,7 @@ User's question: {question}
 
 Provide a thorough, detailed answer.";
 
-        return await _llmService.GenerateAsync(userPrompt, systemPrompt, 3000, ct);
+        return await _llmService.GenerateAsync(userPrompt, systemPrompt, 3000, ct: ct);
     }
 
     private static void AddReplay(ResearchJob job, string type, string title, string description)

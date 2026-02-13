@@ -11,11 +11,12 @@ namespace ResearchHive.Core.Services;
 /// Researches complementary projects for a RepoProfile by searching the web
 /// for tools/libraries that fill identified gaps. Enforces a minimum of 5 complements.
 /// Enriches GitHub URLs with real descriptions before LLM evaluation.
+/// Uses ModelTier.Mini for the complement evaluation call (routine ranking task).
 /// </summary>
 public class ComplementResearchService
 {
-    private readonly BrowserSearchService _searchService;
-    private readonly LlmService _llmService;
+    private readonly IBrowserSearchService _searchService;
+    private readonly ILlmService _llmService;
     private readonly HttpClient _http;
 
     /// <summary>Minimum number of complement suggestions to produce.</summary>
@@ -30,7 +31,7 @@ public class ComplementResearchService
     /// <summary>Duration of the LLM evaluation call in the last ResearchAsync invocation (ms).</summary>
     public long LastLlmDurationMs { get; private set; }
 
-    public ComplementResearchService(BrowserSearchService searchService, LlmService llmService, AppSettings settings)
+    public ComplementResearchService(IBrowserSearchService searchService, ILlmService llmService, AppSettings settings)
     {
         _searchService = searchService;
         _llmService = llmService;
@@ -123,6 +124,7 @@ public class ComplementResearchService
             $"You are a software ecosystem analyst. Return a valid JSON object with a 'complements' array. " +
             $"Include at least {MinimumComplements} complementary projects ranked by relevance. " +
             "Ensure diversity across categories. Use ONLY projects from the URLs provided.",
+            tier: ModelTier.Mini,
             ct: ct);
         llmSw.Stop();
         LastLlmDurationMs = llmSw.ElapsedMilliseconds;

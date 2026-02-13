@@ -742,6 +742,214 @@ public class RepoScannerService
         return (codeBookSb.ToString().Trim(), frameworks, strengths, gaps);
     }
 
+    // ─── Full Agentic Analysis (Codex 5.3 single call with web search) ───
+
+    /// <summary>
+    /// Build a full agentic prompt for Codex that combines code analysis AND web search for complements
+    /// into a single call. Codex's native web search capability handles complement discovery autonomously.
+    /// This eliminates the separate ComplementResearchService call entirely.
+    /// </summary>
+    public static string BuildFullAgenticPrompt(RepoProfile profile, IReadOnlyList<string> retrievedChunks)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("You are a senior software architect with web search capabilities.");
+        sb.AppendLine("Perform a COMPLETE repository analysis in a single pass:");
+        sb.AppendLine("  1. Analyze the source code excerpts provided below");
+        sb.AppendLine("  2. Search the web for real complementary open-source projects that fill identified gaps");
+        sb.AppendLine();
+        sb.AppendLine($"## Repository: {profile.Owner}/{profile.Name}");
+        sb.AppendLine($"- Description: {profile.Description}");
+        sb.AppendLine($"- Primary Language: {profile.PrimaryLanguage}");
+        sb.AppendLine($"- Languages: {string.Join(", ", profile.Languages)}");
+        sb.AppendLine($"- Dependencies ({profile.Dependencies.Count}): {string.Join(", ", profile.Dependencies.Select(d => d.Name))}");
+        sb.AppendLine($"- Indexed: {profile.IndexedFileCount} files, {profile.IndexedChunkCount} chunks");
+        sb.AppendLine();
+
+        sb.AppendLine("## Source Code Excerpts:");
+        sb.AppendLine();
+        for (int i = 0; i < retrievedChunks.Count; i++)
+        {
+            sb.AppendLine($"### Excerpt {i + 1}:");
+            sb.AppendLine(retrievedChunks[i]);
+            sb.AppendLine("---");
+        }
+        sb.AppendLine();
+
+        sb.AppendLine("=== PRODUCE ALL FIVE SECTIONS BELOW ===");
+        sb.AppendLine();
+        sb.AppendLine("## CodeBook");
+        sb.AppendLine("A concise architecture reference document (under 1500 words) covering:");
+        sb.AppendLine("1. **Purpose** — What the project does");
+        sb.AppendLine("2. **Architecture Overview** — Layers, modules, key patterns (MVC, CQRS, etc.)");
+        sb.AppendLine("3. **Key Abstractions** — Important classes, interfaces with one-line descriptions");
+        sb.AppendLine("4. **Data Flow** — How data moves through the system");
+        sb.AppendLine("5. **Extension Points** — How a developer would add features");
+        sb.AppendLine("6. **Build & Run** — Commands or steps to build and run");
+        sb.AppendLine("7. **Notable Design Decisions**");
+        sb.AppendLine("Reference actual class/function names from the code excerpts.");
+        sb.AppendLine();
+        sb.AppendLine("## Frameworks");
+        sb.AppendLine("- framework1");
+        sb.AppendLine("- framework2");
+        sb.AppendLine();
+        sb.AppendLine("## Strengths");
+        sb.AppendLine("- strength1 (cite specific code evidence: class names, patterns, services)");
+        sb.AppendLine("(list at least 5 specific strengths based on what the code actually implements)");
+        sb.AppendLine();
+        sb.AppendLine("## Gaps");
+        sb.AppendLine("- gap1 (self-verified: explain why this is genuinely missing from the code)");
+        sb.AppendLine("(list at least 5 gaps — only MISSING capabilities, not critiques of existing features)");
+        sb.AppendLine();
+        sb.AppendLine("## Complementary Projects");
+        sb.AppendLine("SEARCH THE WEB for real open-source projects that address each gap above.");
+        sb.AppendLine("For EACH complement, provide:");
+        sb.AppendLine("- **Name:** project-name");
+        sb.AppendLine("- **URL:** https://github.com/owner/repo (MUST be a real, verifiable URL)");
+        sb.AppendLine("- **Stars:** approximate star count from your web search");
+        sb.AppendLine("- **License:** MIT/Apache-2.0/etc.");
+        sb.AppendLine("- **Purpose:** one sentence description");
+        sb.AppendLine("- **What it adds:** what it specifically adds to this repo");
+        sb.AppendLine("- **Category:** Testing|Performance|Security|Documentation|Monitoring|DevOps|UI|DataAccess|Other");
+        sb.AppendLine("Find at least 5 real projects. Do NOT hallucinate URLs — search the web to verify each one.");
+        sb.AppendLine("Ensure category diversity — pick projects from different categories.");
+        sb.AppendLine();
+        sb.AppendLine("CRITICAL RULES:");
+        sb.AppendLine("- Be specific — reference real class names, service names, and patterns from the code");
+        sb.AppendLine("- Strengths MUST cite specific code evidence");
+        sb.AppendLine("- Gaps MUST be MISSING things — NOT critiques of existing features");
+        sb.AppendLine("- Self-verify each gap: if the code excerpts show the feature exists, REMOVE that gap");
+        sb.AppendLine("- Complementary projects MUST be real — use your web search to find and verify them");
+        sb.AppendLine("- Keep at least 5 verified gaps and at least 5 complementary projects");
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Parse the full agentic analysis response into CodeBook, Frameworks, Strengths, Gaps, AND Complements.
+    /// The response contains five sections: ## CodeBook, ## Frameworks, ## Strengths, ## Gaps, ## Complementary Projects.
+    /// </summary>
+    public static (string codeBook, List<string> frameworks, List<string> strengths, List<string> gaps, List<ComplementProject> complements) ParseFullAgenticAnalysis(string response)
+    {
+        var lines = response.Split('\n');
+        string? currentSection = null;
+        var codeBookSb = new System.Text.StringBuilder();
+        var frameworks = new List<string>();
+        var strengths = new List<string>();
+        var gaps = new List<string>();
+        var complements = new List<ComplementProject>();
+
+        // Temporary storage for building complement entries
+        ComplementProject? currentComplement = null;
+
+        foreach (var rawLine in lines)
+        {
+            var trimmed = rawLine.Trim();
+
+            // Detect ## level headers (not ### subheadings within CodeBook)
+            if (trimmed.StartsWith("## ") && !trimmed.StartsWith("### "))
+            {
+                // Flush any in-progress complement
+                if (currentSection == "complements" && currentComplement != null && !string.IsNullOrEmpty(currentComplement.Name))
+                    complements.Add(currentComplement);
+                currentComplement = null;
+
+                if (trimmed.StartsWith("## CodeBook", StringComparison.OrdinalIgnoreCase))
+                    currentSection = "codebook";
+                else if (trimmed.StartsWith("## Frameworks", StringComparison.OrdinalIgnoreCase))
+                    currentSection = "frameworks";
+                else if (trimmed.StartsWith("## Strengths", StringComparison.OrdinalIgnoreCase))
+                    currentSection = "strengths";
+                else if (trimmed.StartsWith("## Gaps", StringComparison.OrdinalIgnoreCase) &&
+                         !trimmed.Contains("Complement", StringComparison.OrdinalIgnoreCase))
+                    currentSection = "gaps";
+                else if (trimmed.Contains("Complement", StringComparison.OrdinalIgnoreCase))
+                    currentSection = "complements";
+                else
+                    currentSection = null;
+                continue;
+            }
+
+            switch (currentSection)
+            {
+                case "codebook":
+                    codeBookSb.AppendLine(rawLine);
+                    break;
+                case "frameworks":
+                    if (trimmed.StartsWith("- ") && trimmed.Length > 2)
+                        frameworks.Add(trimmed[2..].Trim());
+                    break;
+                case "strengths":
+                    if (trimmed.StartsWith("- ") && trimmed.Length > 2)
+                        strengths.Add(trimmed[2..].Trim());
+                    break;
+                case "gaps":
+                    if (trimmed.StartsWith("- ") && trimmed.Length > 2)
+                        gaps.Add(trimmed[2..].Trim());
+                    break;
+                case "complements":
+                    ParseComplementLine(trimmed, ref currentComplement, complements);
+                    break;
+            }
+        }
+
+        // Flush last complement
+        if (currentComplement != null && !string.IsNullOrEmpty(currentComplement.Name))
+            complements.Add(currentComplement);
+
+        return (codeBookSb.ToString().Trim(), frameworks, strengths, gaps, complements);
+    }
+
+    /// <summary>Parse a single line within the Complementary Projects section.</summary>
+    private static void ParseComplementLine(string trimmed, ref ComplementProject? current, List<ComplementProject> complements)
+    {
+        // Numbered entries like "### 1. ProjectName" or "### ProjectName" start a new complement
+        if (trimmed.StartsWith("### ") || (trimmed.StartsWith("**") && trimmed.Contains("Name")))
+        {
+            if (current != null && !string.IsNullOrEmpty(current.Name))
+                complements.Add(current);
+            current = new ComplementProject();
+            // Try to extract name from "### 1. Name" pattern
+            var name = trimmed.TrimStart('#', ' ', '*');
+            if (name.Length > 0 && char.IsDigit(name[0]))
+                name = name.Contains('.') ? name[(name.IndexOf('.') + 1)..].Trim() : name;
+            if (!string.IsNullOrWhiteSpace(name) && !name.StartsWith("Name", StringComparison.OrdinalIgnoreCase))
+                current.Name = name;
+            return;
+        }
+
+        if (current == null) return;
+
+        // Parse "- **Key:** Value" or "- Key: Value" patterns
+        if (trimmed.StartsWith("- ") || trimmed.StartsWith("* "))
+        {
+            var content = trimmed[2..].Trim().TrimStart('*').Trim();
+            // Remove markdown bold markers
+            content = content.Replace("**", "");
+
+            if (content.StartsWith("Name:", StringComparison.OrdinalIgnoreCase))
+                current.Name = content[5..].Trim();
+            else if (content.StartsWith("URL:", StringComparison.OrdinalIgnoreCase))
+                current.Url = content[4..].Trim();
+            else if (content.StartsWith("Stars:", StringComparison.OrdinalIgnoreCase))
+            {
+                // Try to parse star count for enrichment but store in purpose if no other field
+                var starText = content[6..].Trim();
+                if (!string.IsNullOrEmpty(current.Purpose))
+                    current.Purpose += $" ({starText} stars)";
+            }
+            else if (content.StartsWith("License:", StringComparison.OrdinalIgnoreCase))
+                current.License = content[8..].Trim();
+            else if (content.StartsWith("Purpose:", StringComparison.OrdinalIgnoreCase))
+                current.Purpose = content[8..].Trim();
+            else if (content.StartsWith("What it adds:", StringComparison.OrdinalIgnoreCase))
+                current.WhatItAdds = content[13..].Trim();
+            else if (content.StartsWith("Category:", StringComparison.OrdinalIgnoreCase))
+                current.Category = content[9..].Trim();
+            else if (content.StartsWith("Maturity:", StringComparison.OrdinalIgnoreCase))
+                current.Maturity = content[9..].Trim();
+        }
+    }
+
     // ─── JSON-structured prompts for Ollama (smaller models benefit from format enforcement) ───
 
     /// <summary>

@@ -1,3 +1,4 @@
+using ResearchHive.Core.Configuration;
 using ResearchHive.Core.Models;
 using System.Text;
 
@@ -8,11 +9,12 @@ namespace ResearchHive.Core.Services;
 /// Pulls the top architecture-relevant chunks from the vector store, sends them to the LLM,
 /// and asks for a structured summary covering: purpose, architecture, key abstractions,
 /// data flow, extension points, and build/run instructions.
+/// Uses ModelTier.Mini for cost-efficient generation (routine summarization task).
 /// </summary>
 public class CodeBookGenerator
 {
-    private readonly RetrievalService _retrieval;
-    private readonly LlmService _llm;
+    private readonly IRetrievalService _retrieval;
+    private readonly ILlmService _llm;
 
     private static readonly string[] ArchitectureQueries = new[]
     {
@@ -24,7 +26,7 @@ public class CodeBookGenerator
         "build deploy dockerfile CI pipeline"
     };
 
-    public CodeBookGenerator(RetrievalService retrieval, LlmService llm)
+    public CodeBookGenerator(IRetrievalService retrieval, ILlmService llm)
     {
         _retrieval = retrieval;
         _llm = llm;
@@ -48,7 +50,7 @@ public class CodeBookGenerator
             {
                 return await _retrieval.HybridSearchAsync(sessionId, q, repoFilter, topK: 5, ct);
             }
-            catch { return new List<RetrievalResult>(); }
+            catch (Exception) { return new List<RetrievalResult>(); }
         }).ToList();
 
         var retrievalResults = await Task.WhenAll(retrievalTasks);
@@ -102,7 +104,7 @@ Keep it under 1500 words. Do NOT repeat the code — summarize and explain.";
 
 Produce the structured Markdown CodeBook now.";
 
-        var response = await _llm.GenerateWithMetadataAsync(userPrompt, systemPrompt, maxTokens: 2000, ct: ct);
+        var response = await _llm.GenerateWithMetadataAsync(userPrompt, systemPrompt, maxTokens: 2000, tier: ModelTier.Mini, ct: ct);
         return $"# CodeBook: {profile.Owner}/{profile.Name}\n\n{response.Text}";
     }
 }

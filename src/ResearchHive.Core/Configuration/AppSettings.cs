@@ -1,5 +1,16 @@
 namespace ResearchHive.Core.Configuration;
 
+/// <summary>Which model tier to use for an LLM call. Enables intelligent routing of routine tasks to cheaper/faster models.</summary>
+public enum ModelTier
+{
+    /// <summary>Use the user's selected model (default behavior).</summary>
+    Default,
+    /// <summary>Use a smaller/cheaper model for routine tasks (CodeBook, gap verify, complement eval).</summary>
+    Mini,
+    /// <summary>Use the most capable model. Reserved for complex agentic tasks.</summary>
+    Full
+}
+
 public enum PaidProviderType
 {
     None,
@@ -82,6 +93,8 @@ public class AppSettings
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "npm", "node_modules", "@openai", "codex", "bin", "codex.js");
     public string CodexModel { get; set; } = "gpt-5.3-codex";
+    /// <summary>Mini model for routine Codex tasks (CodeBook, gap verification, complement evaluation). 4x more efficient.</summary>
+    public string CodexMiniModel { get; set; } = "gpt-5.1-codex-mini";
     /// <summary>Enable live web search for Codex CLI research prompts.</summary>
     public bool CodexEnableWebSearch { get; set; } = true;
     /// <summary>How to authenticate when provider is ChatGptPlus.</summary>
@@ -174,6 +187,22 @@ public class AppSettings
         [PaidProviderType.OpenRouter] = new[] { "openai/gpt-4o", "anthropic/claude-sonnet-4-20250514", "google/gemini-2.0-flash", "meta-llama/llama-3.1-405b-instruct" },
         [PaidProviderType.AzureOpenAI] = new[] { "gpt-4o", "gpt-4o-mini", "gpt-4.1" },
         [PaidProviderType.GitHubModels] = new[] { "openai/gpt-4o", "openai/gpt-4o-mini", "openai/gpt-4.1", "openai/gpt-4.1-mini", "openai/o3-mini", "openai/o4-mini" },
-        [PaidProviderType.ChatGptPlus] = new[] { "gpt-5.3-codex", "o3", "o4-mini", "gpt-4.1", "gpt-4o" },
+        [PaidProviderType.ChatGptPlus] = new[] { "gpt-5.3-codex", "gpt-5.1-codex-mini", "o3", "o4-mini", "gpt-4.1", "gpt-4o" },
+    };
+
+    /// <summary>
+    /// Maps each provider to its best "mini" model for routine tasks.
+    /// Used when <see cref="ModelTier.Mini"/> is requested.
+    /// </summary>
+    public static IReadOnlyDictionary<PaidProviderType, string> MiniModelMap { get; } = new Dictionary<PaidProviderType, string>
+    {
+        [PaidProviderType.OpenAI] = "gpt-4.1-mini",
+        [PaidProviderType.Anthropic] = "claude-haiku-4-20250514",
+        [PaidProviderType.GoogleGemini] = "gemini-2.0-flash",
+        [PaidProviderType.MistralAI] = "mistral-small-latest",
+        [PaidProviderType.OpenRouter] = "openai/gpt-4o-mini",
+        [PaidProviderType.AzureOpenAI] = "gpt-4o-mini",
+        [PaidProviderType.GitHubModels] = "openai/gpt-4o-mini",
+        [PaidProviderType.ChatGptPlus] = "gpt-5.1-codex-mini",
     };
 }

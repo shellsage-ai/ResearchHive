@@ -1,5 +1,6 @@
 using ResearchHive.Core.Configuration;
 using ResearchHive.Core.Models;
+using Microsoft.Extensions.Logging;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
@@ -12,16 +13,21 @@ namespace ResearchHive.Core.Services;
 /// - Cloud providers: OpenAI, Anthropic, Gemini, Mistral, OpenRouter, Azure, GitHub Models
 /// - Configurable routing (LocalOnly / LocalWithCloudFallback / CloudPrimary / CloudOnly)
 /// - Tool calling for research agents (search_evidence, search_web, get_source, verify_claim)
-/// - Configurable model selection per provider
+/// - Model tiering (Default/Mini/Full) for cost-efficient call routing
+/// - Circuit breaker for provider fault isolation
+/// - Exponential backoff with jitter for transient failures
 /// </summary>
-public class LlmService
+public class LlmService : ILlmService
 {
     private readonly AppSettings _settings;
     private readonly HttpClient _httpClient;
     private readonly CodexCliService? _codexCli;
+    private readonly ILogger<LlmService>? _logger;
+    private readonly LlmCircuitBreaker _circuitBreaker;
     private bool _ollamaAvailable = true;
     private DateTime _lastOllamaRetryTime = DateTime.MinValue;
     private static readonly TimeSpan OllamaRetryInterval = TimeSpan.FromSeconds(60);
+    private static readonly Random _jitterRng = new();
 
     /// <summary>
     /// Fired after each Codex CLI call with the events captured during that call.
@@ -29,10 +35,13 @@ public class LlmService
     /// </summary>
     public event Action<IReadOnlyList<CodexEvent>>? CodexActivityOccurred;
 
-    public LlmService(AppSettings settings, CodexCliService? codexCli = null)
+    public LlmService(AppSettings settings, CodexCliService? codexCli = null,
+        ILogger<LlmService>? logger = null, LlmCircuitBreaker? circuitBreaker = null)
     {
         _settings = settings;
         _codexCli = codexCli;
+        _logger = logger;
+        _circuitBreaker = circuitBreaker ?? new LlmCircuitBreaker();
         _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(120) };
     }
 
@@ -66,10 +75,12 @@ public class LlmService
     /// Standard text generation — no tool calling.
     /// Routes based on <see cref="AppSettings.Routing"/>.
     /// </summary>
+    /// <param name="tier">Model tier — Mini routes to cheaper models for routine tasks.</param>
     /// <param name="maxTokens">Optional token limit for Ollama (num_predict) and cloud (max_tokens). Defaults to 4000 for cloud, unbounded for local.</param>
-    public async Task<string> GenerateAsync(string prompt, string? systemPrompt = null, int? maxTokens = null, CancellationToken ct = default)
+    public async Task<string> GenerateAsync(string prompt, string? systemPrompt = null, int? maxTokens = null,
+        ModelTier tier = ModelTier.Default, CancellationToken ct = default)
     {
-        var response = await GenerateWithMetadataAsync(prompt, systemPrompt, maxTokens, ct);
+        var response = await GenerateWithMetadataAsync(prompt, systemPrompt, maxTokens, tier, ct);
         return response.Text;
     }
 
@@ -79,15 +90,17 @@ public class LlmService
     /// Automatically retries once with doubled token budget if truncation is detected and
     /// maxTokens was not explicitly set by the caller.
     /// </summary>
-    public async Task<LlmResponse> GenerateWithMetadataAsync(string prompt, string? systemPrompt = null, int? maxTokens = null, CancellationToken ct = default)
+    public async Task<LlmResponse> GenerateWithMetadataAsync(string prompt, string? systemPrompt = null,
+        int? maxTokens = null, ModelTier tier = ModelTier.Default, CancellationToken ct = default)
     {
-        var result = await RouteGenerationAsync(prompt, systemPrompt, maxTokens, ct);
+        var modelOverride = ResolveModelOverride(tier);
+        var result = await RouteGenerationAsync(prompt, systemPrompt, maxTokens, ct, modelOverride: modelOverride);
         
         // Auto-retry on truncation when caller didn't set an explicit limit
         if (result.WasTruncated && !maxTokens.HasValue)
         {
             var retryTokens = Math.Min(8000, (maxTokens ?? 4000) * 2);
-            result = await RouteGenerationAsync(prompt, systemPrompt, retryTokens, ct);
+            result = await RouteGenerationAsync(prompt, systemPrompt, retryTokens, ct, modelOverride: modelOverride);
         }
 
         LastModelUsed = result.ModelName;
@@ -99,21 +112,88 @@ public class LlmService
     /// parameter to ensure valid JSON output. Cloud providers handle JSON naturally via prompt instructions.
     /// Use this when the prompt requests structured JSON output (e.g., complement evaluation, analysis).
     /// </summary>
-    public async Task<string> GenerateJsonAsync(string prompt, string? systemPrompt = null, int? maxTokens = null, CancellationToken ct = default)
+    public async Task<string> GenerateJsonAsync(string prompt, string? systemPrompt = null, int? maxTokens = null,
+        ModelTier tier = ModelTier.Default, CancellationToken ct = default)
     {
-        var result = await RouteGenerationAsync(prompt, systemPrompt, maxTokens, ct, useJsonFormat: true);
+        var modelOverride = ResolveModelOverride(tier);
+        var result = await RouteGenerationAsync(prompt, systemPrompt, maxTokens, ct, useJsonFormat: true, modelOverride: modelOverride);
 
         if (result.WasTruncated && !maxTokens.HasValue)
         {
             var retryTokens = Math.Min(8000, (maxTokens ?? 4000) * 2);
-            result = await RouteGenerationAsync(prompt, systemPrompt, retryTokens, ct, useJsonFormat: true);
+            result = await RouteGenerationAsync(prompt, systemPrompt, retryTokens, ct, useJsonFormat: true, modelOverride: modelOverride);
         }
 
         LastModelUsed = result.ModelName;
         return result.Text;
     }
 
-    private async Task<LlmResponse> RouteGenerationAsync(string prompt, string? systemPrompt, int? maxTokens, CancellationToken ct, bool useJsonFormat = false)
+    /// <summary>
+    /// Agentic generation via Codex CLI with web search enabled.
+    /// Makes a single agentic call where Codex autonomously searches the web.
+    /// For non-Codex providers, falls back to standard GenerateAsync.
+    /// </summary>
+    public async Task<string> GenerateAgenticAsync(string prompt, string? systemPrompt = null,
+        int timeoutSeconds = 300, CancellationToken ct = default)
+    {
+        if (!IsCodexOAuthActive || _codexCli == null)
+        {
+            _logger?.LogInformation("GenerateAgenticAsync: Codex not active, falling back to GenerateAsync");
+            return await GenerateAsync(prompt, systemPrompt, ct: ct);
+        }
+
+        var fullPrompt = systemPrompt != null ? $"{systemPrompt}\n\n{prompt}" : prompt;
+        _logger?.LogInformation("GenerateAgenticAsync: Invoking Codex with web search (timeout: {Timeout}s)", timeoutSeconds);
+
+        // Retry with backoff: 2 attempts for agentic calls
+        for (int attempt = 0; attempt < 2; attempt++)
+        {
+            try
+            {
+                var result = await _codexCli.GenerateWithToolsAsync(
+                    fullPrompt, enableSearch: true, sandbox: "read-only",
+                    ct: ct);
+                RaiseCodexActivity();
+                if (result != null)
+                {
+                    _circuitBreaker.RecordCloudSuccess();
+                    LastModelUsed = "codex-cli-agentic";
+                    _logger?.LogInformation("GenerateAgenticAsync: Success on attempt {Attempt}, response {Length} chars",
+                        attempt + 1, result.Length);
+                    return result;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "GenerateAgenticAsync: Attempt {Attempt} failed", attempt + 1);
+            }
+
+            if (attempt < 1)
+            {
+                var delay = CalculateBackoffDelay(attempt);
+                _logger?.LogInformation("GenerateAgenticAsync: Retrying after {Delay}ms", delay);
+                await Task.Delay(delay, ct);
+            }
+        }
+
+        _circuitBreaker.RecordCloudFailure();
+        _logger?.LogWarning("GenerateAgenticAsync: Both attempts failed, falling back to GenerateAsync");
+        return await GenerateAsync(prompt, systemPrompt, ct: ct);
+    }
+
+    /// <summary>Resolve the mini model name for the current provider.</summary>
+    public string? ResolveMiniModel()
+    {
+        if (IsCodexOAuthActive)
+            return _settings.CodexMiniModel;
+        var provider = ResolveActiveCloudProvider();
+        if (provider != PaidProviderType.None && AppSettings.MiniModelMap.TryGetValue(provider, out var mini))
+            return mini;
+        return null; // Ollama — no mini variant, use SynthesisModel
+    }
+
+    private async Task<LlmResponse> RouteGenerationAsync(string prompt, string? systemPrompt, int? maxTokens,
+        CancellationToken ct, bool useJsonFormat = false, string? modelOverride = null)
     {
         var routing = _settings.Routing;
 
@@ -131,6 +211,8 @@ public class LlmService
         {
             case RoutingStrategy.LocalOnly:
             {
+                if (!_circuitBreaker.AllowOllamaCall())
+                    return unavailable("[LLM_UNAVAILABLE] Ollama circuit breaker is open — too many consecutive failures.");
                 var localResult = await TryOllamaWithMetadata(prompt, systemPrompt, maxTokens, ct, useJsonFormat);
                 if (localResult != null) return localResult;
                 return unavailable("[LLM_UNAVAILABLE] Ollama is not running or did not respond. " +
@@ -139,7 +221,9 @@ public class LlmService
 
             case RoutingStrategy.CloudOnly:
             {
-                var cloudResult = await TryCloudWithMetadata(prompt, systemPrompt, maxTokens, ct);
+                if (!_circuitBreaker.AllowCloudCall())
+                    return unavailable("[LLM_UNAVAILABLE] Cloud circuit breaker is open — too many consecutive failures.");
+                var cloudResult = await TryCloudWithMetadata(prompt, systemPrompt, maxTokens, ct, modelOverride);
                 if (cloudResult != null) return cloudResult;
                 return unavailable("[LLM_UNAVAILABLE] Cloud AI returned no response. Check your provider settings, authentication, and connectivity. " +
                        $"Provider: {_settings.PaidProvider}, Auth: {_settings.ChatGptPlusAuth}");
@@ -147,8 +231,12 @@ public class LlmService
 
             case RoutingStrategy.CloudPrimary:
             {
-                var cpResult = await TryCloudWithMetadata(prompt, systemPrompt, maxTokens, ct)
-                    ?? await TryOllamaWithMetadata(prompt, systemPrompt, maxTokens, ct, useJsonFormat);
+                var cpResult = _circuitBreaker.AllowCloudCall()
+                    ? await TryCloudWithMetadata(prompt, systemPrompt, maxTokens, ct, modelOverride)
+                    : null;
+                cpResult ??= _circuitBreaker.AllowOllamaCall()
+                    ? await TryOllamaWithMetadata(prompt, systemPrompt, maxTokens, ct, useJsonFormat)
+                    : null;
                 if (cpResult != null) return cpResult;
                 return unavailable("[LLM_UNAVAILABLE] Neither cloud provider nor Ollama responded. " +
                        $"Cloud: {_settings.PaidProvider}, Auth: {_settings.ChatGptPlusAuth}. Check both connections.");
@@ -157,8 +245,12 @@ public class LlmService
             case RoutingStrategy.LocalWithCloudFallback:
             default:
             {
-                var lcResult = await TryOllamaWithMetadata(prompt, systemPrompt, maxTokens, ct, useJsonFormat)
-                    ?? await TryCloudWithMetadata(prompt, systemPrompt, maxTokens, ct);
+                var lcResult = _circuitBreaker.AllowOllamaCall()
+                    ? await TryOllamaWithMetadata(prompt, systemPrompt, maxTokens, ct, useJsonFormat)
+                    : null;
+                lcResult ??= _circuitBreaker.AllowCloudCall()
+                    ? await TryCloudWithMetadata(prompt, systemPrompt, maxTokens, ct, modelOverride)
+                    : null;
                 if (lcResult != null) return lcResult;
                 return unavailable("[LLM_UNAVAILABLE] Neither Ollama nor cloud provider responded. " +
                        "Start Ollama or configure a cloud provider in Settings.");
@@ -436,28 +528,36 @@ public class LlmService
     {
         if (!_ollamaAvailable) return null;
 
-        for (int attempt = 0; attempt < 2; attempt++)
+        for (int attempt = 0; attempt < 3; attempt++)
         {
             try
             {
                 var result = await CallOllamaWithMetadataAsync(prompt, systemPrompt, maxTokens, ct, useJsonFormat);
-                if (result != null) return result;
+                if (result != null)
+                {
+                    _circuitBreaker.RecordOllamaSuccess();
+                    return result;
+                }
                 break;
             }
-            catch when (attempt == 0)
+            catch when (attempt < 2)
             {
-                await Task.Delay(800, ct);
+                var delay = CalculateBackoffDelay(attempt);
+                _logger?.LogWarning("Ollama attempt {Attempt} failed, retrying in {Delay}ms", attempt + 1, delay);
+                await Task.Delay(delay, ct);
             }
-            catch
+            catch (Exception ex)
             {
+                _logger?.LogError(ex, "Ollama attempt {Attempt} failed, marking unavailable", attempt + 1);
                 _ollamaAvailable = false;
                 _lastOllamaRetryTime = DateTime.UtcNow;
+                _circuitBreaker.RecordOllamaFailure();
             }
         }
         return null;
     }
 
-    private async Task<LlmResponse?> TryCloudWithMetadata(string prompt, string? systemPrompt, int? maxTokens, CancellationToken ct)
+    private async Task<LlmResponse?> TryCloudWithMetadata(string prompt, string? systemPrompt, int? maxTokens, CancellationToken ct, string? modelOverride = null)
     {
         var provider = ResolveActiveCloudProvider();
         if (provider == PaidProviderType.None) return null;
@@ -467,22 +567,32 @@ public class LlmService
             && _settings.ChatGptPlusAuth == ChatGptPlusAuthMode.CodexOAuth)
         {
             if (_codexCli == null || !_codexCli.IsAvailable || !_codexCli.IsAuthenticated) return null;
-            try
+            var fullPrompt = systemPrompt != null ? $"{systemPrompt}\n\n{prompt}" : prompt;
+            for (int attempt = 0; attempt < 3; attempt++)
             {
-                var fullPrompt = systemPrompt != null ? $"{systemPrompt}\n\n{prompt}" : prompt;
-                var result = await _codexCli.GenerateAsync(fullPrompt, maxTokens, ct);
-                RaiseCodexActivity();
-                if (result != null) return new LlmResponse(result, false, "stop", "codex-cli");
-                await Task.Delay(1500, ct);
-                result = await _codexCli.GenerateAsync(fullPrompt, maxTokens, ct);
-                RaiseCodexActivity();
-                return result != null ? new LlmResponse(result, false, "stop", "codex-cli") : null;
+                try
+                {
+                    var result = await _codexCli.GenerateAsync(fullPrompt, maxTokens, modelOverride, ct);
+                    RaiseCodexActivity();
+                    if (result != null)
+                    {
+                        _circuitBreaker.RecordCloudSuccess();
+                        return new LlmResponse(result, false, "stop", modelOverride ?? "codex-cli");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogWarning(ex, "Codex CLI attempt {Attempt} failed", attempt + 1);
+                    RaiseCodexActivity();
+                }
+                if (attempt < 2)
+                {
+                    var delay = CalculateBackoffDelay(attempt);
+                    await Task.Delay(delay, ct);
+                }
             }
-            catch
-            {
-                RaiseCodexActivity();
-                return null;
-            }
+            _circuitBreaker.RecordCloudFailure();
+            return null;
         }
 
         var apiKey = ResolveApiKey();
@@ -490,10 +600,14 @@ public class LlmService
 
         try
         {
-            return await CallCloudWithMetadataAsync(provider, apiKey, prompt, systemPrompt, maxTokens, ct);
+            var result = await CallCloudWithMetadataAsync(provider, apiKey, prompt, systemPrompt, maxTokens, ct);
+            _circuitBreaker.RecordCloudSuccess();
+            return result;
         }
-        catch
+        catch (Exception ex)
         {
+            _logger?.LogError(ex, "Cloud provider {Provider} call failed", provider);
+            _circuitBreaker.RecordCloudFailure();
             return null;
         }
     }
@@ -538,12 +652,12 @@ public class LlmService
             {
                 var fullPrompt = systemPrompt != null ? $"{systemPrompt}\n\n{prompt}" : prompt;
                 // Regular generation: no web search — let the pipeline handle search/evidence
-                var result = await _codexCli.GenerateAsync(fullPrompt, maxTokens, ct);
+                var result = await _codexCli.GenerateAsync(fullPrompt, maxTokens, ct: ct);
                 RaiseCodexActivity();
                 if (result != null) return result;
                 // Retry once after brief pause for transient failures
                 await Task.Delay(1500, ct);
-                result = await _codexCli.GenerateAsync(fullPrompt, maxTokens, ct);
+                result = await _codexCli.GenerateAsync(fullPrompt, maxTokens, ct: ct);
                 RaiseCodexActivity();
                 return result;
             }
@@ -574,6 +688,29 @@ public class LlmService
     {
         if (!_settings.UsePaidProvider) return PaidProviderType.None;
         return _settings.PaidProvider;
+    }
+
+    /// <summary>
+    /// Resolve the model override string for a given tier. Returns null for Default tier (use user's model).
+    /// </summary>
+    private string? ResolveModelOverride(ModelTier tier)
+    {
+        if (tier == ModelTier.Default) return null;
+        if (tier == ModelTier.Mini) return ResolveMiniModel();
+        // Full tier uses the user's configured model (no override needed)
+        return null;
+    }
+
+    /// <summary>
+    /// Calculate exponential backoff delay with jitter.
+    /// Base: 1s, Factor: 2x, Max: 8s, Jitter: ±25%.
+    /// </summary>
+    private static int CalculateBackoffDelay(int attempt)
+    {
+        var baseDelay = 1000 * Math.Pow(2, attempt); // 1s, 2s, 4s, 8s...
+        var capped = Math.Min(baseDelay, 8000);
+        var jitter = capped * (0.75 + _jitterRng.NextDouble() * 0.5); // ±25%
+        return (int)jitter;
     }
 
     /// <summary>

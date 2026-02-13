@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using ResearchHive.Core.Configuration;
 using ResearchHive.Core.Data;
 using System.Runtime.Versioning;
@@ -18,8 +19,19 @@ public static class ServiceRegistration
         services.AddSingleton<CourtesyPolicy>();
         services.AddSingleton<EmbeddingService>();
         services.AddSingleton<CodexCliService>();
+
+        // Circuit breaker for LLM provider fault isolation
+        services.AddSingleton<LlmCircuitBreaker>(sp =>
+            new LlmCircuitBreaker(logger: sp.GetService<ILogger<LlmCircuitBreaker>>()));
+
+        // LlmService: registered as concrete + ILlmService (same singleton)
         services.AddSingleton<LlmService>(sp =>
-            new LlmService(sp.GetRequiredService<AppSettings>(), sp.GetRequiredService<CodexCliService>()));
+            new LlmService(
+                sp.GetRequiredService<AppSettings>(),
+                sp.GetRequiredService<CodexCliService>(),
+                sp.GetService<ILogger<LlmService>>(),
+                sp.GetService<LlmCircuitBreaker>()));
+        services.AddSingleton<ILlmService>(sp => sp.GetRequiredService<LlmService>());
 
         services.AddSingleton<ArtifactStore>(sp =>
             new ArtifactStore(settings.SessionsPath, sp.GetRequiredService<SessionManager>()));
@@ -29,8 +41,10 @@ public static class ServiceRegistration
         services.AddSingleton<PdfIngestionService>();
         services.AddSingleton<IndexService>();
         services.AddSingleton<RetrievalService>();
+        services.AddSingleton<IRetrievalService>(sp => sp.GetRequiredService<RetrievalService>());
         services.AddSingleton<BrowserSearchService>(sp =>
             new BrowserSearchService(sp.GetRequiredService<AppSettings>()));
+        services.AddSingleton<IBrowserSearchService>(sp => sp.GetRequiredService<BrowserSearchService>());
         services.AddSingleton<GoogleSearchService>();
         services.AddSingleton<ResearchJobRunner>(sp =>
         {
@@ -52,13 +66,20 @@ public static class ServiceRegistration
         services.AddSingleton<MaterialsJobRunner>();
         services.AddSingleton<FusionJobRunner>();
         services.AddSingleton<RepoScannerService>();
-        services.AddSingleton<ComplementResearchService>();
+        services.AddSingleton<ComplementResearchService>(sp =>
+            new ComplementResearchService(
+                sp.GetRequiredService<IBrowserSearchService>(),
+                sp.GetRequiredService<ILlmService>(),
+                sp.GetRequiredService<AppSettings>()));
 
         // Repo RAG services
         services.AddSingleton<RepoCloneService>();
         services.AddSingleton<CodeChunker>();
         services.AddSingleton<RepoIndexService>();
-        services.AddSingleton<CodeBookGenerator>();
+        services.AddSingleton<CodeBookGenerator>(sp =>
+            new CodeBookGenerator(
+                sp.GetRequiredService<IRetrievalService>(),
+                sp.GetRequiredService<ILlmService>()));
 
         // Global memory (Hive Mind)
         services.AddSingleton<GlobalDb>(sp => new GlobalDb(settings.GlobalDbPath));
@@ -71,10 +92,11 @@ public static class ServiceRegistration
                 sp.GetRequiredService<SessionManager>(),
                 sp.GetRequiredService<RepoScannerService>(),
                 sp.GetRequiredService<ComplementResearchService>(),
-                sp.GetRequiredService<LlmService>(),
+                sp.GetRequiredService<ILlmService>(),
                 sp.GetRequiredService<RepoIndexService>(),
                 sp.GetRequiredService<CodeBookGenerator>(),
-                sp.GetRequiredService<RetrievalService>());
+                sp.GetRequiredService<IRetrievalService>(),
+                sp.GetService<ILogger<RepoIntelligenceJobRunner>>());
             runner.GlobalMemory = sp.GetRequiredService<GlobalMemoryService>();
             return runner;
         });

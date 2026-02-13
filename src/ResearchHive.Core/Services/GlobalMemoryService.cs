@@ -261,7 +261,7 @@ Question: {question}
 
 Provide a thorough answer based on the available evidence.";
 
-        return await _llmService.GenerateAsync(userPrompt, systemPrompt, 3000, ct);
+        return await _llmService.GenerateAsync(userPrompt, systemPrompt, 3000, ct: ct);
     }
 
     /// <summary>Get Hive Mind statistics.</summary>

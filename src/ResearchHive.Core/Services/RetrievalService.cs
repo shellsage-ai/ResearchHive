@@ -10,7 +10,7 @@ namespace ResearchHive.Core.Services;
 /// 3. Heuristic boosters (exact phrase, title match, recency)
 /// 4. Reciprocal Rank Fusion (RRF) for lane merging
 /// </summary>
-public class RetrievalService
+public class RetrievalService : IRetrievalService
 {
     private readonly SessionManager _sessionManager;
     private readonly EmbeddingService _embeddingService;

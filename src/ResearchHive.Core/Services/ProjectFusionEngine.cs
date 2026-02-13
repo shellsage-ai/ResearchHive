@@ -146,7 +146,7 @@ DECISION: <decision> | FROM: <input name(s)>
             outlinePrompt.AppendLine("Do NOT write full prose yet. Just key points, decisions, and items for each section.");
             outlinePrompt.AppendLine("Label each section clearly.");
 
-            var outlineResponse = await _llmService.GenerateAsync(outlinePrompt.ToString(), systemPrompt, 1500, ct);
+            var outlineResponse = await _llmService.GenerateAsync(outlinePrompt.ToString(), systemPrompt, 1500, ct: ct);
             AddReplay(job, "outline", "Outline Generated", "Expanding individual sections...");
 
             // Build shared context block (compact version of inputs for section calls)
@@ -265,11 +265,11 @@ Here are the project inputs:
 Now write ONLY the **{sectionName}** section in full detail. Be thorough and specific.
 Output the section content directly — do NOT repeat the section name as a header.";
 
-        var response = await _llmService.GenerateWithMetadataAsync(prompt, systemPrompt, 1500, ct);
+        var response = await _llmService.GenerateWithMetadataAsync(prompt, systemPrompt, 1500, ct: ct);
         
         // If truncated, retry with more tokens
         if (response.WasTruncated)
-            response = await _llmService.GenerateWithMetadataAsync(prompt, systemPrompt, 3000, ct);
+            response = await _llmService.GenerateWithMetadataAsync(prompt, systemPrompt, 3000, ct: ct);
 
         return (sectionName, response.Text);
     }

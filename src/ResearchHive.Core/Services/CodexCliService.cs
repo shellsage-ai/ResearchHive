@@ -151,10 +151,11 @@ public class CodexCliService
     /// Generate a response using Codex CLI (read-only sandbox, no web search).
     /// Best for: synthesis, summarization, analysis prompts where no external tools needed.
     /// </summary>
-    public async Task<string?> GenerateAsync(string prompt, int? maxTokens = null, CancellationToken ct = default)
+    /// <param name="modelOverride">If set, override the user's model selection for this call (e.g. mini model for routine tasks).</param>
+    public async Task<string?> GenerateAsync(string prompt, int? maxTokens = null, string? modelOverride = null, CancellationToken ct = default)
     {
         return await RunCodexExecAsync(prompt, maxTokens: maxTokens,
-            enableSearch: false, sandbox: "read-only", ct: ct);
+            enableSearch: false, sandbox: "read-only", modelOverride: modelOverride, ct: ct);
     }
 
     /// <summary>
@@ -162,19 +163,21 @@ public class CodexCliService
     /// The Codex model natively decides when to search the web and execute code.
     /// Best for: research tasks that need live web data, grounding, fact-checking.
     /// </summary>
+    /// <param name="modelOverride">If set, override the user's model selection for this call.</param>
     public async Task<string?> GenerateWithToolsAsync(string prompt, int? maxTokens = null,
-        bool enableSearch = true, string sandbox = "read-only", CancellationToken ct = default)
+        bool enableSearch = true, string sandbox = "read-only", string? modelOverride = null, CancellationToken ct = default)
     {
         return await RunCodexExecAsync(prompt, maxTokens: maxTokens,
-            enableSearch: enableSearch, sandbox: sandbox, ct: ct);
+            enableSearch: enableSearch, sandbox: sandbox, modelOverride: modelOverride, ct: ct);
     }
 
     /// <summary>
     /// Generate a structured JSON response conforming to a schema.
     /// The Codex CLI validates the output against the schema.
     /// </summary>
+    /// <param name="modelOverride">If set, override the user's model selection for this call.</param>
     public async Task<string?> GenerateStructuredAsync(string prompt, string jsonSchema,
-        bool enableSearch = true, CancellationToken ct = default)
+        bool enableSearch = true, string? modelOverride = null, CancellationToken ct = default)
     {
         // Write schema to a temp file (Codex CLI reads it from disk)
         var schemaPath = Path.Combine(Path.GetTempPath(), $"codex_schema_{Guid.NewGuid():N}.json");
@@ -183,7 +186,7 @@ public class CodexCliService
             // Write without BOM — Codex requires clean UTF-8
             await File.WriteAllTextAsync(schemaPath, jsonSchema, new UTF8Encoding(false), ct);
             return await RunCodexExecAsync(prompt, enableSearch: enableSearch,
-                sandbox: "read-only", outputSchemaPath: schemaPath, ct: ct);
+                sandbox: "read-only", outputSchemaPath: schemaPath, modelOverride: modelOverride, ct: ct);
         }
         finally
         {
@@ -211,6 +214,7 @@ public class CodexCliService
         bool enableSearch = false,
         string sandbox = "read-only",
         string? outputSchemaPath = null,
+        string? modelOverride = null,
         int timeoutSeconds = 180,
         CancellationToken ct = default)
     {
@@ -238,8 +242,8 @@ public class CodexCliService
         args.Append($" --sandbox {sandbox}");
         args.Append(" --skip-git-repo-check");
 
-        // Model override (only if explicitly set; otherwise Codex uses its default)
-        var model = _settings.PaidProviderModel;
+        // Model override: explicit per-call override > user's PaidProviderModel > Codex CLI default
+        var model = modelOverride ?? _settings.PaidProviderModel;
         if (!string.IsNullOrEmpty(model))
             args.Append($" --model {model}");
 
