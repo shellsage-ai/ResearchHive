@@ -544,4 +544,72 @@ public class ExportServiceTests : IDisposable
         result.Should().NotContain("=====");
         result.Should().NotContain("-------");
     }
+
+    // ─────────────── Bracket-escaping in pipe-table cells ───────────────
+
+    [Fact]
+    public void EscapeTableCellBrackets_EscapesBareVersionBrackets()
+    {
+        var row = "| Perfolizer | [0.3.0,) | src/BDN.csproj |";
+        var result = ExportService.EscapeTableCellBrackets(row);
+        result.Should().Contain("\\[0.3.0,)");
+        result.Should().Contain("Perfolizer");
+    }
+
+    [Fact]
+    public void EscapeTableCellBrackets_SkipsBacktickWrappedCells()
+    {
+        var row = "| Package | `[2.8.0]` | file.csproj |";
+        var result = ExportService.EscapeTableCellBrackets(row);
+        // Cell with backtick should be left as-is
+        result.Should().Contain("`[2.8.0]`");
+    }
+
+    [Fact]
+    public void EscapeTableCellBrackets_DoesNotDoubleEscape()
+    {
+        var row = "| Package | \\[2.8.0\\] | file.csproj |";
+        var result = ExportService.EscapeTableCellBrackets(row);
+        result.Should().NotContain("\\\\[");
+    }
+
+    [Fact]
+    public void FlattenMarkdownNesting_EscapesBracketsInTableRows()
+    {
+        var md = "## Dependencies\n| Package | Version | Manifest |\n|---------|---------|----------|\n| Foo | [2.8.0] | a.csproj |\n| Bar | [5.0.0,) | b.csproj |";
+        var result = ExportService.FlattenMarkdownNesting(md);
+        result.Should().Contain("\\[2.8.0]", "opening bracket in table data rows should be escaped");
+        result.Should().Contain("\\[5.0.0,)", "opening bracket in version range should be escaped");
+        result.Should().Contain("|---------|", "separator rows should NOT be modified");
+    }
+
+    [Fact]
+    public void SafeMarkdownToHtml_BracketVersionTable_DoesNotFallbackToPre()
+    {
+        // Simulate BenchmarkDotNet-style dependency table with NuGet version ranges
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("# Repository Analysis: dotnet/BenchmarkDotNet");
+        sb.AppendLine();
+        sb.AppendLine("## Dependencies");
+        sb.AppendLine("| Package | Version | Manifest |");
+        sb.AppendLine("|---------|---------|----------|");
+        sb.AppendLine("| BenchmarkDotNet.Annotations | [2.8.0] | src/BDN.csproj |");
+        sb.AppendLine("| Perfolizer | [0.3.0,) | src/BDN.csproj |");
+        sb.AppendLine("| Microsoft.Diagnostics.Tracing.TraceEvent | [3.1.8,) | src/BDN.csproj |");
+        sb.AppendLine("| CommandLineParser | [2.9.1] | src/BDN.csproj |");
+        sb.AppendLine("| Iced | [1.17.0] | src/BDN.csproj |");
+        sb.AppendLine("| Microsoft.CodeAnalysis.CSharp | [4.8.0] | src/BDN.csproj |");
+        for (int i = 0; i < 22; i++)
+            sb.AppendLine($"| Package{i} | [1.{i}.0] | src/BDN.csproj |");
+        sb.AppendLine();
+        sb.AppendLine("## Strengths");
+        sb.AppendLine("- ✅ Mature benchmarking framework");
+
+        var pipeline = new Markdig.MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
+        var html = ExportService.SafeMarkdownToHtml(sb.ToString(), pipeline);
+
+        html.Should().NotStartWith("<pre>", "should NOT fall back to <pre> for bracket-laden tables");
+        html.Should().Contain("<table>", "table should be rendered as HTML table");
+        html.Should().Contain("BenchmarkDotNet.Annotations");
+    }
 }

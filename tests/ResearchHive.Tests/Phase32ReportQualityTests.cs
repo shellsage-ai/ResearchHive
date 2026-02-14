@@ -124,6 +124,79 @@ public class Phase32ReportQualityTests
         hints.Where(h => h == "WPF").Should().BeEmpty("bare 'WPF' should be suppressed when 'WPF + MVVM' is present");
     }
 
+    // ─────────────── Fix B: Self-referential complement filter ───────────────
+
+    [Fact]
+    public void NormalizeGitHubUrl_RejectsSelfReferentialUrl()
+    {
+        var self = ComplementResearchService.NormalizeGitHubUrl("https://github.com/dotnet/BenchmarkDotNet");
+        var comp = ComplementResearchService.NormalizeGitHubUrl("https://github.com/dotnet/benchmarkdotnet");
+        self.Should().Be(comp, "URLs should normalize to same value regardless of case");
+    }
+
+    // ─────────────── Fix C: Duplicate header stripping ───────────────
+
+    [Fact]
+    public void StripLeadingHeader_RemovesDuplicateHeader()
+    {
+        var content = "## Unified Vision\n\nThe resulting project combines both...";
+        var result = ProjectFusionEngine.StripLeadingHeader(content);
+        result.Should().Be("The resulting project combines both...");
+    }
+
+    [Fact]
+    public void StripLeadingHeader_PreservesContentWithoutHeader()
+    {
+        var content = "The resulting project combines both...";
+        var result = ProjectFusionEngine.StripLeadingHeader(content);
+        result.Should().Be("The resulting project combines both...");
+    }
+
+    [Fact]
+    public void StripLeadingHeader_HandlesLeadingBlankLines()
+    {
+        var content = "\n\n## Architecture Proposal\n\nLayered structure...";
+        var result = ProjectFusionEngine.StripLeadingHeader(content);
+        result.Should().Be("Layered structure...");
+    }
+
+    [Fact]
+    public void StripLeadingHeader_HandlesEmptyContent()
+    {
+        ProjectFusionEngine.StripLeadingHeader("").Should().Be("");
+        ProjectFusionEngine.StripLeadingHeader(null!).Should().BeNull();
+    }
+
+    // ─────────────── Fix E: Circular fusion gap rejection ───────────────
+
+    [Fact]
+    public void ValidateGapsClosed_RejectsCircularFusionClaims()
+    {
+        var section = "- No CI/CD → resolved by Fusion (combines strengths of both projects)";
+        var profiles = new List<RepoProfile>
+        {
+            CreateProfile("owner", "ProjectA", strengths: new[] { "Testing" })
+        };
+        var result = new FusionVerificationResult();
+        var output = FusionPostVerifier.ValidateGapsClosed(section, profiles, result);
+        result.GapsClosedCorrected.Should().ContainSingle(c => c.Contains("CIRCULAR"));
+        output.Trim().Should().BeEmpty("circular claim should be removed");
+    }
+
+    [Fact]
+    public void ValidateGapsClosed_AllowsLegitimateGapClosures()
+    {
+        var section = "- No CI/CD → resolved by ProjectA's GitHub Actions workflow";
+        var profiles = new List<RepoProfile>
+        {
+            CreateProfile("owner", "ProjectA", strengths: new[] { "GitHub Actions workflow", "CI/CD pipeline" })
+        };
+        var result = new FusionVerificationResult();
+        var output = FusionPostVerifier.ValidateGapsClosed(section, profiles, result);
+        result.GapsClosedCorrected.Should().BeEmpty();
+        output.Should().Contain("GitHub Actions");
+    }
+
     // ─────────────── Helper to create minimal RepoProfile ───────────────
 
     private static RepoProfile CreateProfile(string owner, string name, string[]? strengths = null)

@@ -977,7 +977,12 @@ public class RepoIntelligenceJobRunner
             sb.AppendLine("| Package | Version | Manifest |");
             sb.AppendLine("|---------|---------|----------|");
             foreach (var dep in p.Dependencies.Take(30))
-                sb.AppendLine($"| {dep.Name} | {dep.Version} | {dep.ManifestFile} |");
+            {
+                // Wrap version in backticks to prevent bracket notation like [2.8.0] or [5.0.0,)
+                // from being parsed as markdown link references / footnotes by Markdig.
+                var ver = string.IsNullOrEmpty(dep.Version) ? "" : $"`{dep.Version}`";
+                sb.AppendLine($"| {dep.Name} | {ver} | {dep.ManifestFile} |");
+            }
             if (p.Dependencies.Count > 30)
                 sb.AppendLine($"_...and {p.Dependencies.Count - 30} more_");
             sb.AppendLine();

@@ -43,8 +43,10 @@ public class ExportService
         {
             return Markdig.Markdown.ToHtml(flattened, pipeline);
         }
-        catch
+        catch (Exception ex)
         {
+            // Log for diagnostics — helps identify which markdown constructs cause Markdig failures
+            System.Diagnostics.Debug.WriteLine($"[ExportService] Markdig failed, falling back to <pre>: {ex.GetType().Name}: {ex.Message}");
             // Last resort: render as preformatted, HTML-escaped text
             return $"<pre>{EscapeHtml(markdown)}</pre>";
         }
@@ -99,6 +101,13 @@ public class ExportService
                 }
             }
 
+            // ── Escape orphaned brackets inside pipe-table cells ──
+            // Bracket notation like [2.8.0] or [5.0.0,) inside table cells
+            // can be mis-parsed as link references / footnotes by Markdig's
+            // UseAdvancedExtensions() pipeline, causing exceptions.
+            if (IsPipeTableRow(line))
+                line = EscapeTableCellBrackets(line);
+
             sb.Append(line);
             sb.Append('\n');
         }
@@ -108,6 +117,39 @@ public class ExportService
             sb.Length--;
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Returns true if a line looks like a pipe-table data row (not a separator).
+    /// </summary>
+    private static bool IsPipeTableRow(string line)
+    {
+        var t = line.TrimStart();
+        // Must start with | and contain at least two |
+        if (t.Length < 3 || t[0] != '|') return false;
+        // Separator rows (|---|---| etc.) are not data rows
+        if (Regex.IsMatch(t, @"^\|[\s:|-]+\|\s*$")) return false;
+        return t.IndexOf('|', 1) > 0;
+    }
+
+    /// <summary>
+    /// In pipe-table data cells, escape bare [ that could be mis-parsed as link references.
+    /// Only escapes brackets that are NOT already inside backtick code spans.
+    /// </summary>
+    internal static string EscapeTableCellBrackets(string line)
+    {
+        // Split by | preserving the leading/trailing pipes
+        var parts = line.Split('|');
+        for (int i = 0; i < parts.Length; i++)
+        {
+            var cell = parts[i];
+            // Skip cells that are already code-wrapped (contain backticks)
+            if (cell.Contains('`')) continue;
+            // Escape [ that starts a bracket group like [1.2.3] or [5.0.0,)
+            // but only if not already backslash-escaped
+            parts[i] = Regex.Replace(cell, @"(?<!\\)\[", "\\[");
+        }
+        return string.Join('|', parts);
     }
 
     /// <summary>
@@ -126,7 +168,9 @@ public class ExportService
         {
             var trimmed = lines[i].TrimEnd('\r').Trim();
 
-            // Check if this line is a setext underline (=== or ---)
+            // Check if this line is a setext underline (=== or ---).
+            // Note: a bare "---" is also a thematic break; we only treat it as
+            // a setext H2 underline when there's a preceding header-text line.
             bool isH1Underline = trimmed.Length >= 3 && trimmed.All(c => c == '=');
             bool isH2Underline = trimmed.Length >= 3 && trimmed.All(c => c == '-');
 

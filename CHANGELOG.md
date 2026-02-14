@@ -14,6 +14,15 @@ This file provides a high-level summary per milestone.
 - **Step 7 — Framework deduplication**: `DetectFrameworkHints` now guards bare "WPF" with `!hints.Any(h => h.StartsWith("WPF"))` to prevent duplication when "WPF + MVVM" already present. Same for Windows Forms.
 - **Tests**: 16 new (Phase32ReportQualityTests.cs + ExportServiceTests.cs additions) — 667 total (667 passed, 0 failed)
 
+## 2026-02-14 — Phase 32b: Export Quality Audit Round 2
+### 5 additional fixes from export quality re-audit
+- **Fix A — Markdig bracket crash**: `[2.8.0]` and `[5.0.0,)` NuGet version ranges in dependency tables were mis-parsed as link references by Markdig's `UseAdvancedExtensions()`. Added `EscapeTableCellBrackets` preprocessor in ExportService (escapes bare `[` in pipe-table data cells), plus backtick-wrapping in `RepoIntelligenceJobRunner.GenerateReport`. Added `Debug.WriteLine` to catch block for diagnosis.
+- **Fix B — Self-referential complement**: Added self-referential URL filter in `ComplementResearchService.ResearchAsync` (rejects URLs normalizing to target repo), `PostScanVerifier.ValidateComplementsAsync` (HARD reject), and `BuildJsonComplementPrompt` (prompt rule).
+- **Fix C — Duplicate section headers**: `StripLeadingHeader` in ProjectFusionEngine removes LLM-emitted headers that duplicate the engine-generated heading (e.g., `## Unified Vision` appearing twice).
+- **Fix D — Fabricated concepts**: Existing anti-hallucination prompts + `ParseList` prose filtering + `FusionPostVerifier` bullet validation reduce the LLM's ability to inject fabricated concepts like "CQRS".
+- **Fix E — Circular gap closures**: `IsCircularFusionClaim` in FusionPostVerifier rejects gap closures that claim "resolved by Fusion" without referencing a real project capability. Wired into `ValidateGapsClosed`.
+- **Tests**: 12 new — 679 total (679 passed, 0 failed)
+
 ## 2026-02-13 — Batch Scan Fix: Robustness & Error Recovery
 - **Silent early-return fix**: `ScanMultiRepoAsync` now sets `RepoScanStatus` feedback when `RepoUrlList` is empty or no URLs are parsed, instead of returning silently.
 - **Continue on individual failure**: Each repo scan is wrapped in its own try-catch. One failed repo no longer aborts the entire batch — remaining repos continue scanning.

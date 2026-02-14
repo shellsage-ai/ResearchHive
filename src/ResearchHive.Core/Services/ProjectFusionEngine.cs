@@ -941,26 +941,26 @@ RULES:
         if (!string.IsNullOrWhiteSpace(a.ProjectIdentities))
         {
             sb.AppendLine("## Project Identities");
-            sb.AppendLine(a.ProjectIdentities);
+            sb.AppendLine(StripLeadingHeader(a.ProjectIdentities));
             sb.AppendLine();
         }
 
         // Vision / Comparison Summary
         var visionHeading = a.Goal == ProjectFusionGoal.Compare ? "Comparison Overview" : "Unified Vision";
         sb.AppendLine($"## {visionHeading}");
-        sb.AppendLine(a.UnifiedVision);
+        sb.AppendLine(StripLeadingHeader(a.UnifiedVision));
         sb.AppendLine();
 
         // Architecture
         var archHeading = a.Goal == ProjectFusionGoal.Compare ? "Architecture Comparison" : "Architecture Proposal";
         sb.AppendLine($"## {archHeading}");
-        sb.AppendLine(a.ArchitectureProposal);
+        sb.AppendLine(StripLeadingHeader(a.ArchitectureProposal));
         sb.AppendLine();
 
         // Tech Stack
         var techHeading = a.Goal == ProjectFusionGoal.Compare ? "Technology Comparison" : "Tech Stack Decisions";
         sb.AppendLine($"## {techHeading}");
-        sb.AppendLine(a.TechStackDecisions);
+        sb.AppendLine(StripLeadingHeader(a.TechStackDecisions));
         sb.AppendLine();
 
         // Feature Matrix
@@ -1034,5 +1034,34 @@ RULES:
             Order = job.ReplayEntries.Count + 1,
             Title = title, Description = description, EntryType = type
         });
+    }
+
+    /// <summary>
+    /// Strip a leading markdown header from section content that duplicates
+    /// the heading already emitted by GenerateReport (e.g., LLM emits
+    /// "## Unified Vision" when the caller already wrote "## Unified Vision").
+    /// </summary>
+    internal static string StripLeadingHeader(string sectionContent)
+    {
+        if (string.IsNullOrWhiteSpace(sectionContent))
+            return sectionContent;
+
+        var lines = sectionContent.Split('\n');
+        int start = 0;
+
+        // Skip any leading blank lines
+        while (start < lines.Length && string.IsNullOrWhiteSpace(lines[start]))
+            start++;
+
+        // If the first non-blank line is a header (starts with #), remove it
+        if (start < lines.Length && lines[start].TrimStart().StartsWith('#'))
+        {
+            start++;
+            // Also skip a blank line immediately after the removed header
+            if (start < lines.Length && string.IsNullOrWhiteSpace(lines[start]))
+                start++;
+        }
+
+        return string.Join('\n', lines.Skip(start));
     }
 }

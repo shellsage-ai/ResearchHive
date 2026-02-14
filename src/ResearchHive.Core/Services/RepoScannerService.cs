@@ -1649,6 +1649,7 @@ public class RepoScannerService
 }");
         sb.AppendLine();
         sb.AppendLine("RULES:");
+        sb.AppendLine($"- Do NOT suggest the target project itself ({profile.Owner}/{profile.Name}). It cannot be its own complement.");
         sb.AppendLine("- Pick the BEST option per topic. If multiple topics yield the same project, pick alternatives.");
         sb.AppendLine("- Ensure category diversity — do NOT suggest multiple projects in the same category.");
         sb.AppendLine("- Derive project names from URL paths (github.com/owner/repo → repo).");

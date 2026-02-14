@@ -132,7 +132,9 @@ public class ComplementResearchService
         var enrichedResults = (await Task.WhenAll(enrichTasks)).ToList();
         LastEnrichCallCount = enrichedResults.Sum(r => r.entries.Count);
 
-        // Dedup URLs across topics — keep first occurrence only
+        // Dedup URLs across topics — keep first occurrence only;
+        // also reject self-referential URLs that match the target repo
+        var selfUrl = NormalizeGitHubUrl(profile.RepoUrl);
         var dedupedResults = new List<(string topic, List<(string url, string desc)> entries)>();
         foreach (var (topic, entries) in enrichedResults)
         {
@@ -140,6 +142,9 @@ public class ComplementResearchService
             foreach (var (url, desc) in entries)
             {
                 var normalizedUrl = NormalizeGitHubUrl(url);
+                // Reject self-referential: complement URL matches target repo
+                if (normalizedUrl.Equals(selfUrl, StringComparison.OrdinalIgnoreCase))
+                    continue;
                 if (seenUrls.Add(normalizedUrl))
                     uniqueEntries.Add((url, desc));
             }

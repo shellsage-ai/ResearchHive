@@ -327,6 +327,14 @@ public class FusionPostVerifier
             // a resolving project/capability, verify it exists in that project's vocabulary
             var bulletContent = trimmed.TrimStart('-', '*', '•', ' ');
 
+            // Reject circular claims like "resolved by Fusion" that don't reference a real project
+            if (IsCircularFusionClaim(bulletContent))
+            {
+                result.GapsClosedCorrected.Add(
+                    $"CIRCULAR: Claims resolution via 'Fusion' without referencing a real project capability: {bulletContent}");
+                continue; // Drop this line
+            }
+
             // Try to extract "resolved by <project>/<capability>" or "→ resolved by" patterns
             var arrowMatch = Regex.Match(bulletContent, @"→\s*(?:resolved\s+by\s+)?(.+)", RegexOptions.IgnoreCase);
             if (arrowMatch.Success)
@@ -369,6 +377,21 @@ public class FusionPostVerifier
         }
 
         return string.Join('\n', validLines);
+    }
+
+    /// <summary>Reject gap closures that claim "resolved by Fusion" without referencing a real project capability.</summary>
+    private static bool IsCircularFusionClaim(string bulletContent)
+    {
+        var lower = bulletContent.ToLowerInvariant();
+        // Detect patterns like "resolved by Fusion", "resolved by the fusion", "combination of both"
+        return (lower.Contains("resolved by fusion") ||
+                lower.Contains("resolved by the fusion") ||
+                lower.Contains("resolved by combining") ||
+                lower.Contains("combination of both") ||
+                lower.Contains("fusion provides") ||
+                lower.Contains("fusion of")) &&
+               // Exception: if it also references a concrete project, allow it
+               !Regex.IsMatch(lower, @"resolved by .+?('s|/)");
     }
 
     /// <summary>Simple overlap: check if any 3+ char word from the gap appears in the capability.</summary>

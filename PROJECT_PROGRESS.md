@@ -1,11 +1,11 @@
 # ResearchHive — Project Progress
 
 ## Status
-- Current milestone: All milestones (1-9) + Phases 10-32 complete
+- Current milestone: All milestones (1-9) + Phases 10-32b complete
 - Build status: ✅ PASSING (0 errors)
-- Test baseline: 667 total — 667 passed, 0 failures
+- Test baseline: 679 total — 679 passed, 0 failures
 - Services: 45 DI registrations (39 unique concrete services incl. interfaces + App.xaml.cs)
-- Last verified: Full test suite green (Phase 32 — Report Export Quality)
+- Last verified: Full test suite green (Phase 32b — Export Quality Audit Round 2)
 
 ## Build / Run Commands
 ```

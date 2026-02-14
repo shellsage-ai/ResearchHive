@@ -327,6 +327,15 @@ public class PostScanVerifier
 
         foreach (var comp in profile.ComplementSuggestions)
         {
+            // ── Self-referential check ── (hard reject — the target project itself)
+            var compNorm = ComplementResearchService.NormalizeGitHubUrl(comp.Url);
+            var selfNorm = ComplementResearchService.NormalizeGitHubUrl(profile.RepoUrl);
+            if (compNorm.Equals(selfNorm, StringComparison.OrdinalIgnoreCase))
+            {
+                toRemove.Add((comp, $"SELF-REFERENTIAL: \"{comp.Name}\" is the target project itself", "HARD"));
+                continue;
+            }
+
             // ── Ecosystem check ── (hard reject — never backfill)
             if (!IsEcosystemCompatible(comp, factSheet))
             {
