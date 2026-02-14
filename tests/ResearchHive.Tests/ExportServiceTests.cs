@@ -477,4 +477,71 @@ public class ExportServiceTests : IDisposable
         var html = await File.ReadAllTextAsync(reportFiles[0]);
         html.Should().Contain("Analysis Report");
     }
+
+    // ─────────────── Phase 32 — ConvertSetextToAtx tests ───────────────
+
+    [Fact]
+    public void ConvertSetextToAtx_ConvertsH1_SetextToAtx()
+    {
+        var input = "My Title\n========";
+        var result = ExportService.ConvertSetextToAtx(input);
+        result.Should().Be("# My Title");
+    }
+
+    [Fact]
+    public void ConvertSetextToAtx_ConvertsH2_SetextToAtx()
+    {
+        var input = "Some text before\n\nSubtitle\n--------\n\nParagraph after";
+        var result = ExportService.ConvertSetextToAtx(input);
+        result.Should().Contain("## Subtitle");
+        result.Should().NotContain("--------");
+        result.Should().Contain("Some text before");
+        result.Should().Contain("Paragraph after");
+    }
+
+    [Fact]
+    public void ConvertSetextToAtx_RemovesOrphanedSeparators()
+    {
+        // === with no preceding text should be removed
+        var input = "Hello\n\n=========\n\nWorld";
+        var result = ExportService.ConvertSetextToAtx(input);
+        result.Should().NotContain("===");
+        result.Should().Contain("Hello");
+        result.Should().Contain("World");
+    }
+
+    [Fact]
+    public void ConvertSetextToAtx_PreservesNormalContent()
+    {
+        var input = "Regular paragraph\nwith continuation\n\n- list item";
+        var result = ExportService.ConvertSetextToAtx(input);
+        result.Should().Be(input);
+    }
+
+    [Fact]
+    public void ConvertSetextToAtx_HandlesNullAndEmpty()
+    {
+        ExportService.ConvertSetextToAtx(null!).Should().BeNull();
+        ExportService.ConvertSetextToAtx("").Should().Be("");
+    }
+
+    [Fact]
+    public void ConvertSetextToAtx_DoesNotConvertListItemUnderlines()
+    {
+        // A --- line preceded by a list item should be treated as orphaned, not a header
+        var input = "- First item\n---\n- Second item";
+        var result = ExportService.ConvertSetextToAtx(input);
+        result.Should().NotContain("## ");
+    }
+
+    [Fact]
+    public void FlattenMarkdownNesting_IntegratesSetextConversion()
+    {
+        var input = "Title\n=====\n\nSome content\n\nSection\n-------\n\nMore text";
+        var result = ExportService.FlattenMarkdownNesting(input);
+        result.Should().Contain("# Title");
+        result.Should().Contain("## Section");
+        result.Should().NotContain("=====");
+        result.Should().NotContain("-------");
+    }
 }

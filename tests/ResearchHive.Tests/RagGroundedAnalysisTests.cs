@@ -537,7 +537,8 @@ research workflows with full citation tracking, safety awareness, and IP analysi
         hints.Should().Contain("SQLite");
         hints.Should().Contain("Playwright (browser automation)");
         hints.Should().Contain(".NET 8");
-        hints.Should().Contain("WPF");
+        // Bare "WPF" is suppressed when "WPF + MVVM" already covers it (Phase 32 dedup)
+        hints.Where(h => h == "WPF").Should().BeEmpty("bare 'WPF' should be suppressed when 'WPF + MVVM' is present");
         hints.Should().Contain("Windows-specific (WPF/WinForms)");
     }
 

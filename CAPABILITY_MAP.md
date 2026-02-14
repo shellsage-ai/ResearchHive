@@ -4,7 +4,7 @@
 > This file is the single source of truth for "what exists, where, and why."
 >
 > **Maintenance rule**: Updated after every implementation step per `agents/orchestrator.agent.md` enforcement rules.
-> **Last verified**: 2026-02-13 — 651 tests (651 passed, 0 failed), 0 build errors. Batch scan fix (post-Phase 31).
+> **Last verified**: 2026-02-14 — 667 tests (667 passed, 0 failed), 0 build errors. Phase 32 — Report Export Quality.
 
 ---
 
@@ -695,6 +695,7 @@ tests/
 
 | Date | Change | Files |
 |------|--------|-------|
+| 2026-02-14 | Phase 32: Report Export Quality — 7-step fix: (1) GitHub API logging (ILogger in RepoScannerService, 403/401/general error logging with rate-limit hints), (2) Setext→ATX conversion (ConvertSetextToAtx preprocessor + prompt rule), (3) Projected Capabilities bullet-only (prompt + ParseList prose filter), (4) Gaps Closed logical connection (prompt + FusionPostVerifier bullet validation), (5) Strength coverage increase (5→10-15), (6) Complement description guard, (7) Framework dedup (WPF/WinForms StartsWith guard). 16 new tests. | RepoScannerService.cs, ExportService.cs, ProjectFusionEngine.cs, FusionPostVerifier.cs, Phase32ReportQualityTests.cs (NEW), ExportServiceTests.cs, RagGroundedAnalysisTests.cs |
 | 2026-02-13 | Phase 31: Anti-hallucination hardening — 6-step implementation: (1) strength grounding in PostScanVerifier (GroundStrengthDescriptions, DeflateDescription, FindMatchingCapability, OverstatementPatterns), (2) scan self-validation LLM pass (SelfValidateStrengthsAsync), (3) FusionPostVerifier (5 validators: tech stack, features, gaps, provenance, prose), (4) wired into DI + ProjectFusionEngine, (5) cross-section consistency (BuildConsistencyContext, priorSectionContext, tightened UNIFIED_VISION/ARCHITECTURE guidance), (6) prompt precision rules. Bug fix: ValidateFeatureMatrix table parsing order. 35 new tests. | PostScanVerifier.cs, RepoIntelligenceJobRunner.cs, FusionPostVerifier.cs (NEW), ProjectFusionEngine.cs, ServiceRegistration.cs, RepoScannerService.cs, Phase31VerifierTests.cs (NEW) |
 | 2026-02-13 | Export depth-limit fix — SafeMarkdownToHtml + FlattenMarkdownNesting wraps all 3 Markdig.Markdown.ToHtml() calls; pre-flattens 4+ level nesting | ExportService.cs |
 | 2026-02-13 | Phase 30: Scan identity confusion fix — 8-step: wipe stale profiles, source-ID filter on RAG, identity context in analysis/gap/CodeBook prompts, anti-confusion system prompt, AnalysisSummary + InfrastructureStrengths fields | RepoIntelligenceJobRunner.cs, RepoScannerService.cs, CodeBookGenerator.cs, DomainModels.cs |

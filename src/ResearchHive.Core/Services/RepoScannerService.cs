@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using ResearchHive.Core.Configuration;
 using ResearchHive.Core.Models;
 using System.Net.Http.Headers;
@@ -15,14 +16,19 @@ public class RepoScannerService
     private readonly HttpClient _http;
     private readonly LlmService _llmService;
     private readonly AppSettings _settings;
+    private readonly ILogger? _logger;
 
     /// <summary>Number of GitHub API calls made during the last ScanAsync invocation.</summary>
     public int LastScanApiCallCount { get; private set; }
 
-    public RepoScannerService(AppSettings settings, LlmService llmService)
+    /// <summary>Last HTTP failure status from FetchJsonAsync (0 = no failure).</summary>
+    public int LastHttpFailureStatus { get; private set; }
+
+    public RepoScannerService(AppSettings settings, LlmService llmService, ILogger<RepoScannerService>? logger = null)
     {
         _settings = settings;
         _llmService = llmService;
+        _logger = logger;
         _http = new HttpClient();
         _http.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("ResearchHive", "1.0"));
         if (!string.IsNullOrEmpty(settings.GitHubPat))
@@ -841,7 +847,7 @@ public class RepoScannerService
         sb.AppendLine("## Strengths");
         sb.AppendLine("- strength1");
         sb.AppendLine("- strength2");
-        sb.AppendLine("(list at least 5 specific strengths based on what the code actually implements)");
+        sb.AppendLine("(list at least 10-15 specific strengths covering all major subsystems — DI, data layer, search, UI, export, domain logic, safety, etc. If the project has 20+ services, aim for at least one strength per major service category.)");
         sb.AppendLine("## Gaps");
         sb.AppendLine("- gap1");
         sb.AppendLine("- gap2");
@@ -1072,8 +1078,13 @@ public class RepoScannerService
 
                 if (tf.Contains("-windows")) hints.Add("Windows-specific (WPF/WinForms)");
             }
-            if (content.Contains("<UseWPF>true</UseWPF>", StringComparison.OrdinalIgnoreCase)) hints.Add("WPF");
-            if (content.Contains("<UseWindowsForms>true</UseWindowsForms>", StringComparison.OrdinalIgnoreCase)) hints.Add("Windows Forms");
+            if (content.Contains("<UseWPF>true</UseWPF>", StringComparison.OrdinalIgnoreCase)
+                && !hints.Any(h => h.StartsWith("WPF", StringComparison.OrdinalIgnoreCase)))
+                hints.Add("WPF");
+            if (content.Contains("<UseWindowsForms>true</UseWindowsForms>", StringComparison.OrdinalIgnoreCase)
+                && !hints.Any(h => h.Contains("Windows Forms", StringComparison.OrdinalIgnoreCase))
+                && !hints.Any(h => h.Contains("WinForms", StringComparison.OrdinalIgnoreCase)))
+                hints.Add("Windows Forms");
         }
 
         return hints.ToList();
@@ -1085,11 +1096,39 @@ public class RepoScannerService
         {
             LastScanApiCallCount++;
             var resp = await _http.GetAsync(url, ct);
-            if (!resp.IsSuccessStatusCode) return null;
+            if (!resp.IsSuccessStatusCode)
+            {
+                LastHttpFailureStatus = (int)resp.StatusCode;
+                var remaining = resp.Headers.Contains("X-RateLimit-Remaining")
+                    ? resp.Headers.GetValues("X-RateLimit-Remaining").FirstOrDefault() : null;
+                if ((int)resp.StatusCode == 403)
+                {
+                    var hint = string.IsNullOrEmpty(_settings.GitHubPat)
+                        ? " Set GitHubPat in settings to increase the rate limit."
+                        : "";
+                    _logger?.LogWarning("GitHub API rate-limited (403) for {Url}. Remaining: {Remaining}.{Hint}",
+                        url, remaining ?? "unknown", hint);
+                }
+                else if ((int)resp.StatusCode == 401)
+                {
+                    _logger?.LogWarning("GitHub API auth failed (401) for {Url}. The GitHubPat may be invalid or expired.", url);
+                }
+                else
+                {
+                    _logger?.LogWarning("GitHub API returned {Status} for {Url}. Remaining: {Remaining}",
+                        (int)resp.StatusCode, url, remaining ?? "unknown");
+                }
+                return null;
+            }
+            LastHttpFailureStatus = 0;
             var json = await resp.Content.ReadAsStringAsync(ct);
             return JsonDocument.Parse(json).RootElement.Clone();
         }
-        catch { return null; }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "GitHub API request failed for {Url}", url);
+            return null;
+        }
     }
 
     private async Task<List<JsonElement>?> FetchJsonArrayAsync(string url, CancellationToken ct)
@@ -1617,6 +1656,7 @@ public class RepoScannerService
         sb.AppendLine("- Do NOT suggest basic documentation repos (e.g., dotnet/docs) — suggest TOOLS, not reference material.");
         sb.AppendLine("- Do NOT suggest technologies the project explicitly chose NOT to use (check Database above).");
         sb.AppendLine("- Prefer projects that extend the project's DOMAIN capabilities over generic infrastructure.");
+        sb.AppendLine("- Use ONLY the descriptions provided alongside each URL for the 'purpose' field. If no description was provided for a URL, set purpose to 'Description not available' — do NOT guess or infer what a project does from its name or URL.");
         sb.AppendLine("- Return ONLY valid JSON, no additional text.");
 
         return sb.ToString();

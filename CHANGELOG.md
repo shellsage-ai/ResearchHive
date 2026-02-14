@@ -3,6 +3,17 @@
 All changes are tracked in `CAPABILITY_MAP.md` (Change Log section) for granular file-level detail.
 This file provides a high-level summary per milestone.
 
+## 2026-02-14 — Phase 32: Report Export Quality
+### 7-Step fix for issues discovered during export quality audit
+- **Step 1 — GitHub API logging**: `FetchJsonAsync` in RepoScannerService now logs 403 (rate-limit with `GitHubPat` hint), 401 (bad token), and general failures with `X-RateLimit-Remaining` header. `ILogger<RepoScannerService>` injected via optional constructor parameter. `LastHttpFailureStatus` property tracks last failure code.
+- **Step 2 — Setext header cleanup**: `ConvertSetextToAtx` preprocessor in ExportService converts setext-style headers (`===`/`---` underlines) to ATX-style (`#`/`##`). Orphaned separator lines removed. Prompt rule added in ProjectFusionEngine to prefer ATX headers.
+- **Step 3 — Projected Capabilities bullet-only**: Prompt rules in `BuildSectionInstructions` and `GetSectionGuidance` now enforce "Output ONLY bullet points — no prose between items." `ParseList` rewritten to filter out non-bullet prose lines (keeps only `-`, `*`, `•`, or numbered items).
+- **Step 4 — Gaps Closed logical connection**: Prompt instructions require resolutions to be "logically connected — the resolving capability must DIRECTLY address the gap domain." `FusionPostVerifier.ValidateGapsClosed` now validates bullet items with `→` arrows against profile capabilities, flagging fabricated or unverifiable claims.
+- **Step 5 — Strength coverage increase**: RepoScannerService prompt now requests "at least 10-15 specific strengths covering all major subsystems" (up from 5).
+- **Step 6 — Complement hallucination guard**: Complement prompt now requires "Use ONLY the descriptions provided alongside each URL. If no description was provided, set purpose to 'Description not available'."
+- **Step 7 — Framework deduplication**: `DetectFrameworkHints` now guards bare "WPF" with `!hints.Any(h => h.StartsWith("WPF"))` to prevent duplication when "WPF + MVVM" already present. Same for Windows Forms.
+- **Tests**: 16 new (Phase32ReportQualityTests.cs + ExportServiceTests.cs additions) — 667 total (667 passed, 0 failed)
+
 ## 2026-02-13 — Batch Scan Fix: Robustness & Error Recovery
 - **Silent early-return fix**: `ScanMultiRepoAsync` now sets `RepoScanStatus` feedback when `RepoUrlList` is empty or no URLs are parsed, instead of returning silently.
 - **Continue on individual failure**: Each repo scan is wrapped in its own try-catch. One failed repo no longer aborts the entire batch — remaining repos continue scanning.

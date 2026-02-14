@@ -1,6 +1,7 @@
 using ResearchHive.Core.Models;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace ResearchHive.Core.Services;
 
@@ -431,7 +432,8 @@ For Compare mode, note which project(s) have each feature.");
             sb.AppendLine(@"PROJECTED_CAPABILITIES:
 For each project, list what it would be capable of if combined with the other's strengths.
 Format: - <capability description> (enabled by combining <Project A feature> + <Project B feature>)
-Focus on NEW capabilities that neither project has alone but would emerge from combining them.");
+Focus on NEW capabilities that neither project has alone but would emerge from combining them.
+Output ONLY bullet points, one per line. No introductory prose, no explanatory paragraphs, no commentary between items.");
         }
         else
         {
@@ -442,7 +444,8 @@ Include BOTH:
 2. Emergent capabilities — NEW things the fused project could do that neither input could do alone.
 Format each as: - <capability description> (from <source> OR enabled by combining <A> + <B>)
 Be specific and practical — describe what a user or developer could actually DO with the fused project.
-List at least 8-12 capabilities.");
+List at least 8-12 capabilities.
+Output ONLY bullet points, one per line. No introductory prose, no explanatory paragraphs, no commentary between items.");
         }
         sb.AppendLine();
 
@@ -458,7 +461,8 @@ Format: - **<Project>** fills gap: <description>");
             sb.AppendLine(@"GAPS_CLOSED:
 List specific gaps from the original projects that this fusion resolves.
 Each item must reference which project HAD the gap and how the other project fills it.
-Format: - <gap from Project A> → resolved by <capability from Project B>");
+Format: - <gap from Project A> → resolved by <capability from Project B>
+Each resolution must be LOGICALLY CONNECTED — the resolving capability must DIRECTLY address the gap domain. Do not pair unrelated gaps with unrelated capabilities.");
         }
         sb.AppendLine();
 
@@ -537,7 +541,8 @@ RULES:
 - If you are unsure whether a technology is used, do NOT mention it.
 - Do NOT attribute one project's features to the other project. Refer to the identity reminder above.
 - Be specific and concrete. No filler or generic statements.
-- Use **bold** for key terms, markdown tables where comparing items, bullet points for lists.";
+- Use **bold** for key terms, markdown tables where comparing items, bullet points for lists.
+- Use ATX-style headers ONLY (## Header). Do NOT use setext-style headers (text followed by === or ---). Do NOT output decorative separator lines of = or - characters.";
 
         var response = await _llmService.GenerateWithMetadataAsync(prompt, systemPrompt, 1500, ct: ct);
 
@@ -620,16 +625,16 @@ RULES:
             "List ALL significant features in the EXACT format: FEATURE: <name> | SOURCE: <project(s)>. One per line. Include features from EVERY input project.",
 
         "PROJECTED_CAPABILITIES" when goal == ProjectFusionGoal.Compare =>
-            "List what each project could do if combined with the other's strengths. Focus on emergent capabilities neither has alone.",
+            "List what each project could do if combined with the other's strengths. Focus on emergent capabilities neither has alone. Output a clean bullet list ONLY — no prose or commentary between items.",
 
         "PROJECTED_CAPABILITIES" =>
-            "List 8-12 concrete capabilities the fused project would have. Include inherited capabilities (carried from inputs) AND emergent ones (new from combining). Be specific — describe what a user could actually DO.",
+            "List 8-12 concrete capabilities the fused project would have. Include inherited capabilities (carried from inputs) AND emergent ones (new from combining). Be specific — describe what a user could actually DO. Output a clean bullet list ONLY — no prose or commentary between items.",
 
         "GAPS_CLOSED" when goal == ProjectFusionGoal.Compare =>
             "For each project, list strengths it has that the other lacks. Format: **<Project>** fills gap: <description>.",
 
         "GAPS_CLOSED" =>
-            "List gaps from original projects resolved by fusion. Reference which project HAD the gap and which provides the fix. Be specific to the input data.",
+            "List gaps from original projects resolved by fusion. Reference which project HAD the gap and which provides the fix. Each resolution must be logically connected — the resolving capability must directly address the gap domain. Be specific to the input data.",
 
         "NEW_GAPS" when goal == ProjectFusionGoal.Compare =>
             "List gaps BOTH projects share and areas where combining them would cause friction.",
@@ -882,14 +887,24 @@ RULES:
         return result;
     }
 
-    private static List<string> ParseList(string text)
+    internal static List<string> ParseList(string text)
     {
         var items = new List<string>();
         foreach (var line in text.Split('\n', StringSplitOptions.RemoveEmptyEntries))
         {
-            var trimmed = line.Trim().TrimStart('-', '*', '•', ' ');
-            if (!string.IsNullOrWhiteSpace(trimmed))
-                items.Add(trimmed);
+            var trimmed = line.Trim();
+
+            // Only keep lines that start with a bullet marker or numbered list
+            if (!trimmed.StartsWith('-') && !trimmed.StartsWith('*') &&
+                !trimmed.StartsWith('•') && !Regex.IsMatch(trimmed, @"^\d+[.)]"))
+                continue; // Skip prose / commentary lines
+
+            var content = trimmed.TrimStart('-', '*', '•', ' ');
+            // For numbered items, strip the leading "1. " or "1) "
+            content = Regex.Replace(content, @"^\d+[.)]\s*", "");
+
+            if (!string.IsNullOrWhiteSpace(content))
+                items.Add(content);
         }
         return items;
     }

@@ -59,6 +59,9 @@ public class ExportService
         if (string.IsNullOrEmpty(markdown))
             return markdown;
 
+        // ── Phase 1: Convert setext-style headers to ATX and remove orphaned separator lines ──
+        markdown = ConvertSetextToAtx(markdown);
+
         var sb = new StringBuilder(markdown.Length);
         foreach (var rawLine in markdown.Split('\n'))
         {
@@ -105,6 +108,66 @@ public class ExportService
             sb.Length--;
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Convert setext-style headers (underlines of === or ---) to ATX-style (# / ##).
+    /// Also removes orphaned separator lines that have no preceding header text.
+    /// </summary>
+    internal static string ConvertSetextToAtx(string markdown)
+    {
+        if (string.IsNullOrEmpty(markdown))
+            return markdown;
+
+        var lines = markdown.Split('\n');
+        var result = new List<string>(lines.Length);
+
+        for (int i = 0; i < lines.Length; i++)
+        {
+            var trimmed = lines[i].TrimEnd('\r').Trim();
+
+            // Check if this line is a setext underline (=== or ---)
+            bool isH1Underline = trimmed.Length >= 3 && trimmed.All(c => c == '=');
+            bool isH2Underline = trimmed.Length >= 3 && trimmed.All(c => c == '-');
+
+            if (isH1Underline || isH2Underline)
+            {
+                // Look back for preceding non-empty text line (allow at most 1 blank line gap)
+                string? headerText = null;
+                int headerIdx = -1;
+
+                for (int back = result.Count - 1; back >= Math.Max(0, result.Count - 2); back--)
+                {
+                    var candidate = result[back].Trim();
+                    if (!string.IsNullOrWhiteSpace(candidate))
+                    {
+                        // Must not itself look like a list item, blockquote, or header
+                        if (!candidate.StartsWith('#') && !candidate.StartsWith('>') &&
+                            !candidate.StartsWith('-') && !candidate.StartsWith('*') &&
+                            !Regex.IsMatch(candidate, @"^\d+[.)]"))
+                        {
+                            headerText = candidate;
+                            headerIdx = back;
+                        }
+                        break;
+                    }
+                }
+
+                if (headerText != null && headerIdx >= 0)
+                {
+                    // Replace the text line with ATX header and skip the underline
+                    var prefix = isH1Underline ? "# " : "## ";
+                    result[headerIdx] = prefix + headerText;
+                    // Don't add the underline line
+                }
+                // else: orphaned separator — drop it entirely
+                continue;
+            }
+
+            result.Add(lines[i].TrimEnd('\r'));
+        }
+
+        return string.Join('\n', result);
     }
 
     public string ExportSessionToZip(string sessionId, string outputPath)

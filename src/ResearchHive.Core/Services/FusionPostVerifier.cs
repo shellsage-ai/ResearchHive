@@ -324,8 +324,48 @@ public class FusionPostVerifier
             }
 
             // For bullet-point items, do a lightweight check: if the line mentions
-            // a specific project's capability, verify that project has it
+            // a resolving project/capability, verify it exists in that project's vocabulary
+            var bulletContent = trimmed.TrimStart('-', '*', '•', ' ');
+
+            // Try to extract "resolved by <project>/<capability>" or "→ resolved by" patterns
+            var arrowMatch = Regex.Match(bulletContent, @"→\s*(?:resolved\s+by\s+)?(.+)", RegexOptions.IgnoreCase);
+            if (arrowMatch.Success)
+            {
+                var resolutionText = arrowMatch.Groups[1].Value.Trim().ToLowerInvariant();
+                // Try to find which profile this resolution references
+                bool anyProfileMatches = false;
+                foreach (var p in profiles)
+                {
+                    var nameLower = p.Name.ToLowerInvariant();
+                    var fullName = $"{p.Owner}/{p.Name}".ToLowerInvariant();
+                    if (resolutionText.Contains(nameLower) || resolutionText.Contains(fullName))
+                    {
+                        // Verify the claimed capability exists
+                        bool hasCapability = p.Strengths
+                            .Concat(p.InfrastructureStrengths)
+                            .Concat(p.CoreCapabilities)
+                            .Any(s => FeatureOverlapSimple(resolutionText, s.ToLowerInvariant()));
+                        if (!hasCapability)
+                        {
+                            result.GapsClosedCorrected.Add(
+                                $"FABRICATED: Bullet claims resolution via '{p.Owner}/{p.Name}' but no matching capability: {bulletContent}");
+                            goto nextLine; // Skip this line
+                        }
+                        anyProfileMatches = true;
+                        break;
+                    }
+                }
+                // If no profile matched at all, it might be hallucinated
+                if (!anyProfileMatches && profiles.Count > 0)
+                {
+                    result.GapsClosedCorrected.Add(
+                        $"UNVERIFIABLE: Bullet references unknown project: {bulletContent}");
+                    goto nextLine;
+                }
+            }
+
             validLines.Add(line);
+            nextLine:;
         }
 
         return string.Join('\n', validLines);
