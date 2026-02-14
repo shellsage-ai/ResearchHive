@@ -14,13 +14,14 @@ Build a Windows-native, agentic research assistant that:
 "Give it a research goal, let it run, then open a readable report with receipts you can click."
 
 ## Scale
-- **42 DI registrations** (38 unique concrete services) across LLM routing, web search, evidence capture, indexing, retrieval, domain runners, repo intelligence, global memory, deterministic verification, and GitHub discovery
+- **45 DI registrations** (39 unique concrete services) across LLM routing, web search, evidence capture, indexing, retrieval, domain runners, repo intelligence, global memory, deterministic verification, fusion post-verification, and GitHub discovery
 - **22 UI tabs** in the session workspace, visibility filtered by 7 domain packs
 - **3 SQLite databases**: per-session (20 tables), global registry, global Hive Mind (FTS5-indexed)
 - **8 cloud LLM providers** + local Ollama with configurable routing strategies + model tiering (Default/Mini/Full) + LLM circuit breaker
 - **7-layer deterministic fact sheet pipeline** for zero-hallucination repo scans
 - **4-layer anti-hallucination pipeline** for complement research filtering
-- **597 tests** (xUnit + FluentAssertions + Moq) — 597 passed, 2 skipped, 0 failures
+- **6-step factual accuracy hardening** for scan outputs (strength grounding, self-validation, prompt precision) and fusion outputs (FusionPostVerifier with 5 validators, cross-section consistency)
+- **639 tests** (xUnit + FluentAssertions + Moq) — 639 passed, 0 failures
 
 ## Principles
 - Evidence over vibes

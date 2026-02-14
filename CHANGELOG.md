@@ -3,6 +3,62 @@
 All changes are tracked in `CAPABILITY_MAP.md` (Change Log section) for granular file-level detail.
 This file provides a high-level summary per milestone.
 
+## 2026-02-13 — Phase 31: Anti-Hallucination & Factual Accuracy Hardening
+### 6-Step Pipeline to Reduce LLM Hallucination in Scan and Fusion Outputs
+- **Step 1 — Strength grounding (PostScanVerifier)**: `GroundStrengthDescriptions` matches overstatement patterns ("parallel RAG", "retry logic", "structured logging", etc.) against fact sheet evidence. `DeflateDescription` removes vague adjectives (robust, comprehensive, powerful, advanced, sophisticated, seamless). `FindMatchingCapability` uses keyword-overlap matching to replace inflated claims with verified capability descriptions.
+- **Step 2 — Scan self-validation LLM pass**: `SelfValidateStrengthsAsync` in RepoIntelligenceJobRunner cross-checks strengths vs fact sheet via Mini-tier LLM call. Parses ORIGINAL/CORRECTED pairs and applies inline corrections.
+- **Step 3 — FusionPostVerifier** (new file, ~505 lines): 5 validators for fusion output — `ValidateTechStackTable` (removes fabricated tech rows), `ValidateFeatureMatrix` (re-attributes misattributed features), `ValidateGapsClosed` (removes fabricated gap closures), `ValidateProvenance` (removes orphaned entries), `ValidateProseAsync` (LLM fact-checks UNIFIED_VISION and ARCHITECTURE).
+- **Step 4 — Wire FusionPostVerifier**: Registered in DI (ServiceRegistration.cs), injected into ProjectFusionEngine, runs after section expansion with replay logging.
+- **Step 5 — Cross-section consistency**: `BuildConsistencyContext` extracts identity/tech/feature decisions from batch 1 sections, passes `priorSectionContext` into later expansion batches. Tightened `UNIFIED_VISION` guidance (require source attribution per capability) and `ARCHITECTURE` guidance (every component must trace to a real class).
+- **Step 6 — Prompt tightening**: `AppendFormatInstructions` expanded with "STRENGTH DESCRIPTION PRECISION" rules — precise verbs, anti-inflation examples, class-name requirement.
+- **Bug fix**: `ValidateFeatureMatrix` table rows were incorrectly matched by `FEATURE: X | SOURCE: Y` regex, bypassing re-attribution logic. Tables now processed first.
+- **Tests**: 35 new (Phase31VerifierTests.cs) — 639 total (639 passed, 0 failed)
+
+## 2026-02-13 — Export Markdown Depth-Limit Fix
+- **SafeMarkdownToHtml**: New method in ExportService.cs wraps `Markdig.Markdown.ToHtml()` with try/catch for "too deeply nested" errors
+- **FlattenMarkdownNesting**: Pre-processes markdown to collapse 4+ levels of nested blockquotes/lists to 3 levels
+- Applied to all 3 `Markdig.Markdown.ToHtml()` call sites in ExportService
+- **Tests**: 604 total (604 passed, 0 failed)
+
+## 2026-02-13 — Phase 30: Scan Identity Confusion & Cross-Contamination Fix
+### 8-Step Fix for Report Accuracy
+- **Fix 1 — Wipe stale profiles before re-scan**: `ScanRepoAsync` now deletes existing profile for same URL before writing new one, preventing merges of old + new data
+- **Fix 2 — Source-ID filter in RAG queries**: All 12 RAG analysis queries and per-gap verification queries now filter chunks by `sourceIdFilter` matching the scan's `profileId`, preventing cross-repo chunk contamination
+- **Fix 3 — Identity context in analysis prompt**: LLM analysis prompt now starts with explicit identity block — "You are analyzing {owner}/{name}" with owner, URL, and primary language set as hard constraints
+- **Fix 4 — Identity context in gap verification**: Gap verification prompt includes identity header preventing "this project" confusion
+- **Fix 5 — Stronger anti-confusion instructions**: System prompt for analysis now includes 3 explicit rules: never confuse projects, never attribute capabilities from other repos, if asked about repo X only answer about repo X
+- **Fix 6 — CodeBook identity header**: CodeBook generation prompt now includes project identity header
+- **Fix 7 — AnalysisSummary field**: New `RepoProfile.AnalysisSummary` field captures the summary from analysis; `InfrastructureStrengths` now populated from parsed `### Infrastructure` sub-section
+- **Fix 8 — Report generation identity**: Report generation includes identity reminder in system prompt
+- **Tests**: 597 total (597 passed, 0 failed) — committed as `6f3ca51`
+
+## 2026-02-14 — Phase 29: Identity Scan (Dedicated Pipeline Phase 2.25)
+### Product-Level Identity Recognition
+- **Dedicated identity scan phase**: `RunIdentityScanAsync` reads README + docs/spec/project briefs + entry points (6000 char cap), runs 1 focused LLM call (~800 tokens), produces `ProductCategory` + `CoreCapabilities`
+- **Local repo description**: Fills empty `Description` for local repos via deterministic first-paragraph extraction (`ExtractFirstParagraph`)
+- **Enriched fusion input**: `FormatProfileForLlm` now includes ProductCategory + CoreCapabilities
+- **UI**: ProductCategory badge (amber) + CoreCapabilities list (purple) on scan cards
+- **Tests**: 599 total (597 passed, 2 skipped)
+
+## 2026-02-14 — Phase 28: Fusion Identity Grounding + Scan/Fusion Cancellation
+### Anti-Hallucination Rules #11-12 + Cancellation Support
+- **12 grounding rules**: Added #11 (cross-attribution prevention) and #12 (distinct purpose preservation) to fusion system prompt
+- **Identity-first outline**: 2-step outline generation — verify identities then outline
+- **Per-section identity reminder injection**: Every section expansion call includes identity markers
+- **╔══ PROJECT ══╗ markers**: Prominent visual markers in `FormatProfileForLlm`
+- **CodeBook limit**: 2500→4000 chars for richer context
+- **Stronger Summary prompts**: All 4 scan paths include explicit project summary instructions
+- **Cancellation**: CancellationTokenSource per scan/fusion/discovery operation, Cancel buttons with confirmation dialogs
+- **Tests**: 599 total (597 passed, 2 skipped)
+
+## 2026-02-14 — Phase 27: Scan & Fusion Quality Overhaul
+### ProjectSummary + ProjectedCapabilities + Anti-Hallucination
+- **`ProjectSummary` field**: Concise 1-3 sentence project summary extracted during scan via `## Summary` section in all 4 scan prompt paths + parsers
+- **`ProjectedCapabilities`**: New PROJECTED_CAPABILITIES fusion section — forward-looking capability predictions, goal-aware (compare vs merge variations)
+- **Anti-hallucination rules**: 3 new grounding rules in all scan prompts preventing analysis tool citation as strengths
+- **UI panels**: New Summary and ProjectedCapabilities sections on scan/fusion cards
+- **Tests**: 599 total (597 passed, 2 skipped)
+
 ## 2026-02-14 — Phase 26: Project Fusion Quality Overhaul
 ### Anti-Hallucination Grounding for Fusion Engine
 - **Grounded system prompt**: 7 critical rules — only reference technologies from input data, no inventing libraries, every claim must be traceable to input profiles

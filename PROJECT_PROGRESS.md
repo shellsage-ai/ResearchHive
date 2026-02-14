@@ -1,11 +1,11 @@
 # ResearchHive — Project Progress
 
 ## Status
-- Current milestone: All milestones (1-9) + Phases 10-26 complete
+- Current milestone: All milestones (1-9) + Phases 10-31 complete
 - Build status: ✅ PASSING (0 errors)
-- Test baseline: 597 total — 597 passed, 2 skipped, 0 failures
-- Services: 42 DI registrations (38 unique concrete services incl. interfaces + App.xaml.cs)
-- Last verified: Full test suite green (Phase 26)
+- Test baseline: 639 total — 639 passed, 0 failures
+- Services: 45 DI registrations (39 unique concrete services incl. interfaces + App.xaml.cs)
+- Last verified: Full test suite green (Phase 31 — commit `dd13b81`)
 
 ## Build / Run Commands
 ```
@@ -242,6 +242,46 @@ dotnet publish src/ResearchHive/ResearchHive.csproj -c Release -o publish/Resear
 - UI: goal descriptions on artifact cards, goal-aware section labels, enriched template descriptions
 - Model: `ProjectFusionArtifact.ProjectIdentities` field, 8 new ViewModel properties
 - Engine: 493→689 lines, 597 tests passing, 0 failures
+
+### Phase 27 — Scan & Fusion Quality Overhaul ✅
+- `ProjectSummary` field: concise 1-3 sentence project summary extracted during scan via `## Summary` in all 4 scan prompt paths
+- `ProjectedCapabilities`: new PROJECTED_CAPABILITIES fusion section — forward-looking capability predictions, goal-aware
+- Anti-hallucination rules in all scan prompts preventing analysis tool citation as strengths
+- UI panels for Summary and ProjectedCapabilities on scan/fusion cards
+- 599 tests (597 passed, 2 skipped)
+
+### Phase 28 — Fusion Identity Grounding + Scan/Fusion Cancellation ✅
+- 12 grounding rules (added #11 cross-attribution, #12 distinct purpose) in fusion system prompt
+- Identity-first outline generation (2-step: verify then outline), per-section identity reminder injection
+- ╔══ PROJECT ══╗ markers in `FormatProfileForLlm`, CodeBook limit 2500→4000
+- CancellationTokenSource per scan/fusion/discovery, Cancel buttons with confirmation dialogs
+- 599 tests (597 passed, 2 skipped)
+
+### Phase 29 — Identity Scan (Dedicated Pipeline Phase 2.25) ✅
+- `RunIdentityScanAsync`: reads README + docs/spec/project briefs + entry points (6000 char cap), 1 focused LLM call (~800 tokens)
+- Produces `ProductCategory` + `CoreCapabilities` + enriched `Summary`
+- Fills empty `Description` for local repos via `ExtractFirstParagraph`
+- UI: ProductCategory badge (amber) + CoreCapabilities list (purple) on scan cards
+- 599 tests (597 passed, 2 skipped)
+
+### Phase 30 — Scan Identity Confusion & Cross-Contamination Fix ✅
+- 8-step fix: (1) wipe stale profiles before re-scan, (2) source-ID filter on all RAG queries, (3) identity context in analysis prompts, (4) identity in gap verification, (5) anti-confusion system prompt rules, (6) CodeBook identity header, (7) AnalysisSummary + InfrastructureStrengths parsing, (8) report generation identity reminder
+- Committed as `6f3ca51` — 597 tests (597 passed, 0 failed)
+
+### Export Markdown Depth-Limit Fix ✅
+- `SafeMarkdownToHtml` + `FlattenMarkdownNesting` in ExportService.cs: wraps all 3 `Markdig.Markdown.ToHtml()` calls
+- Pre-flattens 4+ level blockquote/list nesting to 3 levels
+- Committed as `106914f` — 604 tests (604 passed, 0 failed)
+
+### Phase 31 — Anti-Hallucination & Factual Accuracy Hardening ✅
+- Step 1: Strength grounding in PostScanVerifier — `GroundStrengthDescriptions`, `DeflateDescription`, `FindMatchingCapability`, `OverstatementPatterns`
+- Step 2: Scan self-validation LLM pass — `SelfValidateStrengthsAsync` cross-checks strengths vs fact sheet via Mini LLM
+- Step 3: `FusionPostVerifier` (new file, ~505 lines) — 5 validators: tech stack, features, gaps, provenance, prose
+- Step 4: Wired into DI + ProjectFusionEngine with replay logging
+- Step 5: Cross-section consistency — `BuildConsistencyContext` + tightened UNIFIED_VISION/ARCHITECTURE guidance
+- Step 6: Prompt precision rules in `AppendFormatInstructions`
+- Bug fix: `ValidateFeatureMatrix` table parsing order fixed
+- 35 new tests (Phase31VerifierTests.cs) — committed as `dd13b81` — 639 tests (639 passed, 0 failed)
 
 ## End-to-End Demo Checklist
 

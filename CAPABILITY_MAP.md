@@ -4,7 +4,7 @@
 > This file is the single source of truth for "what exists, where, and why."
 >
 > **Maintenance rule**: Updated after every implementation step per `agents/orchestrator.agent.md` enforcement rules.
-> **Last verified**: 2026-02-14 — 599 tests (597 passed, 2 skipped), 0 build errors. Phase 29 commit (pending).
+> **Last verified**: 2026-02-13 — 639 tests (639 passed, 0 failed), 0 build errors. Phase 31 commit `dd13b81`.
 
 ---
 
@@ -313,6 +313,28 @@ Status: `[x]` = implemented + tested | `[~]` = implemented, untested or partial 
 - [x] Scan anti-hallucination rules — RepoScannerService.cs (AppendFormatInstructions, BuildConsolidatedAnalysisPrompt, BuildFullAgenticPrompt)
   WHY: Prevents LLM from listing analysis tool/model as a repo strength, inventing licenses, or confusing project identities
 
+- [x] Scan identity confusion fix (Phase 30) — RepoIntelligenceJobRunner.cs, RepoScannerService.cs, CodeBookGenerator.cs
+  WHY: 8-step fix: wipe stale profiles before re-scan, source-ID filter on all RAG queries, identity context in analysis/gap-verification/CodeBook prompts, anti-confusion system prompt rules, AnalysisSummary + InfrastructureStrengths parsing
+  TESTS: 597 total at commit
+
+- [x] Strength grounding in PostScanVerifier (Phase 31) — PostScanVerifier.cs
+  WHY: Deterministic replacement of overstatement patterns ("parallel RAG", "retry logic", etc.) with fact-sheet-grounded descriptions; `DeflateDescription` removes vague adjectives; `FindMatchingCapability` keyword-overlap matching
+  TESTS: Phase31VerifierTests.cs (7 — deflation, grounding, no-op, infra, patterns)
+
+- [x] Scan self-validation LLM pass (Phase 31) — RepoIntelligenceJobRunner.cs (SelfValidateStrengthsAsync)
+  WHY: Mini-tier LLM cross-checks strengths against fact sheet evidence; parses ORIGINAL/CORRECTED pairs; catches remaining overstatements after deterministic grounding
+
+- [x] FusionPostVerifier (Phase 31) — FusionPostVerifier.cs (~505 lines)
+  WHY: Post-generation verifier for fusion output — 5 validators: fabricated tech rows, misattributed features, fabricated gap closures, orphaned provenance, LLM prose fact-check
+  TESTS: Phase31VerifierTests.cs (15 — vocab builder, tech stack, feature matrix, gaps closed, provenance, integration, result summary)
+
+- [x] Cross-section fusion consistency (Phase 31) — ProjectFusionEngine.cs (BuildConsistencyContext, ExpandSectionAsync)
+  WHY: Batch 1 section decisions (identity, tech stack, feature attributions) injected into later batches to prevent contradictions
+
+- [x] Export markdown depth-limit fix — ExportService.cs (SafeMarkdownToHtml, FlattenMarkdownNesting)
+  WHY: Markdig throws "too deeply nested" on some LLM-generated markdown; pre-flattens 4+ level nesting, wraps all ToHtml calls with try/catch fallback
+  TESTS: ExportServiceTests.cs
+
 ---
 
 ## 8. Hive Mind / Global Memory
@@ -516,7 +538,7 @@ SessionWorkspaceViewModel decomposed from 2578 lines into 12 files using partial
 
 ## 13. DI Registrations (ServiceRegistration.cs + App.xaml.cs)
 
-42 DI registrations (38 unique concrete services) via `AddResearchHiveCore()` + App.xaml.cs:
+45 DI registrations (39 unique concrete services incl. interfaces + App.xaml.cs):
 
 | # | Service | Registration | Notes |
 |---|---------|-------------|-------|
@@ -555,16 +577,17 @@ SessionWorkspaceViewModel decomposed from 2578 lines into 12 files using partial
 | 33 | GlobalDb | Factory lambda | Depends on AppSettings.GlobalDbPath |
 | 34 | GlobalMemoryService | Direct | |
 | 35 | RepoIntelligenceJobRunner | Factory lambda | 7+ constructor params + GlobalMemory property injection |
-| 36 | ProjectFusionEngine | Direct | |
+| 36 | ProjectFusionEngine | Factory lambda | Phase 31: depends on SessionManager, LlmService, FusionPostVerifier |
 | 37 | ExportService | Direct | |
 | 38 | InboxWatcher | Direct | |
 | 39 | CrossSessionSearchService | Direct | |
 | 40 | CitationVerificationService | Direct | |
 | 41 | ContradictionDetector | Direct | |
 | 42 | ResearchComparisonService | Direct | |
+| 43 | FusionPostVerifier | Factory lambda | Phase 31: depends on ILogger, ILlmService |
 | — | **App.xaml.cs registrations:** | | |
-| 43 | NotificationService | App.xaml.cs | Taskbar flash + sound via P/Invoke |
-| 44 | GitHubDiscoveryService | App.xaml.cs | Phase 23: GitHub Search API |
+| 44 | NotificationService | App.xaml.cs | Taskbar flash + sound via P/Invoke |
+| 45 | GitHubDiscoveryService | App.xaml.cs | Phase 23: GitHub Search API |
 
 ---
 
@@ -596,8 +619,11 @@ SessionWorkspaceViewModel decomposed from 2578 lines into 12 files using partial
 | SessionManagerTests.cs | — | Session CRUD operations |
 | SmartPipelineTests.cs | 22 | Consolidated prompt builder/parser, JSON complement prompt/parser, IsLargeContextProvider routing |
 | StreamlinedCodexTests.cs | — | Codex CLI integration |
+| Phase31VerifierTests.cs | 35 | FusionPostVerifier (BuildProjectVocabulary, ValidateTechStackTable, ValidateFeatureMatrix, ValidateGapsClosed, ValidateProvenance, VerifyAsync integration, FusionVerificationResult summary), PostScanVerifier (DeflateDescription 11 cases, GroundStrengthDescriptions 5 cases) |
 
-**Total: 597 tests — 597 passed, 2 skipped, 0 failed**
+| Phase31VerifierTests.cs | 35 | FusionPostVerifier (BuildProjectVocabulary, ValidateTechStackTable, ValidateFeatureMatrix, ValidateGapsClosed, ValidateProvenance, VerifyAsync integration, FusionVerificationResult summary), PostScanVerifier (DeflateDescription 11 cases, GroundStrengthDescriptions 5 cases) |
+
+**Total: 639 tests — 639 passed, 0 failed**
 
 ---
 
@@ -620,7 +646,8 @@ src/
     Services/
       PdfIngestionService.cs       ← Phase 11: PDF text extraction + OCR fallback
       RepoFactSheetBuilder.cs      ← Phase 19: deterministic fact sheet pipeline (~790 lines)
-      PostScanVerifier.cs          ← Phase 19: LLM output validation against fact sheet (~363 lines)
+      PostScanVerifier.cs          ← Phase 19+31: LLM output validation + strength grounding (~1144 lines)
+      FusionPostVerifier.cs          ← Phase 31: fusion output verification (~505 lines)
       LlmCircuitBreaker.cs        ← Phase 17: per-provider circuit breaker
       GitHubDiscoveryService.cs    ← Phase 23: GitHub Search API for project discovery
       ReportTemplateService.cs     ← Phase 25: section templates with formatting guidance
@@ -668,6 +695,9 @@ tests/
 
 | Date | Change | Files |
 |------|--------|-------|
+| 2026-02-13 | Phase 31: Anti-hallucination hardening — 6-step implementation: (1) strength grounding in PostScanVerifier (GroundStrengthDescriptions, DeflateDescription, FindMatchingCapability, OverstatementPatterns), (2) scan self-validation LLM pass (SelfValidateStrengthsAsync), (3) FusionPostVerifier (5 validators: tech stack, features, gaps, provenance, prose), (4) wired into DI + ProjectFusionEngine, (5) cross-section consistency (BuildConsistencyContext, priorSectionContext, tightened UNIFIED_VISION/ARCHITECTURE guidance), (6) prompt precision rules. Bug fix: ValidateFeatureMatrix table parsing order. 35 new tests. | PostScanVerifier.cs, RepoIntelligenceJobRunner.cs, FusionPostVerifier.cs (NEW), ProjectFusionEngine.cs, ServiceRegistration.cs, RepoScannerService.cs, Phase31VerifierTests.cs (NEW) |
+| 2026-02-13 | Export depth-limit fix — SafeMarkdownToHtml + FlattenMarkdownNesting wraps all 3 Markdig.Markdown.ToHtml() calls; pre-flattens 4+ level nesting | ExportService.cs |
+| 2026-02-13 | Phase 30: Scan identity confusion fix — 8-step: wipe stale profiles, source-ID filter on RAG, identity context in analysis/gap/CodeBook prompts, anti-confusion system prompt, AnalysisSummary + InfrastructureStrengths fields | RepoIntelligenceJobRunner.cs, RepoScannerService.cs, CodeBookGenerator.cs, DomainModels.cs |
 | 2026-02-14 | Phase 29: Identity Scan — dedicated pipeline phase (2.25) for product-level identity, separate from code analysis; RunIdentityScanAsync reads README/docs/spec/project briefs/entry points (6000 char cap), 1 focused LLM call (~800 tokens), produces ProductCategory + CoreCapabilities; fills empty Description for local repos via deterministic first-paragraph extraction; FormatProfileForLlm enriched with identity fields; scan report includes identity; XAML UI: ProductCategory badge + CoreCapabilities list on scan cards | RepoScannerService.cs, DomainModels.cs, RepoIntelligenceJobRunner.cs, ProjectFusionEngine.cs, SessionWorkspaceSubViewModels.cs, SessionWorkspaceView.xaml |
 | 2026-02-13 | Add PolyForm Noncommercial 1.0.0 license + commercial licensing guide + README update | LICENSE.md, COMMERCIAL_LICENSE.md, README.md |
 | 2026-02-13 | Phase 28: Fusion identity grounding + scan/fusion cancellation — 12 grounding rules (added #11 cross-attribution, #12 distinct purpose), identity-first outline prompt (2-step: verify then outline), per-section identity reminder injection, ╔══ PROJECT ══╗ markers in FormatProfileForLlm, CodeBook limit 2500→4000, AnalysisModelUsed in profile, stronger Summary prompts in all 4 scan paths, CancellationTokenSource for scan/fusion/discovery, Cancel UI buttons with confirmation dialogs | ProjectFusionEngine.cs, RepoScannerService.cs, SessionWorkspaceViewModel.RepoIntelligence.cs, SessionWorkspaceViewModel.ProjectDiscovery.cs, SessionWorkspaceViewModel.cs, SessionWorkspaceView.xaml |

@@ -41,7 +41,7 @@ Every substantive claim is **cited to immutable evidence** or clearly labeled as
 | **Materials Explorer** | Search for material candidates by properties, with include/avoid filters, safety labeling, and a property comparison table across all candidates. |
 | **Programming Research & IP** | Generate an Approach Matrix comparing solutions across criteria, with IP/licensing analysis (license signals, risk flags, design-around options). |
 | **Hive Mind** | Cross-session global memory with FTS5 + semantic search, strategy extraction, knowledge curation (browse/filter/paginate/delete), and RAG Q&A across all sessions. |
-| **Repo Intelligence** | GitHub repo scanning, shallow cloning, code chunking, CodeBook generation, RAG-powered Q&A, and multi-repo Project Fusion (Merge/Extend/Compare/Architect). |
+| **Repo Intelligence** | GitHub repo scanning, shallow cloning, code chunking, CodeBook generation, RAG-powered Q&A, multi-repo Project Fusion (Merge/Extend/Compare/Architect), deterministic fact-sheet verification, and anti-hallucination post-verification for both scans and fusions. |
 | **Citation Verification** | Quick text-match verification plus deep LLM-backed verification that citations actually support their claims. |
 | **Contradiction Detection** | Fast heuristic scan plus deep embedding + LLM analysis to find conflicting claims across sources. |
 | **Research Comparison** | Side-by-side comparison of sessions with overlap analysis, unique findings, and gap identification. |
@@ -77,10 +77,10 @@ ResearchHive.sln
 │   └── ResearchHive.Core/         # Business logic & services
 │       ├── Data/                   # SessionDb, RegistryDb, GlobalDb (SQLite WAL)
 │       ├── Models/                 # Domain models, DTOs
-│       ├── Services/               # 37 registered services
+│       ├── Services/               # 39 registered services
 │       └── Configuration/          # AppSettings
 ├── tests/
-│   └── ResearchHive.Tests/        # xUnit test suite (341 tests)
+│   └── ResearchHive.Tests/        # xUnit test suite (639 tests)
 ├── spec/                           # Full product specifications
 ├── agents/                         # AI agent prompt definitions
 └── prompts/                        # Build automation prompts
@@ -101,7 +101,7 @@ ResearchHive.sln
 | **DI** | Microsoft.Extensions.DependencyInjection 8.0.0 |
 | **Testing** | xUnit + FluentAssertions-style assertions |
 
-### Core Services (37 registered via DI)
+### Core Services (39 registered via DI)
 
 - `SessionManager` — Create, list, delete sessions
 - `SessionDb` — Per-session SQLite with 20 tables
@@ -127,6 +127,7 @@ ResearchHive.sln
 - `RepoIntelligenceJobRunner` — Full repo analysis pipeline
 - `ComplementResearchService` — Find projects that fill repo gaps
 - `ProjectFusionEngine` — Multi-repo architecture fusion
+- `FusionPostVerifier` — Deterministic + LLM validation of fusion outputs
 - `CitationVerificationService` — Quick + deep citation checks
 - `ContradictionDetector` — Heuristic + LLM contradiction analysis
 - `ResearchComparisonService` — Session comparison engine
@@ -232,7 +233,7 @@ dotnet test tests/ResearchHive.Tests/
 ```
 
 ```
-Passed!  - Failed: 0, Passed: 339, Skipped: 2, Total: 341
+Passed!  - Failed: 0, Passed: 639, Skipped: 0, Total: 639
 ```
 
 ---
@@ -267,7 +268,7 @@ Copyright (c) 2025–2026 ShellSage AI. All rights reserved.
 This is currently a private project. If you have access, please:
 1. Create a feature branch from `main`
 2. Make your changes with tests
-3. Ensure `dotnet test` passes (341+ tests, 0 failures)
+3. Ensure `dotnet test` passes (639+ tests, 0 failures)
 4. Submit a pull request
 
 ---
