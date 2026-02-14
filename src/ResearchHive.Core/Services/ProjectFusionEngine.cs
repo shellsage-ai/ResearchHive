@@ -899,7 +899,9 @@ RULES:
                 !trimmed.StartsWith('•') && !Regex.IsMatch(trimmed, @"^\d+[.)]"))
                 continue; // Skip prose / commentary lines
 
-            var content = trimmed.TrimStart('-', '*', '•', ' ');
+            // Strip only the bullet marker and following whitespace, preserving bold ** markers.
+            // TrimStart('-','*','•',' ') would strip leading ** from bold text.
+            var content = Regex.Replace(trimmed, @"^[-•]\s*|^\*\s+", "");
             // For numbered items, strip the leading "1. " or "1) "
             content = Regex.Replace(content, @"^\d+[.)]\s*", "");
 

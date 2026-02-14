@@ -348,17 +348,40 @@ public class FusionPostVerifier
                     var fullName = $"{p.Owner}/{p.Name}".ToLowerInvariant();
                     if (resolutionText.Contains(nameLower) || resolutionText.Contains(fullName))
                     {
-                        // Verify the claimed capability exists
-                        bool hasCapability = p.Strengths
+                        // Verify the claimed capability exists AND relates to the gap
+                        var matchedCapability = p.Strengths
                             .Concat(p.InfrastructureStrengths)
                             .Concat(p.CoreCapabilities)
-                            .Any(s => FeatureOverlapSimple(resolutionText, s.ToLowerInvariant()));
-                        if (!hasCapability)
+                            .FirstOrDefault(s => FeatureOverlapSimple(resolutionText, s.ToLowerInvariant()));
+                        if (matchedCapability == null)
                         {
                             result.GapsClosedCorrected.Add(
                                 $"FABRICATED: Bullet claims resolution via '{p.Owner}/{p.Name}' but no matching capability: {bulletContent}");
                             goto nextLine; // Skip this line
                         }
+
+                        // Cross-validate: the gap description must be topically related
+                        // to at least one capability of the resolver project (prevents
+                        // mismatched pairings like "No Dependabot" resolved by
+                        // "dependency injection").
+                        var gapBeforeArrow = bulletContent.Contains('\u2192')
+                            ? bulletContent.Split('\u2192')[0].Trim().ToLowerInvariant()
+                            : "";
+                        if (gapBeforeArrow.Length > 0)
+                        {
+                            var allCapabilities = p.Strengths
+                                .Concat(p.InfrastructureStrengths)
+                                .Concat(p.CoreCapabilities);
+                            bool gapRelated = allCapabilities.Any(cap =>
+                                GapRelatesToCapability(gapBeforeArrow, cap.ToLowerInvariant()));
+                            if (!gapRelated)
+                            {
+                                result.GapsClosedCorrected.Add(
+                                    $"MISMATCHED: Gap '{gapBeforeArrow}' is unrelated to {p.Owner}/{p.Name}'s capabilities: {bulletContent}");
+                                goto nextLine;
+                            }
+                        }
+
                         anyProfileMatches = true;
                         break;
                     }
@@ -394,13 +417,52 @@ public class FusionPostVerifier
                !Regex.IsMatch(lower, @"resolved by .+?('s|/)");
     }
 
-    /// <summary>Simple overlap: check if any 3+ char word from the gap appears in the capability.</summary>
+    /// <summary>
+    /// Filler words to exclude from gap-closure overlap matching.
+    /// These are common verbs/prepositions that appear in resolution text but
+    /// do not indicate a real capability.
+    /// </summary>
+    private static readonly HashSet<string> GapStopWords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "resolved", "resolves", "resolving", "integrating", "incorporating",
+        "combining", "providing", "support", "supports", "supporting",
+        "using", "with", "from", "that", "this", "their", "project",
+        "both", "into", "which", "enables", "enabled", "offers",
+        "through", "provides", "leverage", "leveraging", "adding",
+        "brings", "approach", "capability", "capabilities", "feature",
+        "features", "system", "service", "also", "fully", "based",
+        "well", "comprehensive", "robust", "advanced", "built"
+    };
+
+    /// <summary>
+    /// Overlap check with stop-word filtering: extract significant content words
+    /// from the resolution text and require at least 2 matches against the capability
+    /// (or 1 if fewer than 3 significant words remain).
+    /// </summary>
     private static bool FeatureOverlapSimple(string gapText, string capability)
     {
-        var gapWords = Regex.Split(gapText, @"[\s/\(\)\-,.:]+")
-            .Where(w => w.Length >= 4)
+        var gapWords = Regex.Split(gapText, @"[\s/\(\)\-,.:'']+")
+            .Where(w => w.Length >= 4 && !GapStopWords.Contains(w))
             .ToList();
-        return gapWords.Count > 0 && gapWords.Any(w => capability.Contains(w));
+        if (gapWords.Count == 0) return false;
+        var matchCount = gapWords.Count(w => capability.Contains(w));
+        // Require at least 2 matching content words, or 1 if very few significant words
+        return gapWords.Count <= 2 ? matchCount >= 1 : matchCount >= 2;
+    }
+
+    /// <summary>
+    /// Cross-validate that the gap description is topically related to a project capability.
+    /// Returns true if at least one significant word (≥3 chars) from the gap appears in
+    /// the capability string. Returns true (allows through) if the gap has no significant
+    /// words (too short to validate deterministically).
+    /// </summary>
+    private static bool GapRelatesToCapability(string gapText, string capability)
+    {
+        var gapWords = Regex.Split(gapText, @"[\s/\(\)\-,.:''*#]+")
+            .Where(w => w.Length >= 3 && !GapStopWords.Contains(w))
+            .ToList();
+        if (gapWords.Count == 0) return true; // Can't validate, allow through
+        return gapWords.Any(w => capability.Contains(w, StringComparison.OrdinalIgnoreCase));
     }
 
     // ─────────────── PROVENANCE Validation ───────────────

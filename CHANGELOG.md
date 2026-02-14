@@ -23,6 +23,14 @@ This file provides a high-level summary per milestone.
 - **Fix E — Circular gap closures**: `IsCircularFusionClaim` in FusionPostVerifier rejects gap closures that claim "resolved by Fusion" without referencing a real project capability. Wired into `ValidateGapsClosed`.
 - **Tests**: 12 new — 679 total (679 passed, 0 failed)
 
+## 2026-02-14 — Phase 32c: Export Quality Audit Round 3
+### 3 additional fixes from second re-export review
+- **Fix F — Markdig depth-limit crash**: Large pipe tables (30+ rows) exceed Markdig's hard depth limit even with backtick-wrapped brackets. Added `RenderBySection` (splits markdown at heading boundaries, renders each independently) and `SplitLargePipeTables` (repeats table header every 20 rows). BenchmarkDotNet report now renders proper HTML tables.
+- **Fix G — Duplicate H1 title**: `StripLeadingH1` removes leading `# Title` from markdown when it matches the HTML wrapper's `<h1>`. Applied at both export sites.
+- **Fix H — Broken bold formatting**: `ParseList` in ProjectFusionEngine used `TrimStart('-', '*', '•', ' ')` which stripped `**` bold markers. Replaced with regex that only strips bullet chars followed by whitespace.
+- **Fix I — Fabricated gap closures**: Strengthened `FusionPostVerifier` — stop-word filter, higher match threshold (≥2 significant words), gap-to-capability cross-validation.
+- **Tests**: 10 new — 690 total (690 passed, 0 failed)
+
 ## 2026-02-13 — Batch Scan Fix: Robustness & Error Recovery
 - **Silent early-return fix**: `ScanMultiRepoAsync` now sets `RepoScanStatus` feedback when `RepoUrlList` is empty or no URLs are parsed, instead of returning silently.
 - **Continue on individual failure**: Each repo scan is wrapped in its own try-catch. One failed repo no longer aborts the entire batch — remaining repos continue scanning.

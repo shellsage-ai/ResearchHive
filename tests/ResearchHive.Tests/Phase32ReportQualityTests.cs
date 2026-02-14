@@ -197,6 +197,118 @@ public class Phase32ReportQualityTests
         output.Should().Contain("GitHub Actions");
     }
 
+    // ─────────────── Fix: StripLeadingH1 (duplicate title) ───────────────
+
+    [Fact]
+    public void StripLeadingH1_RemovesLeadingH1()
+    {
+        var md = "# Fusion: A + B (Merge)\n\n## Source Projects\n- **A**";
+        var result = ExportService.StripLeadingH1(md);
+        result.Should().NotStartWith("# ");
+        result.Should().Contain("## Source Projects");
+    }
+
+    [Fact]
+    public void StripLeadingH1_PreservesH2()
+    {
+        var md = "## Section Title\n\nContent here.";
+        var result = ExportService.StripLeadingH1(md);
+        result.Should().Be(md, "H2 headers should not be stripped");
+    }
+
+    [Fact]
+    public void StripLeadingH1_SkipsBlankLinesThenStripsH1()
+    {
+        var md = "\n\n# Title\n\nContent after.";
+        var result = ExportService.StripLeadingH1(md);
+        result.Should().NotContain("# Title");
+        result.Should().Contain("Content after.");
+    }
+
+    [Fact]
+    public void StripLeadingH1_NoH1_ReturnsUnchanged()
+    {
+        var md = "Some paragraph text.\n\n## Section";
+        var result = ExportService.StripLeadingH1(md);
+        result.Should().Be(md);
+    }
+
+    [Fact]
+    public void StripLeadingH1_HandlesEmptyInput()
+    {
+        ExportService.StripLeadingH1("").Should().Be("");
+        ExportService.StripLeadingH1(null!).Should().BeNull();
+    }
+
+    // ─────────────── Fix: ParseList preserves bold markers ───────────────
+
+    [Fact]
+    public void ParseList_PreservesBoldMarkers()
+    {
+        var text = "- **No Dependabot/Renovate config found**: Resolved by integrating\n- **No Dockerfile found**: Addressed by adding";
+        var result = ProjectFusionEngine.ParseList(text);
+        result.Should().HaveCount(2);
+        result[0].Should().StartWith("**No Dependabot", "leading ** bold markers must be preserved");
+        result[1].Should().StartWith("**No Dockerfile", "leading ** bold markers must be preserved");
+    }
+
+    [Fact]
+    public void ParseList_StillStripsPlainBullets()
+    {
+        var text = "- plain item\n* star item\n• unicode item";
+        var result = ProjectFusionEngine.ParseList(text);
+        result.Should().HaveCount(3);
+        result[0].Should().Be("plain item");
+        result[1].Should().Be("star item");
+        result[2].Should().Be("unicode item");
+    }
+
+    // ─────────────── Fix: Gap closure fabrication rejection ───────────────
+
+    [Fact]
+    public void ValidateGapsClosed_RejectsFabricatedResolution_DependabotVsDI()
+    {
+        // "dependency injection" is NOT a valid resolution for a Dependabot gap
+        var section = "- No Dependabot config → resolved by ProjectB's dependency injection capabilities";
+        var profiles = new List<RepoProfile>
+        {
+            CreateProfile("owner", "ProjectB", strengths: new[] { "Dependency injection (DI) container" })
+        };
+        var result = new FusionVerificationResult();
+        var output = FusionPostVerifier.ValidateGapsClosed(section, profiles, result);
+        result.GapsClosedCorrected.Should().NotBeEmpty(
+            "DI does not resolve a Dependabot gap — this should be flagged as fabricated");
+    }
+
+    [Fact]
+    public void ValidateGapsClosed_RejectsFabricatedResolution_DockerVsContainerization()
+    {
+        // Project has no containerization support — claiming it resolves "No Dockerfile" is fabricated
+        var section = "- No Dockerfile found → resolved by ProjectB's support for containerization";
+        var profiles = new List<RepoProfile>
+        {
+            CreateProfile("owner", "ProjectB", strengths: new[] { "WPF desktop application", "SQLite per-session databases" })
+        };
+        var result = new FusionVerificationResult();
+        var output = FusionPostVerifier.ValidateGapsClosed(section, profiles, result);
+        result.GapsClosedCorrected.Should().NotBeEmpty(
+            "project has no containerization capability — should be flagged");
+    }
+
+    [Fact]
+    public void ValidateGapsClosed_AcceptsGenuineCapabilityMatch()
+    {
+        var section = "- No CI/CD pipeline → resolved by ProjectB's GitHub Actions workflow and CI/CD pipeline";
+        var profiles = new List<RepoProfile>
+        {
+            CreateProfile("owner", "ProjectB", strengths: new[] { "GitHub Actions workflow", "CI/CD pipeline configuration" })
+        };
+        var result = new FusionVerificationResult();
+        var output = FusionPostVerifier.ValidateGapsClosed(section, profiles, result);
+        result.GapsClosedCorrected.Should().BeEmpty("genuine capability match should pass validation");
+        output.Should().Contain("GitHub Actions");
+    }
+
     // ─────────────── Helper to create minimal RepoProfile ───────────────
 
     private static RepoProfile CreateProfile(string owner, string name, string[]? strengths = null)

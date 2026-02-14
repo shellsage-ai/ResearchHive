@@ -27,10 +27,43 @@ public class ExportService
     //  Safe markdown → HTML with depth-flattening + fallback
     // ────────────────────────────────────────────────────────
 
+    /// <summary>Maximum pipe-table data rows before splitting into sub-tables.</summary>
+    private const int MaxPipeTableRows = 20;
+
+    /// <summary>
+    /// Strip a leading H1 heading (# Title) from markdown content to prevent
+    /// duplicate H1 when the HTML wrapper already provides its own &lt;h1&gt;.
+    /// Only strips when the H1 text matches <paramref name="wrapperTitle"/> (case-insensitive)
+    /// or when no title is supplied (unconditional strip).
+    /// </summary>
+    internal static string StripLeadingH1(string markdown, string? wrapperTitle = null)
+    {
+        if (string.IsNullOrWhiteSpace(markdown))
+            return markdown;
+
+        // Skip leading blank lines, then check for a single-# H1
+        var trimmed = markdown.TrimStart('\n', '\r');
+        if (trimmed.StartsWith("# ") && !trimmed.StartsWith("## "))
+        {
+            var newlineIdx = trimmed.IndexOf('\n');
+            var h1Text = newlineIdx >= 0 ? trimmed[2..newlineIdx].Trim() : trimmed[2..].Trim();
+
+            // Only strip if no title specified (always) or the H1 matches the wrapper title
+            if (wrapperTitle == null || h1Text.Equals(wrapperTitle, StringComparison.OrdinalIgnoreCase))
+            {
+                if (newlineIdx >= 0)
+                    return trimmed[(newlineIdx + 1)..].TrimStart('\n', '\r');
+                return string.Empty;
+            }
+        }
+        return markdown;
+    }
+
     /// <summary>
     /// Convert markdown to HTML safely.  Pre-processes the source to flatten
     /// excessive nesting that can trip Markdig's internal depth limit, and
-    /// falls back to HTML-escaped &lt;pre&gt; text if conversion still fails.
+    /// falls back to section-by-section rendering (then HTML-escaped &lt;pre&gt;)
+    /// if conversion still fails.
     /// </summary>
     internal static string SafeMarkdownToHtml(string markdown, MarkdownPipeline pipeline)
     {
@@ -45,11 +78,132 @@ public class ExportService
         }
         catch (Exception ex)
         {
-            // Log for diagnostics — helps identify which markdown constructs cause Markdig failures
-            System.Diagnostics.Debug.WriteLine($"[ExportService] Markdig failed, falling back to <pre>: {ex.GetType().Name}: {ex.Message}");
-            // Last resort: render as preformatted, HTML-escaped text
-            return $"<pre>{EscapeHtml(markdown)}</pre>";
+            System.Diagnostics.Debug.WriteLine($"[ExportService] Markdig failed on full document ({ex.GetType().Name}), retrying section-by-section");
+
+            // ── Retry: split at heading boundaries, render each section independently ──
+            // This keeps per-section inline depth below Markdig's limit while
+            // preserving all content and formatting.
+            try
+            {
+                return RenderBySection(flattened, pipeline);
+            }
+            catch (Exception ex2)
+            {
+                System.Diagnostics.Debug.WriteLine($"[ExportService] Section-by-section also failed ({ex2.GetType().Name}), falling back to <pre>");
+                // Last resort: render as preformatted, HTML-escaped text
+                return $"<pre>{EscapeHtml(markdown)}</pre>";
+            }
         }
+    }
+
+    /// <summary>
+    /// Split markdown at heading boundaries (## ) and render each section
+    /// independently through Markdig, then concatenate results.
+    /// This prevents large tables or deeply nested constructs in one section
+    /// from exceeding the renderer's inline-depth limit.
+    /// </summary>
+    private static string RenderBySection(string markdown, MarkdownPipeline pipeline)
+    {
+        // Split at lines that start with # (any heading level)
+        var sections = Regex.Split(markdown, @"(?=^#{1,6}\s)", RegexOptions.Multiline);
+
+        var sb = new StringBuilder(markdown.Length);
+        foreach (var section in sections)
+        {
+            if (string.IsNullOrWhiteSpace(section))
+                continue;
+
+            try
+            {
+                sb.Append(Markdig.Markdown.ToHtml(section, pipeline));
+            }
+            catch
+            {
+                // If even a single section is too large, try splitting its
+                // pipe tables into smaller chunks and retry once more.
+                try
+                {
+                    var split = SplitLargePipeTables(section);
+                    sb.Append(Markdig.Markdown.ToHtml(split, pipeline));
+                }
+                catch
+                {
+                    // Section-level fallback: render as escaped text
+                    sb.Append($"<pre>{EscapeHtml(section)}</pre>");
+                }
+            }
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Split any pipe table in the markdown that has more than
+    /// <see cref="MaxPipeTableRows"/> data rows into multiple smaller tables
+    /// by repeating the header row + separator every N rows.
+    /// </summary>
+    internal static string SplitLargePipeTables(string markdown)
+    {
+        var lines = markdown.Split('\n');
+        var result = new StringBuilder(markdown.Length);
+
+        string? headerRow = null;
+        string? separatorRow = null;
+        int dataRowCount = 0;
+        bool inTable = false;
+
+        for (int i = 0; i < lines.Length; i++)
+        {
+            var line = lines[i].TrimEnd('\r');
+            var trimmed = line.TrimStart();
+
+            if (!inTable)
+            {
+                // Detect start of a pipe table: a row starting with |, followed
+                // by a separator row (|---|...|)
+                if (trimmed.StartsWith('|') && i + 1 < lines.Length)
+                {
+                    var nextTrimmed = lines[i + 1].TrimEnd('\r').TrimStart();
+                    if (Regex.IsMatch(nextTrimmed, @"^\|[\s:|-]+\|\s*$"))
+                    {
+                        inTable = true;
+                        headerRow = line;
+                        separatorRow = lines[i + 1].TrimEnd('\r');
+                        dataRowCount = 0;
+                        result.AppendLine(line);
+                        result.AppendLine(separatorRow);
+                        i++; // skip separator
+                        continue;
+                    }
+                }
+                result.AppendLine(line);
+            }
+            else
+            {
+                // Inside a table — check if this is still a data row
+                if (IsPipeTableRow(line) || Regex.IsMatch(trimmed, @"^\|[\s:|-]+\|\s*$"))
+                {
+                    dataRowCount++;
+                    if (dataRowCount > MaxPipeTableRows && dataRowCount % MaxPipeTableRows == 1)
+                    {
+                        // Break the table: blank line, then repeat header + separator
+                        result.AppendLine();
+                        result.AppendLine(headerRow);
+                        result.AppendLine(separatorRow);
+                    }
+                    result.AppendLine(line);
+                }
+                else
+                {
+                    // Non-table line — end the table
+                    inTable = false;
+                    headerRow = null;
+                    separatorRow = null;
+                    result.AppendLine(line);
+                }
+            }
+        }
+
+        return result.ToString();
     }
 
     /// <summary>
@@ -253,7 +407,7 @@ public class ExportService
             ?? throw new InvalidOperationException($"Report {reportId} not found");
 
         var pipeline = new MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
-        var htmlBody = SafeMarkdownToHtml(report.Content, pipeline);
+        var htmlBody = SafeMarkdownToHtml(StripLeadingH1(report.Content, report.Title), pipeline);
 
         var fullHtml = $$"""
 <!DOCTYPE html>
@@ -327,7 +481,7 @@ public class ExportService
         var reportLinks = new StringBuilder();
         foreach (var report in reports)
         {
-            var htmlBody = SafeMarkdownToHtml(report.Content, pipeline);
+            var htmlBody = SafeMarkdownToHtml(StripLeadingH1(report.Content, report.Title), pipeline);
             var reportHtml = WrapHtml(report.Title, htmlBody, report.ReportType, report.CreatedUtc);
             var reportFileName = $"{SanitizeFileName(report.Title)}_{ShortId(report.Id)}.html";
             await File.WriteAllTextAsync(Path.Combine(packetDir, "reports", reportFileName), reportHtml, Encoding.UTF8, ct);
