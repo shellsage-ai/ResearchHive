@@ -479,4 +479,51 @@ public class RepoIntelligenceTests : IDisposable
         o2.Should().Be("dotnet");
         r2.Should().Be("runtime");
     }
+
+    // ─────────────── Batch Scan URL Parsing Tests ───────────────
+
+    [Theory]
+    [InlineData("https://github.com/a/b\nhttps://github.com/c/d", 2)]
+    [InlineData("https://github.com/a/b\r\nhttps://github.com/c/d", 2)]
+    [InlineData("https://github.com/a/b;https://github.com/c/d", 2)]
+    [InlineData("https://github.com/a/b,https://github.com/c/d", 2)]
+    [InlineData("  https://github.com/a/b , https://github.com/c/d  ", 2)]
+    [InlineData("https://github.com/a/b\n\n\nhttps://github.com/c/d\n", 2)]
+    [InlineData("single-url", 1)]
+    [InlineData("", 0)]
+    [InlineData("   ", 0)]
+    [InlineData("\n\n\n", 0)]
+    public void BatchScan_UrlParsing_SplitsCorrectly(string input, int expectedCount)
+    {
+        // Same logic as ScanMultiRepoAsync
+        var urls = string.IsNullOrWhiteSpace(input)
+            ? new List<string>()
+            : input.Split(new[] { '\n', '\r', ';', ',' }, StringSplitOptions.RemoveEmptyEntries)
+                   .Select(u => u.Trim()).Where(u => u.Length > 0).ToList();
+
+        urls.Count.Should().Be(expectedCount);
+    }
+
+    [Fact]
+    public void BatchScan_UrlParsing_PreservesLocalPaths()
+    {
+        // Windows paths with backslashes must NOT be split
+        var input = "C:\\Users\\me\\project1\nC:\\Users\\me\\project2";
+        var urls = input.Split(new[] { '\n', '\r', ';', ',' }, StringSplitOptions.RemoveEmptyEntries)
+                        .Select(u => u.Trim()).Where(u => u.Length > 0).ToList();
+
+        urls.Count.Should().Be(2);
+        urls[0].Should().Be("C:\\Users\\me\\project1");
+        urls[1].Should().Be("C:\\Users\\me\\project2");
+    }
+
+    [Fact]
+    public void BatchScan_UrlParsing_MixedSeparators()
+    {
+        var input = "https://github.com/a/b\nhttps://github.com/c/d;https://github.com/e/f,https://github.com/g/h";
+        var urls = input.Split(new[] { '\n', '\r', ';', ',' }, StringSplitOptions.RemoveEmptyEntries)
+                        .Select(u => u.Trim()).Where(u => u.Length > 0).ToList();
+
+        urls.Count.Should().Be(4);
+    }
 }

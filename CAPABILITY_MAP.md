@@ -4,7 +4,7 @@
 > This file is the single source of truth for "what exists, where, and why."
 >
 > **Maintenance rule**: Updated after every implementation step per `agents/orchestrator.agent.md` enforcement rules.
-> **Last verified**: 2026-02-13 — 639 tests (639 passed, 0 failed), 0 build errors. Phase 31 commit `dd13b81`.
+> **Last verified**: 2026-02-13 — 651 tests (651 passed, 0 failed), 0 build errors. Batch scan fix (post-Phase 31).
 
 ---
 
@@ -712,6 +712,7 @@ tests/
 | 2026-02-13 | Phase 19: Deterministic fact sheet pipeline — RepoFactSheetBuilder + PostScanVerifier + 44 tests | RepoFactSheetBuilder.cs, PostScanVerifier.cs, DomainModels.cs, RepoIntelligenceJobRunner.cs, RepoScannerService.cs, ServiceRegistration.cs, FactSheetAndVerifierTests.cs |
 | 2026-02-13 | Phase 18: Agentic timeout fix, cascade removal, Ctrl+F Find overlay | CodexCliService.cs, LlmService.cs, RepoIntelligenceJobRunner.cs, FindOverlay.cs, SessionWorkspaceView.xaml |
 | 2026-02-13 | Phase 17: Model tiering, agentic Codex, infrastructure hardening — interfaces, circuit breaker, structured logging | LlmService.cs, LlmCircuitBreaker.cs, ILlmService.cs, IRetrievalService.cs, IBrowserSearchService.cs, ServiceRegistration.cs, Phase17AgenticTests.cs |
+| 2026-02-13 | Batch scan fix: continue on individual failure, feedback on empty input, per-scan notifications, LoadSessionData on error, 12 new tests (651 total) | SessionWorkspaceViewModel.RepoIntelligence.cs, RepoIntelligenceTests.cs, CONTEXT_TRANSFER.md |
 | 2026-02-13 | Phase 16: Smart Pipeline — Codex consolidation (4→2 calls), Ollama JSON format, 5 parallelism fixes | LlmService.cs, ResearchJobRunner.cs, RepoScannerService.cs, ComplementResearchService.cs, SmartPipelineTests.cs |
 | 2026-02-13 | Phase 15: Pipeline telemetry, framework detection, RAG parallelism | RepoIntelligenceJobRunner.cs, RepoScannerService.cs, DomainModels.cs |
 | 2026-02-13 | Phase 14: Repo scan quality fixes — deep .csproj, gap quality, GitHub enrichment | RepoScannerService.cs, ComplementResearchService.cs, RepoIntelligenceJobRunner.cs |

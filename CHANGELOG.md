@@ -3,6 +3,15 @@
 All changes are tracked in `CAPABILITY_MAP.md` (Change Log section) for granular file-level detail.
 This file provides a high-level summary per milestone.
 
+## 2026-02-13 — Batch Scan Fix: Robustness & Error Recovery
+- **Silent early-return fix**: `ScanMultiRepoAsync` now sets `RepoScanStatus` feedback when `RepoUrlList` is empty or no URLs are parsed, instead of returning silently.
+- **Continue on individual failure**: Each repo scan is wrapped in its own try-catch. One failed repo no longer aborts the entire batch — remaining repos continue scanning.
+- **Partial results preserved**: `LoadSessionData()` is now called on both error and cancellation paths, so any successfully scanned repos appear in the UI.
+- **Per-scan notifications**: `NotifyRepoScanComplete` fires after each individual scan, matching single-scan behavior.
+- **Summary reporting**: Status shows `succeeded/total` counts plus individual failure details.
+- **Tests**: 12 new batch scan URL parsing tests — 651 total (651 passed, 0 failed)
+- **Context transfer file**: Created `CONTEXT_TRANSFER.md` for session continuity.
+
 ## 2026-02-13 — Phase 31: Anti-Hallucination & Factual Accuracy Hardening
 ### 6-Step Pipeline to Reduce LLM Hallucination in Scan and Fusion Outputs
 - **Step 1 — Strength grounding (PostScanVerifier)**: `GroundStrengthDescriptions` matches overstatement patterns ("parallel RAG", "retry logic", "structured logging", etc.) against fact sheet evidence. `DeflateDescription` removes vague adjectives (robust, comprehensive, powerful, advanced, sophisticated, seamless). `FindMatchingCapability` uses keyword-overlap matching to replace inflated claims with verified capability descriptions.

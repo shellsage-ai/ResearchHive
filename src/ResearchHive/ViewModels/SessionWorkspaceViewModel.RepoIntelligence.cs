@@ -49,34 +49,65 @@ public partial class SessionWorkspaceViewModel
     [RelayCommand]
     private async Task ScanMultiRepoAsync()
     {
-        if (string.IsNullOrWhiteSpace(RepoUrlList)) return;
+        if (string.IsNullOrWhiteSpace(RepoUrlList))
+        {
+            RepoScanStatus = "Enter one or more URLs or paths to scan.";
+            return;
+        }
         var urls = RepoUrlList.Split(new[] { '\n', '\r', ';', ',' }, StringSplitOptions.RemoveEmptyEntries)
                               .Select(u => u.Trim()).Where(u => u.Length > 0).ToList();
-        if (urls.Count == 0) return;
+        if (urls.Count == 0)
+        {
+            RepoScanStatus = "No valid URLs found — enter one per line.";
+            return;
+        }
 
         IsRepoScanning = true;
-        RepoScanStatus = $"Scanning {urls.Count} repos…";
+        RepoScanStatus = $"Scanning {urls.Count} repo(s)…";
         _repoScanCts = new CancellationTokenSource();
+        int succeeded = 0;
+        var failures = new List<string>();
         try
         {
             for (int i = 0; i < urls.Count; i++)
             {
                 _repoScanCts.Token.ThrowIfCancellationRequested();
                 RepoScanStatus = $"Scanning {urls[i]} ({i + 1}/{urls.Count})…";
-                await _repoRunner.RunAnalysisAsync(_sessionId, urls[i], _repoScanCts.Token);
+                try
+                {
+                    await _repoRunner.RunAnalysisAsync(_sessionId, urls[i], _repoScanCts.Token);
+                    succeeded++;
+                    _notificationService.NotifyRepoScanComplete(urls[i]);
+                }
+                catch (OperationCanceledException) { throw; } // propagate cancellation
+                catch (Exception ex)
+                {
+                    failures.Add($"{urls[i]}: {ex.Message}");
+                    RepoScanStatus = $"Error on {urls[i]} — continuing with remaining repos…";
+                }
             }
-            RepoScanStatus = $"All {urls.Count} repos scanned.";
+
+            if (failures.Count == 0)
+            {
+                RepoScanStatus = $"All {urls.Count} repo(s) scanned successfully.";
+            }
+            else
+            {
+                RepoScanStatus = $"Batch complete: {succeeded}/{urls.Count} succeeded, {failures.Count} failed.\n" +
+                                 string.Join("\n", failures);
+            }
             RepoUrlList = "";
             LoadSessionData();
         }
         catch (OperationCanceledException)
         {
-            RepoScanStatus = "Batch scan cancelled.";
+            RepoScanStatus = $"Batch scan cancelled ({succeeded}/{urls.Count} completed).";
             LoadSessionData(); // load any already-completed scans
         }
         catch (Exception ex)
         {
             RepoScanStatus = $"Multi-scan error: {ex.Message}";
+            LoadSessionData(); // load any partial results
         }
         finally
         {

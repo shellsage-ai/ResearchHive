@@ -3,9 +3,9 @@
 ## Status
 - Current milestone: All milestones (1-9) + Phases 10-31 complete
 - Build status: ✅ PASSING (0 errors)
-- Test baseline: 639 total — 639 passed, 0 failures
+- Test baseline: 651 total — 651 passed, 0 failures
 - Services: 45 DI registrations (39 unique concrete services incl. interfaces + App.xaml.cs)
-- Last verified: Full test suite green (Phase 31 — commit `dd13b81`)
+- Last verified: Full test suite green (Batch scan fix, post-Phase 31)
 
 ## Build / Run Commands
 ```
@@ -282,6 +282,15 @@ dotnet publish src/ResearchHive/ResearchHive.csproj -c Release -o publish/Resear
 - Step 6: Prompt precision rules in `AppendFormatInstructions`
 - Bug fix: `ValidateFeatureMatrix` table parsing order fixed
 - 35 new tests (Phase31VerifierTests.cs) — committed as `dd13b81` — 639 tests (639 passed, 0 failed)
+
+### Batch Scan Fix (post-Phase 31)
+- Fixed silent early return — shows feedback when RepoUrlList is empty
+- Each repo wrapped in own try-catch — one failure no longer aborts batch
+- `LoadSessionData()` called on error path — partial results appear in UI
+- Per-scan `NotifyRepoScanComplete` — matches single scan behavior
+- Summary reporting with succeeded/failed counts
+- 12 new batch scan URL parsing tests — 651 total (651 passed, 0 failed)
+- Created `CONTEXT_TRANSFER.md` for session continuity
 
 ## End-to-End Demo Checklist
 

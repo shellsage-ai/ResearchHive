@@ -80,7 +80,7 @@ ResearchHive.sln
 │       ├── Services/               # 39 registered services
 │       └── Configuration/          # AppSettings
 ├── tests/
-│   └── ResearchHive.Tests/        # xUnit test suite (639 tests)
+│   └── ResearchHive.Tests/        # xUnit test suite (651 tests)
 ├── spec/                           # Full product specifications
 ├── agents/                         # AI agent prompt definitions
 └── prompts/                        # Build automation prompts
@@ -233,7 +233,7 @@ dotnet test tests/ResearchHive.Tests/
 ```
 
 ```
-Passed!  - Failed: 0, Passed: 639, Skipped: 0, Total: 639
+Passed!  - Failed: 0, Passed: 651, Skipped: 0, Total: 651
 ```
 
 ---
@@ -268,7 +268,7 @@ Copyright (c) 2025–2026 ShellSage AI. All rights reserved.
 This is currently a private project. If you have access, please:
 1. Create a feature branch from `main`
 2. Make your changes with tests
-3. Ensure `dotnet test` passes (639+ tests, 0 failures)
+3. Ensure `dotnet test` passes (651+ tests, 0 failures)
 4. Submit a pull request
 
 ---

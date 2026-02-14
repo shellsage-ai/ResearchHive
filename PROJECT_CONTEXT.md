@@ -21,7 +21,7 @@ Build a Windows-native, agentic research assistant that:
 - **7-layer deterministic fact sheet pipeline** for zero-hallucination repo scans
 - **4-layer anti-hallucination pipeline** for complement research filtering
 - **6-step factual accuracy hardening** for scan outputs (strength grounding, self-validation, prompt precision) and fusion outputs (FusionPostVerifier with 5 validators, cross-section consistency)
-- **639 tests** (xUnit + FluentAssertions + Moq) — 639 passed, 0 failures
+- **651 tests** (xUnit + FluentAssertions + Moq) — 651 passed, 0 failures
 
 ## Principles
 - Evidence over vibes
