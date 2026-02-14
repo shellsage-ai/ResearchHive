@@ -356,6 +356,9 @@ public class RepoScannerService
             {
                 var dir = Path.GetDirectoryName(csproj) ?? "";
                 if (dir.Contains("bin") || dir.Contains("obj") || dir.Contains("node_modules")) continue;
+                // Skip VS temp project files (e.g. ProjectName_repmvozl_wpftmp.csproj)
+                var fileName = Path.GetFileName(csproj);
+                if (fileName.Contains("_wpftmp", StringComparison.OrdinalIgnoreCase)) continue;
                 var relPath = Path.GetRelativePath(localPath, csproj).Replace('\\', '/');
                 try { depFiles[relPath] = await File.ReadAllTextAsync(csproj, ct); }
                 catch { /* non-fatal */ }

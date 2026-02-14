@@ -31,6 +31,15 @@ This file provides a high-level summary per milestone.
 - **Fix I — Fabricated gap closures**: Strengthened `FusionPostVerifier` — stop-word filter, higher match threshold (≥2 significant words), gap-to-capability cross-validation.
 - **Tests**: 10 new — 690 total (690 passed, 0 failed)
 
+## 2026-02-14 — Phase 32d: Export Quality Audit Round 4
+### 5 remaining fixes from third re-export review
+- **Fix J — Duplicate H1 in repo reports**: `StripLeadingH1` now uses fuzzy title matching — compares the subject after the first colon, so `"Repository Analysis: X"` matches wrapper title `"Repo Analysis: X"`. Also added contains-based fallback.
+- **Fix K — Table overflow rendering**: `SplitLargePipeTables` now inserts TWO blank lines before the continuation header/separator, ensuring Markdig treats the second chunk as a fresh pipe table.
+- **Fix L — Hallucination text leaking**: Prose validation in `FusionPostVerifier` now detects meta-comment corrections (e.g. "This statement invents a capability...") and DELETES the erroneous text instead of inserting the meta-comment into the report.
+- **Fix M — Fabricated gap closures (colon format)**: `ValidateGapsClosed` now also catches `": Resolved by"` patterns (not just `"→ Resolved by"`), extracting the gap text before the colon for cross-validation.
+- **Fix N — Temp csproj in deps**: Local `.csproj` scanning now skips `_wpftmp.csproj` files. Removed accidentally committed temp file. Added `.gitignore` rule.
+- **Tests**: 6 new — 696 total (696 passed, 0 failed)
+
 ## 2026-02-13 — Batch Scan Fix: Robustness & Error Recovery
 - **Silent early-return fix**: `ScanMultiRepoAsync` now sets `RepoScanStatus` feedback when `RepoUrlList` is empty or no URLs are parsed, instead of returning silently.
 - **Continue on individual failure**: Each repo scan is wrapped in its own try-catch. One failed repo no longer aborts the entire batch — remaining repos continue scanning.

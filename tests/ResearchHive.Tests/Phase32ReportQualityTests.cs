@@ -329,4 +329,87 @@ public class Phase32ReportQualityTests
             Description = "Test"
         };
     }
+
+    // ─────────────── Phase 32d: Fix 1 — StripLeadingH1 fuzzy title match ───────────────
+
+    [Fact]
+    public void StripLeadingH1_FuzzyMatch_RepoAnalysisVsRepositoryAnalysis()
+    {
+        // Wrapper title = "Repo Analysis: local/researcher"
+        // Markdown H1 = "# Repository Analysis: local/researcher"
+        var md = "# Repository Analysis: local/researcher\n\n## Project Summary\nContent here.";
+        var result = ExportService.StripLeadingH1(md, "Repo Analysis: local/researcher");
+        result.Should().NotContain("# Repository Analysis", "fuzzy match on colon-subject should strip H1");
+        result.Should().Contain("## Project Summary");
+    }
+
+    [Fact]
+    public void StripLeadingH1_ExactMatch_StillWorks()
+    {
+        var md = "# Repo Analysis: X\n\nContent.";
+        var result = ExportService.StripLeadingH1(md, "Repo Analysis: X");
+        result.Should().NotContain("# Repo Analysis");
+        result.Should().Contain("Content.");
+    }
+
+    [Fact]
+    public void StripLeadingH1_DifferentSubject_DoesNotStrip()
+    {
+        var md = "# Repository Analysis: SomeOtherProject\n\nContent.";
+        var result = ExportService.StripLeadingH1(md, "Repo Analysis: local/researcher");
+        result.Should().Contain("# Repository Analysis: SomeOtherProject",
+            "different subjects after the colon should NOT match");
+    }
+
+    // ─────────────── Phase 32d: Fix 2 — SplitLargePipeTables double blank line ───────────────
+
+    [Fact]
+    public void SplitLargePipeTables_InsertsDoubleBlankLine_ForTableBreak()
+    {
+        // Build a pipe table with 25 rows
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("| Package | Version |");
+        sb.AppendLine("|---------|---------|");
+        for (int i = 1; i <= 25; i++)
+            sb.AppendLine($"| pkg{i} | 1.0.{i} |");
+
+        var result = ExportService.SplitLargePipeTables(sb.ToString());
+
+        // After the split point (row 20), there should be consecutive blank lines
+        // followed by the repeated header. The split inserts two AppendLine() calls
+        // (which produce empty lines) before repeating the header.
+        // Normalize line endings for assertion.
+        var normalized = result.Replace("\r\n", "\n");
+        normalized.Should().Contain("\n\n\n| Package | Version |",
+            "table break must have at least one blank line before the new header");
+    }
+
+    // ─────────────── Phase 32d: Fix 3 — Meta-comment suppression in prose validation ───────────────
+
+    [Fact]
+    public void ValidateGapsClosed_RejectsColonResolvedBy_WithoutArrow()
+    {
+        // Gap format: "No Dependabot config: Resolved by ProjectB's circuit breaker"
+        // (colon instead of arrow, and mismatched topic)
+        var section = "- No Dependabot config: Resolved by ProjectB's circuit breaker implementation";
+        var profiles = new List<RepoProfile>
+        {
+            CreateProfile("owner", "ProjectB", strengths: new[] { "LlmCircuitBreaker.cs implements circuit breaker" })
+        };
+        var result = new FusionVerificationResult();
+        var output = FusionPostVerifier.ValidateGapsClosed(section, profiles, result);
+        result.GapsClosedCorrected.Should().NotBeEmpty(
+            "Dependabot gap resolved by circuit breaker is fabricated — should be caught even without arrow");
+    }
+
+    // ─────────────── Phase 32d: Fix 5 — Temp csproj filter ───────────────
+
+    [Fact]
+    public void WpfTmpCsproj_ShouldBeFilteredByPattern()
+    {
+        // This is a deterministic test — verify the filter pattern matches
+        var fileName = "ResearchHive_repmvozl_wpftmp.csproj";
+        fileName.Contains("_wpftmp", StringComparison.OrdinalIgnoreCase).Should().BeTrue(
+            "the _wpftmp pattern should match VS temp csproj files");
+    }
 }

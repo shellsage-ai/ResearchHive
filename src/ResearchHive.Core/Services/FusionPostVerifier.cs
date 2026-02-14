@@ -335,8 +335,13 @@ public class FusionPostVerifier
                 continue; // Drop this line
             }
 
+            // Also check for "Resolved by" without arrow (LLM sometimes omits the arrow)
+            var colonResolvedMatch = Regex.Match(bulletContent, @":\s*Resolved\s+by\s+(.+)", RegexOptions.IgnoreCase);
+
             // Try to extract "resolved by <project>/<capability>" or "→ resolved by" patterns
             var arrowMatch = Regex.Match(bulletContent, @"→\s*(?:resolved\s+by\s+)?(.+)", RegexOptions.IgnoreCase);
+            if (!arrowMatch.Success && colonResolvedMatch.Success)
+                arrowMatch = colonResolvedMatch;
             if (arrowMatch.Success)
             {
                 var resolutionText = arrowMatch.Groups[1].Value.Trim().ToLowerInvariant();
@@ -364,9 +369,13 @@ public class FusionPostVerifier
                         // to at least one capability of the resolver project (prevents
                         // mismatched pairings like "No Dependabot" resolved by
                         // "dependency injection").
-                        var gapBeforeArrow = bulletContent.Contains('\u2192')
-                            ? bulletContent.Split('\u2192')[0].Trim().ToLowerInvariant()
-                            : "";
+                        var gapBeforeArrow = "";
+                        if (bulletContent.Contains('\u2192'))
+                            gapBeforeArrow = bulletContent.Split('\u2192')[0].Trim().ToLowerInvariant();
+                        else if (colonResolvedMatch.Success)
+                            gapBeforeArrow = bulletContent[..bulletContent.IndexOf(colonResolvedMatch.Value, StringComparison.OrdinalIgnoreCase)].Trim().ToLowerInvariant();
+                        // Strip leading bold markers and emoji for cleaner gap text
+                        gapBeforeArrow = Regex.Replace(gapBeforeArrow, @"^[\s\*✅🔸]+", "").Trim();
                         if (gapBeforeArrow.Length > 0)
                         {
                             var allCapabilities = p.Strengths
@@ -574,13 +583,26 @@ If no errors found, respond with: NO_ERRORS";
 
                 result.ProseCorrections.Add($"PROSE: \"{errorText}\" → \"{correction}\"");
 
-                // Apply correction to the relevant sections
+                // Apply correction to the relevant sections.
+                // If the correction itself is a meta-comment (e.g. "This statement invents..."),
+                // DELETE the erroneous text instead of replacing with the meta-comment.
+                bool isMetaComment = correction.Contains("invents a capability", StringComparison.OrdinalIgnoreCase) ||
+                                     correction.Contains("neither project", StringComparison.OrdinalIgnoreCase) ||
+                                     correction.Contains("not mentioned", StringComparison.OrdinalIgnoreCase) ||
+                                     correction.Contains("does not have", StringComparison.OrdinalIgnoreCase) ||
+                                     correction.Contains("fabricated", StringComparison.OrdinalIgnoreCase) ||
+                                     correction.Contains("no evidence", StringComparison.OrdinalIgnoreCase) ||
+                                     correction.StartsWith("Remove", StringComparison.OrdinalIgnoreCase) ||
+                                     correction.StartsWith("Delete", StringComparison.OrdinalIgnoreCase);
+
+                var replacementText = isMetaComment ? "" : correction;
+
                 foreach (var sectionName in new[] { "UNIFIED_VISION", "ARCHITECTURE" })
                 {
                     if (sectionResults.TryGetValue(sectionName, out var sectionText) &&
                         sectionText.Contains(errorText, StringComparison.OrdinalIgnoreCase))
                     {
-                        sectionResults[sectionName] = sectionText.Replace(errorText, correction);
+                        sectionResults[sectionName] = sectionText.Replace(errorText, replacementText);
                     }
                 }
             }

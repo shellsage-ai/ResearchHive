@@ -4,7 +4,7 @@
 > This file is the single source of truth for "what exists, where, and why."
 >
 > **Maintenance rule**: Updated after every implementation step per `agents/orchestrator.agent.md` enforcement rules.
-> **Last verified**: 2026-02-14 — 690 tests (690 passed, 0 failed), 0 build errors. Phase 32c — Export Quality Audit Round 3.
+> **Last verified**: 2026-02-14 — 696 tests (696 passed, 0 failed), 0 build errors. Phase 32d — Export Quality Audit Round 4.
 
 ---
 
@@ -695,6 +695,7 @@ tests/
 
 | Date | Change | Files |
 |------|--------|-------|
+| 2026-02-14 | Phase 32d: Export Quality Audit Round 4 — 5 fixes: (J) fuzzy H1 title matching via colon-subject comparison, (K) double blank line in SplitLargePipeTables for proper table continuation, (L) meta-comment suppression in prose validation (delete vs insert), (M) colon-format gap closure validation, (N) temp _wpftmp.csproj exclusion from scan + gitignore. 6 new tests. | ExportService.cs, FusionPostVerifier.cs, RepoScannerService.cs, .gitignore, Phase32ReportQualityTests.cs |
 | 2026-02-14 | Phase 32c: Export Quality Audit Round 3 — 4 fixes: (F) Markdig depth-limit crash fixed with RenderBySection + SplitLargePipeTables, (G) duplicate H1 stripping via StripLeadingH1, (H) ParseList bold-marker preservation (regex bullet strip), (I) fabricated gap closure rejection (stop-word filter + match threshold + gap-capability cross-validation). 10 new tests. | ExportService.cs, ProjectFusionEngine.cs, FusionPostVerifier.cs, ExportServiceTests.cs, Phase32ReportQualityTests.cs |
 | 2026-02-14 | Phase 32b: Export Quality Audit Round 2 — 5 fixes: (A) Markdig bracket crash fix (EscapeTableCellBrackets preprocessor + backtick version wrapping + Debug.WriteLine diagnostics), (B) self-referential complement filter (3 locations: ComplementResearchService dedup, PostScanVerifier HARD reject, prompt rule), (C) duplicate section header stripping (StripLeadingHeader in GenerateReport), (D) fabricated concept prevention via existing prompt/filter hardening, (E) circular gap closure rejection (IsCircularFusionClaim in FusionPostVerifier). 12 new tests. | ExportService.cs, RepoIntelligenceJobRunner.cs, ComplementResearchService.cs, PostScanVerifier.cs, RepoScannerService.cs, ProjectFusionEngine.cs, FusionPostVerifier.cs, Phase32ReportQualityTests.cs, ExportServiceTests.cs |
 | 2026-02-14 | Phase 32: Report Export Quality — 7-step fix: (1) GitHub API logging (ILogger in RepoScannerService, 403/401/general error logging with rate-limit hints), (2) Setext→ATX conversion (ConvertSetextToAtx preprocessor + prompt rule), (3) Projected Capabilities bullet-only (prompt + ParseList prose filter), (4) Gaps Closed logical connection (prompt + FusionPostVerifier bullet validation), (5) Strength coverage increase (5→10-15), (6) Complement description guard, (7) Framework dedup (WPF/WinForms StartsWith guard). 16 new tests. | RepoScannerService.cs, ExportService.cs, ProjectFusionEngine.cs, FusionPostVerifier.cs, Phase32ReportQualityTests.cs (NEW), ExportServiceTests.cs, RagGroundedAnalysisTests.cs |

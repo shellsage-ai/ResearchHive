@@ -48,8 +48,13 @@ public class ExportService
             var newlineIdx = trimmed.IndexOf('\n');
             var h1Text = newlineIdx >= 0 ? trimmed[2..newlineIdx].Trim() : trimmed[2..].Trim();
 
-            // Only strip if no title specified (always) or the H1 matches the wrapper title
-            if (wrapperTitle == null || h1Text.Equals(wrapperTitle, StringComparison.OrdinalIgnoreCase))
+            // Only strip if no title specified (always) or the H1 matches / contains the wrapper title
+            // e.g. wrapper="Repo Analysis: x" matches H1="Repository Analysis: x"
+            if (wrapperTitle == null ||
+                h1Text.Equals(wrapperTitle, StringComparison.OrdinalIgnoreCase) ||
+                h1Text.Contains(wrapperTitle, StringComparison.OrdinalIgnoreCase) ||
+                wrapperTitle.Contains(h1Text, StringComparison.OrdinalIgnoreCase) ||
+                TitlesMatchFuzzy(h1Text, wrapperTitle))
             {
                 if (newlineIdx >= 0)
                     return trimmed[(newlineIdx + 1)..].TrimStart('\n', '\r');
@@ -57,6 +62,24 @@ public class ExportService
             }
         }
         return markdown;
+    }
+
+    /// <summary>
+    /// Fuzzy title comparison: checks whether both titles share the same trailing segment
+    /// after the first colon, allowing "Repo Analysis: X" to match "Repository Analysis: X".
+    /// </summary>
+    private static bool TitlesMatchFuzzy(string h1Text, string wrapperTitle)
+    {
+        // Compare the part after the first colon (the subject)
+        var h1Colon = h1Text.IndexOf(':');
+        var wtColon = wrapperTitle.IndexOf(':');
+        if (h1Colon > 0 && wtColon > 0)
+        {
+            var h1Subject = h1Text[(h1Colon + 1)..].Trim();
+            var wtSubject = wrapperTitle[(wtColon + 1)..].Trim();
+            return h1Subject.Equals(wtSubject, StringComparison.OrdinalIgnoreCase);
+        }
+        return false;
     }
 
     /// <summary>
@@ -185,7 +208,9 @@ public class ExportService
                     dataRowCount++;
                     if (dataRowCount > MaxPipeTableRows && dataRowCount % MaxPipeTableRows == 1)
                     {
-                        // Break the table: blank line, then repeat header + separator
+                        // Break the table: TWO blank lines (to end the previous table context),
+                        // then repeat header + separator to start a fresh pipe-table.
+                        result.AppendLine();
                         result.AppendLine();
                         result.AppendLine(headerRow);
                         result.AppendLine(separatorRow);
